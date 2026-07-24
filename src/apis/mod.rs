@@ -1,19 +1,15 @@
-use crate::apis::{
-    fn_ptr::{FnCloneComponent, FnDropComponent},
-    identifies::StorageLocation,
-};
+use crate::apis::fn_ptr::{FnCloneComponent, FnDropComponent};
+
 use std::any::TypeId;
 
-mod fn_ptr;
-pub use fn_ptr::*;
-
-mod constants;
-pub use constants::*;
-
 mod identifies;
-pub use identifies::*;
-
+mod fn_ptr;
 mod traits;
+pub mod constants;
+
+pub use constants::*;
+pub use fn_ptr::*;
+pub use identifies::*;
 pub use traits::*;
 
 pub struct ComponentDescriptor
