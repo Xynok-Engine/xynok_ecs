@@ -1,0 +1,7 @@
+# default build files of Rust for all folders
+**/target/
+
+# macOS 
+*.DS_Store
+
+
