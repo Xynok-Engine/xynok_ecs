@@ -1,7 +1,7 @@
 use std::{any::TypeId, collections::HashMap};
 
 use crate::{
-    apis::{ComponentDescriptor, BYTE_TO_BIT, CHUNK_SIZE_IN_BYTE, DEFAULT_COLUMNS, SIZE_PER_FLAG_BOX, STATE_HEADER_ALIGN, WORD_SIZE_BYTE},
+    apis::{ComponentDescriptor, BYTE_TO_BIT, CHUNK_SIZE_IN_BYTE, CPU_WORD, DEFAULT_COLUMNS},
     chunk::block::Block,
 };
 
@@ -56,7 +56,7 @@ fn try_layout(max_entities: usize, components: &[ComponentDescriptor]) -> Option
     let header_size = crate::utils::header_size_for(max_entities, components.len());
     let total_cols = DEFAULT_COLUMNS.len() + components.len();
     let mut cursor = header_size;
-    let mut max_align = STATE_HEADER_ALIGN;
+    let mut max_align = 0;
     let mut blocks = Vec::with_capacity(total_cols);
     let mut component_indices = HashMap::with_capacity(total_cols);
 
