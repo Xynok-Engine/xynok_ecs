@@ -9,3 +9,4 @@ too_many_arguments = "allow"
 
 [dependencies]
 log = "0.4.33"
+thiserror = "2.0.18"

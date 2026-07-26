@@ -1,5 +1,34 @@
+use thiserror::Error;
 pub enum StorageLocation
 {
     Chunk,
     Archetype,
 }
+
+#[derive(Error, Debug)]
+pub enum XynokEcsError
+{
+    #[error("Archetype contains ZERO component")]
+    EmptyArchetype,
+
+    #[error("Archetype's component total size exceeds 16kB")]
+    ArchetypeIsTooLarge,
+    #[error("CRITICAL: {0}")]
+    Critical(String),
+}
+// src: https://crates.io/crates/thiserror
+//#[derive(Error, Debug)]
+//pub enum DataStoreError
+//{
+//    #[error("data store disconnected")]
+//    Disconnect(#[from] std::io::Error),
+//    #[error("the data for key `{0}` is not available")]
+//    Redaction(String),
+//    #[error("invalid header (expected {expected:?}, found {found:?})")]
+//    InvalidHeader
+//    {
+//        expected: String, found: String
+//    },
+//    #[error("unknown data store error")]
+//    Unknown,
+//}

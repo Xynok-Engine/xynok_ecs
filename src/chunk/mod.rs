@@ -16,12 +16,11 @@ impl Chunk
 {
     pub fn new(layout: *const ChunkLayout) -> Self
     {
-        let spec = unsafe { &*layout };
+        let chunk_layout = unsafe { &*layout };
 
-        // SAFETY: CHUNK_SIZE > 0
-        let ptr = unsafe { std::alloc::alloc(spec.alloc_layout) };
+        let ptr = unsafe { std::alloc::alloc(chunk_layout.alloc_layout) };
         unsafe {
-            std::ptr::write_bytes(ptr, 0u8, spec.header_size);
+            std::ptr::write_bytes(ptr, 0u8, chunk_layout.header_size);
         }
         Self { ptr: ptr, len: 0 }
     }

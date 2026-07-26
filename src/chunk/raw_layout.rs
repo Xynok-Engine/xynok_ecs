@@ -1,23 +1,23 @@
 use std::{any::TypeId, collections::HashMap};
 
 use crate::{
-    apis::{ComponentDescriptor, BYTE_TO_BIT, CHUNK_SIZE_IN_BYTE, CPU_WORD, DEFAULT_COLUMNS},
-    chunk::block::Block,
+    apis::{ComponentDescriptor, XynokEcsError, BYTE_TO_BIT, CHUNK_SIZE_IN_BYTE, CPU_WORD, DEFAULT_COLUMNS},
+    chunk::{block::Block, ChunkLayoutParams},
 };
 
-struct RawLayout
+pub struct RawLayout
 {
-    max_entities_amount: usize,
-    max_align:           usize,
-    blocks:              Vec<Block>,
-    component_indices:   HashMap<TypeId, usize>,
-    header_size:         usize,
+    pub max_entities_amount: usize,
+    pub max_align:           usize,
+    pub blocks:              Vec<Block>,
+    pub component_indices:   HashMap<TypeId, usize>,
+    pub header_size:         usize,
 }
 
 impl RawLayout
 {
     #[track_caller]
-    pub fn new(arch: &[ComponentDescriptor]) -> Self
+    pub fn new(params: &mut ChunkLayoutParams) -> Result<Self, XynokEcsError>
     {
         let mut bytes_per_entity = 0usize;
         for e in DEFAULT_COLUMNS
@@ -27,7 +27,7 @@ impl RawLayout
 
         // arch.len() represents the number of components. We use this count to store the
         // enabled/disabled state of each component as a single bit
-        let bits_per_entity = bytes_per_entity * BYTE_TO_BIT + arch.len();
+        let bits_per_entity = bytes_per_entity * BYTE_TO_BIT + params.arch.len();
 
         debug_assert!(bits_per_entity > 0, "This Arch is empty. Cannot calculate chunk size: division by zero!");
 
@@ -35,55 +35,54 @@ impl RawLayout
 
         loop
         {
-            debug_assert!(
-                max_entities > 0,
-                "components are too large, chunk size of {} bytes is insufficient!",
-                CHUNK_SIZE_IN_BYTE
-            );
-            if let Some(plan) = try_layout(max_entities, arch)
+            if max_entities == 0
             {
-                return plan;
+                return Err(XynokEcsError::ArchetypeIsTooLarge);
+            }
+            if let Some(valid_layout) = try_layout(max_entities, params)
+            {
+                return Ok(valid_layout);
             }
             max_entities -= 1;
         }
-        todo!()
     }
 }
 
-/// Attempts to build a layout for `max_entities` rows, returns `None` if the total size exceeds `CHUNK_SIZE`
-fn try_layout(max_entities: usize, components: &[ComponentDescriptor]) -> Option<RawLayout>
+/// Attempts to build a layout for `max_entities` rows, returns `None` if the total size exceeds [`CHUNK_SIZE_IN_BYTE`]
+fn try_layout(max_entities: usize, params: &mut ChunkLayoutParams) -> Option<RawLayout>
 {
-    let header_size = crate::utils::header_size_for(max_entities, components.len());
-    let total_cols = DEFAULT_COLUMNS.len() + components.len();
+    let header_size = crate::utils::header_size_for(max_entities, params.arch.len());
+    let total_cols = DEFAULT_COLUMNS.len() + params.arch.len();
     let mut cursor = header_size;
     let mut max_align = 0;
-    let mut blocks = Vec::with_capacity(total_cols);
-    let mut component_indices = HashMap::with_capacity(total_cols);
+    params.blocks_temp.clear();
+    params.indices_temp.clear();
 
-    for spec in DEFAULT_COLUMNS.iter().chain(components.iter())
+    for des in DEFAULT_COLUMNS.iter().chain(params.arch.iter())
     {
-        cursor = crate::utils::align_up(cursor, spec.align);
+        cursor = crate::utils::align_up(cursor, des.align);
 
         if cursor > CHUNK_SIZE_IN_BYTE
         {
             return None;
         }
-        blocks.push(spec.as_block(cursor));
-        component_indices.insert(spec.query_type_id, component_indices.len());
-        let column_bytes = spec.byte_size.checked_mul(max_entities)?;
+        params.indices_temp.insert(des.query_type_id, params.blocks_temp.len());
+        params.blocks_temp.push(des.as_block(cursor));
+
+        let column_bytes = des.byte_size.checked_mul(max_entities)?;
         cursor = cursor.checked_add(column_bytes)?;
         if cursor > CHUNK_SIZE_IN_BYTE
         {
             return None;
         }
-        max_align = max_align.max(spec.align);
+        max_align = max_align.max(des.align);
     }
 
     Some(RawLayout {
         max_entities_amount: max_entities,
         max_align:           max_align,
-        blocks:              blocks,
-        component_indices:   component_indices,
+        blocks:              params.blocks_temp.clone(),
+        component_indices:   params.indices_temp.clone(),
         header_size:         header_size,
     })
 }

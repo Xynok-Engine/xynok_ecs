@@ -1,5 +1,4 @@
 use crate::apis::CPU_WORD;
-
 #[inline(always)]
 pub const fn header_size_for(max_entities: usize, component_count: usize) -> usize
 {
