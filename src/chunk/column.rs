@@ -1,5 +1,5 @@
 #[derive(Clone, Copy)]
-pub struct Block
+pub struct Column
 {
     pub offset:    usize,
     pub item_size: usize,
@@ -7,9 +7,9 @@ pub struct Block
 
 impl crate::apis::ComponentDescriptor
 {
-    pub fn as_block(&self, offset: usize) -> Block
+    pub fn as_block(&self, offset: usize) -> Column
     {
-        Block {
+        Column {
             offset:    offset,
             item_size: self.byte_size,
         }

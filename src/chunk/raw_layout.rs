@@ -2,14 +2,14 @@ use std::{any::TypeId, collections::HashMap};
 
 use crate::{
     apis::{ComponentDescriptor, XynokEcsError, BYTE_TO_BIT, CHUNK_SIZE_IN_BYTE, CPU_WORD, DEFAULT_COLUMNS},
-    chunk::{block::Block, ChunkLayoutParams},
+    chunk::{column::Column, layout::ChunkLayoutParams},
 };
 
 pub struct RawLayout
 {
     pub max_entities_amount: usize,
     pub max_align:           usize,
-    pub blocks:              Vec<Block>,
+    pub cols:                Vec<Column>,
     pub component_indices:   HashMap<TypeId, usize>,
     pub header_size:         usize,
 }
@@ -81,7 +81,7 @@ fn try_layout(max_entities: usize, params: &mut ChunkLayoutParams) -> Option<Raw
     Some(RawLayout {
         max_entities_amount: max_entities,
         max_align:           max_align,
-        blocks:              params.blocks_temp.clone(),
+        cols:                params.blocks_temp.clone(),
         component_indices:   params.indices_temp.clone(),
         header_size:         header_size,
     })

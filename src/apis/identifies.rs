@@ -1,3 +1,5 @@
+use std::alloc::LayoutError;
+
 use thiserror::Error;
 pub enum StorageLocation
 {
@@ -13,8 +15,12 @@ pub enum XynokEcsError
 
     #[error("Archetype's component total size exceeds 16kB")]
     ArchetypeIsTooLarge,
-    #[error("CRITICAL: {0}")]
-    Critical(String),
+
+    #[error("Chunk Layout allocation creation failed: {0}")]
+    ChunkLayoutAllocation(LayoutError),
+
+    #[error("Chunk does not contain component: Query<{0}> + Storage<{1}>")]
+    ChunkDoesNotContainComponent(&'static str, &'static str),
 }
 // src: https://crates.io/crates/thiserror
 //#[derive(Error, Debug)]
