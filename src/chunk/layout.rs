@@ -50,6 +50,7 @@ impl ChunkLayout
             {
                 return Err(XynokEcsError::ArchetypeIsTooLarge);
             }
+
             if let Ok(valid_layout) = Self::try_layout(max_entities, params)
             {
                 return Ok(valid_layout);
@@ -61,7 +62,7 @@ impl ChunkLayout
     /// Attempts to build a layout for `max_entities` rows, returns `None` if the total size exceeds [`CHUNK_SIZE_IN_BYTE`]
     fn try_layout(max_entities: usize, params: &mut ChunkLayoutParams) -> Result<ChunkLayout, XynokEcsError>
     {
-        let header = crate::chunk::header::header_for(max_entities, params.arch.len());
+        let header = Header::new(max_entities, params.arch.len());
         let mut cursor = header.size;
         let mut max_align = 0;
         params.component_descriptors_temp.clear();

@@ -48,8 +48,8 @@ impl Chunk
     }
     pub fn get_entities<'a>(&self, layout: &ChunkLayout) -> Result<&'a [Entity], XynokEcsError>
     {
-        let entities = self.get_components::<Entity>(layout)?;
-        Ok(entities)
+        let entities_ptr = unsafe { self.ptr.add(layout.header.entities_offset) };
+        Ok(unsafe { std::slice::from_raw_parts(entities_ptr as *const Entity, self.len()) })
     }
     pub fn get_entities_components<'a, C: TComponent + 'static>(&self, layout: &ChunkLayout) -> Result<(&'a [Entity], &'a [C]), XynokEcsError>
     {

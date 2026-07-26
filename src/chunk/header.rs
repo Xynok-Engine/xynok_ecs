@@ -8,24 +8,26 @@ pub struct Header
     pub entities_offset: usize,
     pub size:            usize,
 }
-pub const fn header_size_for(max_entities: usize, component_count: usize) -> usize
+impl Header
 {
-    let header = header_for(max_entities, component_count);
-    header.size
-}
-pub const fn header_for(max_entities: usize, component_count: usize) -> Header
-{
-    // enable value bits
-    let bit_count = max_entities * component_count;
-    let bitset_size = align_up(bit_count.div_ceil(BITS_PER_BYTE), CPU_WORD);
+    pub const fn new(max_entities: usize, component_count: usize) -> Self
+    {
+        // enable value bits
+        let bit_count = max_entities * component_count;
+        let bitset_size = align_up(bit_count.div_ceil(BITS_PER_BYTE), CPU_WORD);
 
-    // entities
-    let entities_offset = align_up(bitset_size, Entity::COMPONENT_DESCRIPTOR.align);
-    let entities_size = max_entities * Entity::COMPONENT_DESCRIPTOR.byte_size;
+        // entities
+        let entities_offset = align_up(bitset_size, Entity::COMPONENT_DESCRIPTOR.align);
+        let entities_size = max_entities * Entity::COMPONENT_DESCRIPTOR.byte_size;
 
-    let size = align_up(entities_offset + entities_size, CPU_WORD);
-    Header { entities_offset, size }
+        let size = align_up(entities_offset + entities_size, CPU_WORD);
+        Self {
+            entities_offset: entities_offset,
+            size:            size,
+        }
+    }
 }
+
 /// Rounds up `offset` to the nearest multiple of `align` (align must be a power of 2)
 #[inline(always)]
 pub const fn align_up(offset: usize, align: usize) -> usize
