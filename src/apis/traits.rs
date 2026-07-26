@@ -30,3 +30,5 @@ fn drop_glue<T>(ptr: *mut u8)
         std::ptr::drop_in_place(ptr as *mut T);
     }
 }
+
+pub trait TArchetype {}

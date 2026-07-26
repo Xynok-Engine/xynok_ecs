@@ -1,11 +1,23 @@
-use crate::apis::CPU_WORD;
-#[inline(always)]
+use crate::{
+    apis::{TComponentDescriptor, BITS_PER_BYTE, CPU_WORD},
+    entity::Entity,
+};
+
 pub const fn header_size_for(max_entities: usize, component_count: usize) -> usize
 {
-    align_up(max_entities * component_count, CPU_WORD)
+    // enable value bits
+    let bit_count = max_entities * component_count;
+    let bitset_size = align_up(bit_count.div_ceil(BITS_PER_BYTE), CPU_WORD);
+
+    // entities
+    let entities_offset = align_up(bitset_size, Entity::COMPONENT_DESCRIPTOR.align);
+    let entities_size = max_entities * Entity::COMPONENT_DESCRIPTOR.byte_size;
+
+    align_up(entities_offset + entities_size, CPU_WORD)
 }
 
 /// Rounds up `offset` to the nearest multiple of `align` (align must be a power of 2)
+#[inline(always)]
 pub const fn align_up(offset: usize, align: usize) -> usize
 {
     (offset + align - 1) & !(align - 1)

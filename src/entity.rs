@@ -2,7 +2,9 @@ use crate::apis::{StorageLocation, TComponent};
 
 /// Stores an Index and Version, packed into a u64
 /// Layout: bits 0..40 = idx (up to ~1 trillion slots), bits 40..64 = version (~16 million reuses per slot)
+/// usecase of `#[repr(transparent)]`: https://users.rust-lang.org/t/repr-transparent-why/67636
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+#[repr(transparent)]
 pub struct Entity(u64);
 
 impl TComponent for Entity
