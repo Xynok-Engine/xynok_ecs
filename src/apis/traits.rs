@@ -31,4 +31,8 @@ fn drop_glue<T>(ptr: *mut u8)
     }
 }
 
-pub trait TArchetype {}
+pub trait TArchetype
+{
+    const QUERY_TYPE_IDS: &[TypeId];
+    const STORAGE_TYPE_IDS: &[TypeId];
+}

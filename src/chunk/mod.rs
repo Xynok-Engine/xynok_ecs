@@ -6,7 +6,7 @@ use crate::{
     entity::Entity,
 };
 mod layout;
-mod column;
+pub(crate) mod column;
 mod header;
 
 pub struct Chunk
@@ -38,6 +38,7 @@ impl Chunk
     {
         self.len < 1
     }
+
     pub fn get_component<'a, C: TComponent + 'static>(&self, layout: &ChunkLayout, row: usize) -> Result<&'a C, XynokEcsError>
     {
         if row >= self.len()
