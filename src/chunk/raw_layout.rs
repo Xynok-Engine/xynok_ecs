@@ -4,7 +4,6 @@ use crate::{
     apis::{ComponentDescriptor, TComponentDescriptor, XynokEcsError, BITS_PER_BYTE, CHUNK_SIZE_IN_BYTE, CPU_WORD, DEFAULT_COLUMNS},
     chunk::{column::ColumnDescriptor, layout::ChunkLayoutParams},
     entity::Entity,
-    utils::{align_up, header_size_for},
 };
 
 pub struct RawLayout
@@ -17,7 +16,6 @@ pub struct RawLayout
 
 impl RawLayout
 {
-    #[track_caller]
     pub fn new(params: &mut ChunkLayoutParams) -> Result<Self, XynokEcsError>
     {
         if params.arch.is_empty()
@@ -50,14 +48,14 @@ impl RawLayout
 /// Attempts to build a layout for `max_entities` rows, returns `None` if the total size exceeds [`CHUNK_SIZE_IN_BYTE`]
 fn try_layout(max_entities: usize, params: &mut ChunkLayoutParams) -> Option<RawLayout>
 {
-    let header_size = header_size_for(max_entities, params.arch.len());
+    let header_size = crate::utils::header_size_for(max_entities, params.arch.len());
     let mut cursor = header_size;
     let mut max_align = 0;
     params.component_descriptors_temp.clear();
 
     for des in params.arch
     {
-        cursor = align_up(cursor, des.align);
+        cursor = crate::utils::align_up(cursor, des.align);
 
         if cursor > CHUNK_SIZE_IN_BYTE
         {
