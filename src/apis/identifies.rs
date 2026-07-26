@@ -21,6 +21,9 @@ pub enum XynokEcsError
 
     #[error("Chunk does not contain component: Query<{0}> + Storage<{1}>")]
     ChunkDoesNotContainComponent(&'static str, &'static str),
+
+    #[error("Idx({0}) is out of chunk len [0 ,{1}]")]
+    IdxIsOutOfChunkLen(usize, usize),
 }
 // src: https://crates.io/crates/thiserror
 //#[derive(Error, Debug)]
