@@ -6,8 +6,8 @@ use crate::{
     entity::Entity,
 };
 mod layout;
-mod raw_layout;
 mod column;
+mod header;
 
 pub struct Chunk
 {
@@ -21,7 +21,7 @@ impl Chunk
     {
         let ptr = unsafe { std::alloc::alloc(layout.alloc_layout) };
         unsafe {
-            std::ptr::write_bytes(ptr, 0u8, layout.header_size);
+            std::ptr::write_bytes(ptr, 0u8, layout.header.size);
         }
         Self { ptr: ptr, len: 0 }
     }
@@ -46,9 +46,14 @@ impl Chunk
         let base = self.column_ptr::<C>(layout)?;
         Ok(unsafe { std::slice::from_raw_parts_mut(base as *mut C, self.len()) })
     }
-    pub fn get_entities_components<'a, C: TComponent + 'static>(&self, layout: &ChunkLayout) -> Result<(&'a [Entity], &'a [C]), XynokEcsError>
+    pub fn get_entities<'a>(&self, layout: &ChunkLayout) -> Result<&'a [Entity], XynokEcsError>
     {
         let entities = self.get_components::<Entity>(layout)?;
+        Ok(entities)
+    }
+    pub fn get_entities_components<'a, C: TComponent + 'static>(&self, layout: &ChunkLayout) -> Result<(&'a [Entity], &'a [C]), XynokEcsError>
+    {
+        let entities = self.get_entities(layout)?;
         let components = self.get_components::<C>(layout)?;
         Ok((entities, components))
     }
@@ -56,7 +61,7 @@ impl Chunk
     pub fn get_entities_components_mut<'a, C: TComponent + 'static>(&self, layout: &ChunkLayout)
         -> Result<(&'a [Entity], &'a mut [C]), XynokEcsError>
     {
-        let entities = self.get_components::<Entity>(layout)?;
+        let entities = self.get_entities(layout)?;
         let components = self.get_components_mut::<C>(layout)?;
         Ok((entities, components))
     }

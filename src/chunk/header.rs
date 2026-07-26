@@ -3,7 +3,17 @@ use crate::{
     entity::Entity,
 };
 
+pub struct Header
+{
+    pub entities_offset: usize,
+    pub size:            usize,
+}
 pub const fn header_size_for(max_entities: usize, component_count: usize) -> usize
+{
+    let header = header_for(max_entities, component_count);
+    header.size
+}
+pub const fn header_for(max_entities: usize, component_count: usize) -> Header
 {
     // enable value bits
     let bit_count = max_entities * component_count;
@@ -13,9 +23,9 @@ pub const fn header_size_for(max_entities: usize, component_count: usize) -> usi
     let entities_offset = align_up(bitset_size, Entity::COMPONENT_DESCRIPTOR.align);
     let entities_size = max_entities * Entity::COMPONENT_DESCRIPTOR.byte_size;
 
-    align_up(entities_offset + entities_size, CPU_WORD)
+    let size = align_up(entities_offset + entities_size, CPU_WORD);
+    Header { entities_offset, size }
 }
-
 /// Rounds up `offset` to the nearest multiple of `align` (align must be a power of 2)
 #[inline(always)]
 pub const fn align_up(offset: usize, align: usize) -> usize
@@ -33,7 +43,7 @@ pub const fn row_to_bit_mask(row: usize) -> u64
 #[cfg(test)]
 mod test
 {
-    use crate::utils::*;
+    use crate::chunk::header::*;
     #[test]
     fn t_align_up()
     {
