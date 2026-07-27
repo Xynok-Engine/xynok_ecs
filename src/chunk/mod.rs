@@ -5,14 +5,15 @@ use crate::{
     chunk::layout::ChunkLayout,
     entity::Entity,
 };
-mod layout;
+pub(crate) mod layout;
 pub(crate) mod column;
 mod header;
 
 pub struct Chunk
 {
-    ptr: *mut u8,
-    len: usize,
+    ptr:     *mut u8,
+    len:     usize,
+    max_len: usize,
 }
 
 impl Chunk
@@ -23,7 +24,11 @@ impl Chunk
         unsafe {
             std::ptr::write_bytes(ptr, 0u8, layout.header.size);
         }
-        Self { ptr: ptr, len: 0 }
+        Self {
+            ptr:     ptr,
+            len:     0,
+            max_len: layout.max_len,
+        }
     }
 
     pub fn ptr(&self) -> *mut u8
@@ -33,6 +38,11 @@ impl Chunk
     pub fn len(&self) -> usize
     {
         self.len
+    }
+
+    pub fn is_full(&self) -> bool
+    {
+        self.len() < self.max_len
     }
     pub fn is_empty(&self) -> bool
     {

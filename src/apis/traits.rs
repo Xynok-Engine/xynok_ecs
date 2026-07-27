@@ -1,6 +1,9 @@
 use std::any::TypeId;
 
-use crate::apis::{identifies::StorageLocation, ComponentDescriptor};
+use crate::{
+    apis::{identifies::StorageLocation, ComponentDescriptor},
+    chunk::Chunk,
+};
 pub trait TComponent: Sized
 {
     type StorageDataType: TComponent + 'static;
@@ -33,6 +36,9 @@ fn drop_glue<T>(ptr: *mut u8)
 
 pub trait TArchetype
 {
+    const COMPONENT_DESCRIPTORS: &[ComponentDescriptor];
     const QUERY_TYPE_IDS: &[TypeId];
     const STORAGE_TYPE_IDS: &[TypeId];
+
+    fn push_to(chunk: &mut Chunk, val: Self);
 }

@@ -5,18 +5,24 @@ use std::{
 
 use crate::{
     apis::TArchetype,
-    chunk::Chunk,
+    archetype::Archetype,
+    chunk::{
+        layout::{ChunkLayout, ChunkLayoutParams},
+        Chunk,
+    },
     entity::Entity,
-    world::{archetype::Archetype, temp_allocation::WorldTempAllocation},
+    world::{arch_spec::ArchetypeSpec, entity_spec::EntitySpec, temp_allocation::WorldTempAllocation},
 };
-mod archetype;
 mod temp_allocation;
+mod entity_spec;
+mod arch_spec;
 pub struct World
 {
-    archetypes:               HashMap<usize, Archetype>,
+    archetypes:               HashMap<usize, ArchetypeSpec>,
     component_counter:        HashMap<TypeId, usize>,
     component_set_counter:    HashMap<Vec<usize>, usize>,
     archetype_counter:        HashMap<TypeId, usize>,
+    entities:                 HashMap<Entity, EntitySpec>,
     temp_alloc:               WorldTempAllocation,
     global_archetype_version: usize,
 }
@@ -36,29 +42,58 @@ impl World
             component_counter:        HashMap::new(),
             archetype_counter:        HashMap::new(),
             component_set_counter:    HashMap::new(),
+            entities:                 HashMap::new(),
             temp_alloc:               WorldTempAllocation::new(),
             global_archetype_version: 0,
         }
     }
 
+    #[track_caller]
     pub fn register<T: TArchetype + 'static>(&mut self)
     {
         let _ = self.get_or_create_archetype_id::<T>();
     }
-
+    #[track_caller]
     pub fn create<T: TArchetype + 'static>(&mut self, val: T) -> Entity
     {
-        let arch_id = self.get_or_create_archetype_id::<T>();
+        let arch_spec = self.get_or_create_archetype_spec_mut::<T>();
+
         todo!()
     }
 }
 
 impl World
 {
-    fn create_archetype<T: TArchetype + 'static>(&mut self) {}
+    fn get_archetype_id<T: TArchetype + 'static>(&self) -> Option<usize>
+    {
+        self.archetype_counter.get(&std::any::TypeId::of::<T>()).copied()
+    }
+    fn get_archetype_spec<T: TArchetype + 'static>(&self) -> Option<&ArchetypeSpec>
+    {
+        match self.get_archetype_id::<T>()
+        {
+            Some(arch_id) => self.archetypes.get(&arch_id),
+            None => None,
+        }
+    }
+    fn get_archetype_spec_mut<T: TArchetype + 'static>(&mut self) -> Option<&mut ArchetypeSpec>
+    {
+        match self.get_archetype_id::<T>()
+        {
+            Some(arch_id) => self.archetypes.get_mut(&arch_id),
+            None => None,
+        }
+    }
 }
 impl World
 {
+    #[track_caller]
+    fn get_or_create_archetype_spec_mut<T: TArchetype + 'static>(&mut self) -> &mut ArchetypeSpec
+    {
+        let arch_id = self.get_or_create_archetype_id::<T>();
+        self.archetypes.get_mut(&arch_id).unwrap()
+    }
+    #[track_caller]
     fn get_or_create_archetype_id<T: TArchetype + 'static>(&mut self) -> usize
     {
         match self.get_archetype_id::<T>()
@@ -67,11 +102,8 @@ impl World
             None => self.create_archetype_id::<T>(),
         }
     }
-    fn get_archetype_id<T: TArchetype + 'static>(&self) -> Option<usize>
-    {
-        self.archetype_counter.get(&std::any::TypeId::of::<T>()).copied()
-    }
 
+    #[track_caller]
     fn create_archetype_id<T: TArchetype + 'static>(&mut self) -> usize
     {
         let component_set = &mut self.temp_alloc.vec_usize;
@@ -91,7 +123,7 @@ impl World
         }
         normalize_set(component_set);
 
-        let arch_id = match self.component_set_counter.get(component_set)
+        match self.component_set_counter.get(component_set)
         {
             Some(r) =>
             {
@@ -104,11 +136,27 @@ impl World
                 let arch_id = self.component_set_counter.len();
                 self.component_set_counter.insert(component_set.clone(), arch_id);
                 self.archetype_counter.insert(std::any::TypeId::of::<T>(), arch_id);
+                self.create_archetype::<T>(arch_id);
+                self.structure_changed();
                 arch_id
             }
+        }
+    }
+
+    #[track_caller]
+    fn create_archetype<T: TArchetype + 'static>(&mut self, id: usize)
+    {
+        let params = ChunkLayoutParams {
+            arch:                       T::COMPONENT_DESCRIPTORS,
+            component_descriptors_temp: &mut self.temp_alloc.col_descriptors,
         };
-        self.structure_changed();
-        arch_id
+        let layout = match ChunkLayout::new(params)
+        {
+            Ok(r) => r,
+            Err(e) => panic!("Create Archetype `{}` Failed: {e}", std::any::type_name::<T>()),
+        };
+        let arch_spec = ArchetypeSpec::new(layout);
+        self.archetypes.insert(id, arch_spec);
     }
 
     fn structure_changed(&mut self)
