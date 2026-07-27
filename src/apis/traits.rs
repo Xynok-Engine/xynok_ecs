@@ -2,7 +2,7 @@ use std::any::TypeId;
 
 use crate::{
     apis::{identifies::StorageLocation, ComponentDescriptor},
-    chunk::Chunk,
+    chunk::{layout::ChunkLayout, Chunk},
 };
 pub trait TComponent: Sized
 {
@@ -40,5 +40,10 @@ pub trait TArchetype
     const QUERY_TYPE_IDS: &[TypeId];
     const STORAGE_TYPE_IDS: &[TypeId];
 
-    fn push_to(chunk: &mut Chunk, val: Self);
+    #[track_caller]
+    fn push_to(layout: &ChunkLayout, chunk: &mut Chunk, val: Self);
+    fn remove_at(layout: &ChunkLayout, chunk: &mut Chunk, idx: usize);
 }
+
+pub trait TSystemParam {}
+pub trait TQueryParam {}

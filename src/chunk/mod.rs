@@ -119,8 +119,48 @@ impl Chunk
 }
 impl Chunk
 {
+    #[track_caller]
+    pub unsafe fn push<T: TComponent + 'static>(&mut self, layout: &ChunkLayout, value: T) -> Result<(), XynokEcsError>
+    {
+        debug_assert!(
+            !self.is_full(),
+            "Chunk is full of capacity({}), cannot push more component `{}`",
+            self.max_len,
+            std::any::type_name::<T::StorageDataType>()
+        );
+        unsafe {
+            self.write_value(layout, self.len(), value);
+            self.increase_len();
+        }
+        Ok(())
+    }
+    #[track_caller]
+    pub unsafe fn remove_at<T: TComponent + 'static>(&mut self, layout: &ChunkLayout, idx: usize) -> Result<(), XynokEcsError>
+    {
+        debug_assert!(
+            idx < self.len(),
+            "Idx({}) is out of chunk's range [0, {}], cannot remove component `{}`",
+            idx,
+            self.len(),
+            std::any::type_name::<T::StorageDataType>()
+        );
+
+        let ptr = self.components_ptr::<T>(layout);
+        todo!()
+    }
+}
+impl Chunk
+{
+    unsafe fn increase_len(&mut self)
+    {
+        self.len += 1;
+    }
+    unsafe fn decrease_len(&mut self)
+    {
+        self.len -= 1;
+    }
     /// Drop the old value and assign the new one
-    pub fn set_value<T: TComponent + 'static>(&mut self, layout: &ChunkLayout, row: usize, value: T) -> Result<(), XynokEcsError>
+    unsafe fn set_value<T: TComponent + 'static>(&mut self, layout: &ChunkLayout, row: usize, value: T) -> Result<(), XynokEcsError>
     {
         let col_ptr = self.components_ptr::<T>(layout)?;
         unsafe {
@@ -130,7 +170,7 @@ impl Chunk
         Ok(())
     }
     /// Writes directly to memory without dropping the old value. Typically used when the memory has just been initialized
-    pub fn write_value<T: TComponent + 'static>(&mut self, layout: &ChunkLayout, row: usize, value: T) -> Result<(), XynokEcsError>
+    unsafe fn write_value<T: TComponent + 'static>(&mut self, layout: &ChunkLayout, row: usize, value: T) -> Result<(), XynokEcsError>
     {
         let col_ptr = self.components_ptr::<T>(layout)?;
         unsafe {
@@ -142,7 +182,7 @@ impl Chunk
 }
 impl Chunk
 {
-    fn components_ptr<T: TComponent + 'static>(&self, layout: &ChunkLayout) -> Result<*mut u8, XynokEcsError>
+    pub(crate) fn components_ptr<T: TComponent + 'static>(&self, layout: &ChunkLayout) -> Result<*mut u8, XynokEcsError>
     {
         let col_des = match layout.component_col_descriptors.get(&std::any::TypeId::of::<T::StorageDataType>())
         {

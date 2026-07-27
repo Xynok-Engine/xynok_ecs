@@ -49,7 +49,7 @@ impl World
     }
 
     #[track_caller]
-    pub fn register<T: TArchetype + 'static>(&mut self)
+    pub fn register_archetype<T: TArchetype + 'static>(&mut self)
     {
         let _ = self.get_or_create_archetype_id::<T>();
     }
@@ -57,6 +57,7 @@ impl World
     pub fn create<T: TArchetype + 'static>(&mut self, val: T) -> Entity
     {
         let arch_spec = self.get_or_create_archetype_spec_mut::<T>();
+        arch_spec.arch.push(&arch_spec.layout, val);
 
         todo!()
     }

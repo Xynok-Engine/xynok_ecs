@@ -12,6 +12,7 @@ use crate::{
 };
 
 mod entity_to_chunk;
+mod variant;
 
 pub struct Archetype
 {
@@ -50,12 +51,15 @@ impl Archetype
         };
         let chunk = unsafe { self.chunks.get_unchecked_mut(free_chunk_idx) };
 
-        T::push_to(chunk, val);
+        T::push_to(layout, chunk, val);
 
         if !chunk.is_full()
         {
             self.free_chunks.enqueue(free_chunk_idx);
         }
-        todo!()
+        ArchetypeComponentSpec {
+            chunk_idx:    free_chunk_idx,
+            idx_in_chunk: chunk.len() - 1,
+        }
     }
 }
