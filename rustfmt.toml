@@ -10,7 +10,7 @@ struct_field_align_threshold = 30
 
 format_code_in_doc_comments = true
 
-max_width = 150 # line length default 100
+max_width = 160 # line length default 100
 
 where_single_line = true
 
@@ -23,4 +23,4 @@ reorder_modules = false # macro #[enum_dispatcher] requires this
 use_field_init_shorthand = false
 use_try_shorthand = true
 # default attr_fn_like_width = 70
-attr_fn_like_width = 70
+attr_fn_like_width = 160

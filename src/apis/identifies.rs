@@ -24,6 +24,12 @@ pub enum XynokEcsError
 
     #[error("Idx({0}) is out of chunk len [0 ,{1}]")]
     IdxIsOutOfChunkLen(usize, usize),
+
+    #[error("Chunk is full of capacity({0})")]
+    ChunkIsFull(usize),
+
+    #[error("Chunk idx({0}) is not in range [0, {1}]")]
+    ChunkIdxIsNotInRange(usize, usize),
 }
 // src: https://crates.io/crates/thiserror
 //#[derive(Error, Debug)]

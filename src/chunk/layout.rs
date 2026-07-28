@@ -75,9 +75,7 @@ impl ChunkLayout
             {
                 return Err(XynokEcsError::ArchetypeIsTooLarge);
             }
-            params
-                .component_descriptors_temp
-                .insert(des.query_type_id, des.as_column_descriptor(cursor));
+            params.component_descriptors_temp.insert(des.query_type_id, des.as_column_descriptor(cursor));
 
             let column_bytes = match des.byte_size.checked_mul(max_entities)
             {

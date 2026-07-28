@@ -1,8 +1,9 @@
 use std::any::TypeId;
 
 use crate::{
-    apis::{identifies::StorageLocation, ComponentDescriptor},
+    apis::{identifies::StorageLocation, swapped_row::SwappedRow, ComponentDescriptor, XynokEcsError},
     chunk::{layout::ChunkLayout, Chunk},
+    entity::Entity,
 };
 pub trait TComponent: Sized
 {
@@ -40,9 +41,18 @@ pub trait TArchetype
     const QUERY_TYPE_IDS: &[TypeId];
     const STORAGE_TYPE_IDS: &[TypeId];
 
-    #[track_caller]
-    fn push_to(layout: &ChunkLayout, chunk: &mut Chunk, val: Self);
-    fn remove_at(layout: &ChunkLayout, chunk: &mut Chunk, idx: usize);
+    fn push_to(layout: &ChunkLayout, chunk: &mut Chunk, e: Entity, val: Self) -> Result<(), XynokEcsError>;
+
+    fn remove_at(layout: &ChunkLayout, chunk: &mut Chunk, idx: usize) -> Result<Option<SwappedRow>, XynokEcsError>
+    {
+        unsafe {
+            match chunk.remove_at(layout, idx)
+            {
+                Ok(r) => Ok(r),
+                Err(e) => Err(e),
+            }
+        }
+    }
 }
 
 pub trait TSystemParam {}

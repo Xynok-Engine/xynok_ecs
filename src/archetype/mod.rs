@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::{
-    apis::TArchetype,
+    apis::{swapped_row::SwappedRow, FnRemoveEntity, TArchetype, XynokEcsError},
     archetype::entity_to_chunk::EntityToChunk,
     chunk::{
         layout::{self, ChunkLayout},
@@ -21,7 +21,7 @@ pub struct Archetype
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct ArchetypeComponentSpec
+pub struct EntityInChunkIndices
 {
     pub chunk_idx:    usize,
     pub idx_in_chunk: usize,
@@ -36,7 +36,7 @@ impl Archetype
         }
     }
 
-    pub fn push<T: TArchetype + 'static>(&mut self, layout: &ChunkLayout, val: T) -> ArchetypeComponentSpec
+    pub fn push<T: TArchetype + 'static>(&mut self, layout: &ChunkLayout, e: Entity, val: T) -> Result<EntityInChunkIndices, XynokEcsError>
     {
         let free_chunk_idx = match self.free_chunks.dequeue()
         {
@@ -49,17 +49,43 @@ impl Archetype
                 idx
             }
         };
+
         let chunk = unsafe { self.chunks.get_unchecked_mut(free_chunk_idx) };
 
-        T::push_to(layout, chunk, val);
+        let idx_in_chunk = unsafe {
+            match T::push_to(layout, chunk, e, val)
+            {
+                Ok(_) =>
+                {}
+                Err(e) => return Err(e),
+            };
+            let idx_in_chunk = chunk.len();
+            chunk.increase_len();
+            idx_in_chunk
+        };
 
         if !chunk.is_full()
         {
             self.free_chunks.enqueue(free_chunk_idx);
         }
-        ArchetypeComponentSpec {
+
+        Ok(EntityInChunkIndices {
             chunk_idx:    free_chunk_idx,
-            idx_in_chunk: chunk.len() - 1,
+            idx_in_chunk: idx_in_chunk,
+        })
+    }
+
+    pub fn remove_at(&mut self, fn_remove: FnRemoveEntity, layout: &ChunkLayout, chunk_idx: usize, idx: usize) -> Result<Option<SwappedRow>, XynokEcsError>
+    {
+        let chunk = match self.chunks.get_mut(chunk_idx)
+        {
+            Some(r) => r,
+            None => return Err(XynokEcsError::ChunkIdxIsNotInRange(chunk_idx, self.chunks.len())),
+        };
+        match (fn_remove)(layout, chunk, idx)
+        {
+            Ok(r) => Ok(r),
+            Err(e) => Err(e),
         }
     }
 }

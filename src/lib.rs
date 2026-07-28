@@ -4,4 +4,4 @@ mod std;
 mod entity;
 mod chunk;
 mod archetype;
-mod world;
+pub mod world;

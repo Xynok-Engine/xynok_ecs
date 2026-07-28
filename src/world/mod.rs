@@ -4,7 +4,10 @@ use std::{
 };
 
 use crate::{
-    apis::TArchetype,
+    apis::{
+        swapped_row::{self, SwappedRow},
+        TArchetype,
+    },
     archetype::Archetype,
     chunk::{
         layout::{ChunkLayout, ChunkLayoutParams},
@@ -33,21 +36,23 @@ fn normalize_set(set: &mut Vec<usize>)
     set.dedup();
 }
 
-impl World
+impl Default for World
 {
-    pub fn new() -> Self
+    fn default() -> Self
     {
         Self {
+            entities:                 HashMap::with_capacity(16),
             archetypes:               HashMap::new(),
             component_counter:        HashMap::new(),
             archetype_counter:        HashMap::new(),
             component_set_counter:    HashMap::new(),
-            entities:                 HashMap::new(),
             temp_alloc:               WorldTempAllocation::new(),
-            global_archetype_version: 0,
+            global_archetype_version: 1usize,
         }
     }
-
+}
+impl World
+{
     #[track_caller]
     pub fn register_archetype<T: TArchetype + 'static>(&mut self)
     {
@@ -56,13 +61,74 @@ impl World
     #[track_caller]
     pub fn create<T: TArchetype + 'static>(&mut self, val: T) -> Entity
     {
-        let arch_spec = self.get_or_create_archetype_spec_mut::<T>();
-        arch_spec.arch.push(&arch_spec.layout, val);
+        let new_e = self.new_entity();
+        let (arch_id, arch_spec) = self.get_or_create_archetype_spec_mut::<T>();
 
-        todo!()
+        let arch_to_chunk_spec = match arch_spec.arch.push(&arch_spec.layout, new_e, val)
+        {
+            Ok(r) => r,
+            Err(e) => panic!("{}", e),
+        };
+
+        self.entities.insert(
+            new_e,
+            EntitySpec {
+                arch_id:         arch_id,
+                chunk_idx:       arch_to_chunk_spec.chunk_idx,
+                idx_in_chunk:    arch_to_chunk_spec.idx_in_chunk,
+                current_version: new_e.version(),
+            },
+        );
+        new_e
+    }
+
+    #[track_caller]
+    pub fn destroy(&mut self, e: Entity)
+    {
+        let e_spec = match self.entities.get(&e)
+        {
+            Some(r) => r,
+            None => panic!("{} does not exist to be destroyed !", e),
+        };
+        let arch = self.archetypes.get_mut(&e_spec.arch_id).unwrap();
+        match arch.arch.remove_at(arch.fn_remove, &arch.layout, e_spec.chunk_idx, e_spec.chunk_idx)
+        {
+            Ok(r) =>
+            {
+                if let Some(swapped_row) = r
+                {
+                    self.update_entity_indices(swapped_row);
+                }
+            }
+            Err(e) => panic!("{}", e),
+        };
     }
 }
 
+impl World
+{
+    #[track_caller]
+    fn update_entity_indices(&mut self, swapped_row: SwappedRow)
+    {
+        let swapped_e_spec = match self.entities.get_mut(&swapped_row.e)
+        {
+            Some(r) => r,
+            None => panic!("Swapped {} not found to update indices !", swapped_row.e),
+        };
+        debug_assert!(
+            swapped_row.from == swapped_e_spec.idx_in_chunk,
+            "{} with old idx `{}` != swapped idx `{}`",
+            swapped_row.e,
+            swapped_e_spec.idx_in_chunk,
+            swapped_row.from
+        );
+        swapped_e_spec.idx_in_chunk = swapped_row.to;
+    }
+    fn new_entity(&self) -> Entity
+    {
+        Entity::new(self.entities.len(), Entity::INITIALIZE_VERSION)
+    }
+}
 impl World
 {
     fn get_archetype_id<T: TArchetype + 'static>(&self) -> Option<usize>
@@ -89,10 +155,10 @@ impl World
 impl World
 {
     #[track_caller]
-    fn get_or_create_archetype_spec_mut<T: TArchetype + 'static>(&mut self) -> &mut ArchetypeSpec
+    fn get_or_create_archetype_spec_mut<T: TArchetype + 'static>(&mut self) -> (usize, &mut ArchetypeSpec)
     {
         let arch_id = self.get_or_create_archetype_id::<T>();
-        self.archetypes.get_mut(&arch_id).unwrap()
+        (arch_id, self.archetypes.get_mut(&arch_id).unwrap())
     }
     #[track_caller]
     fn get_or_create_archetype_id<T: TArchetype + 'static>(&mut self) -> usize
@@ -156,7 +222,7 @@ impl World
             Ok(r) => r,
             Err(e) => panic!("Create Archetype `{}` Failed: {e}", std::any::type_name::<T>()),
         };
-        let arch_spec = ArchetypeSpec::new(layout);
+        let arch_spec = ArchetypeSpec::new::<T>(layout);
         self.archetypes.insert(id, arch_spec);
     }
 

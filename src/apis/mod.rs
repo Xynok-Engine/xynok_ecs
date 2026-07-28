@@ -1,11 +1,11 @@
-use crate::apis::fn_ptr::{FnCloneComponent, FnDropComponent};
-
 use std::any::TypeId;
 
 mod identifies;
-mod fn_ptr;
+pub mod fn_ptr;
 mod traits;
 pub mod constants;
+
+pub mod swapped_row;
 
 pub use constants::*;
 pub use fn_ptr::*;
@@ -20,5 +20,4 @@ pub struct ComponentDescriptor
     pub align:            usize,
     pub storage_location: StorageLocation,
     pub fn_drop:          FnDropComponent,
-    //pub fn_clone:         FnCloneComponent,
 }

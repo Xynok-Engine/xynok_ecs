@@ -1,7 +1,7 @@
 use std::any::TypeId;
 
 use crate::{
-    apis::{TComponent, XynokEcsError},
+    apis::{swapped_row::SwappedRow, TComponent, XynokEcsError},
     chunk::layout::ChunkLayout,
     entity::Entity,
 };
@@ -87,11 +87,7 @@ impl Chunk
         {
             return Err(XynokEcsError::IdxIsOutOfChunkLen(row, self.len()));
         }
-
-        unsafe {
-            let entities_ptr = self.ptr.add(layout.header.entities_offset);
-            Ok(&*(entities_ptr as *const Entity).add(row))
-        }
+        Ok(unsafe { self.get_entity_uncheck(layout, row) })
     }
     pub fn get_entities<'a>(&self, layout: &ChunkLayout) -> Result<&'a [Entity], XynokEcsError>
     {
@@ -107,60 +103,91 @@ impl Chunk
         Ok((entities, components))
     }
 
-    pub fn get_entities_components_mut<'a, C: TComponent + 'static>(
-        &mut self,
-        layout: &ChunkLayout,
-    ) -> Result<(&'a [Entity], &'a mut [C]), XynokEcsError>
+    pub fn get_entities_components_mut<'a, C: TComponent + 'static>(&mut self, layout: &ChunkLayout) -> Result<(&'a [Entity], &'a mut [C]), XynokEcsError>
     {
         let entities = self.get_entities(layout)?;
         let components = self.get_components_mut::<C>(layout)?;
         Ok((entities, components))
     }
 }
+
 impl Chunk
 {
     #[track_caller]
-    pub unsafe fn push<T: TComponent + 'static>(&mut self, layout: &ChunkLayout, value: T) -> Result<(), XynokEcsError>
+    pub unsafe fn remove_at(&mut self, layout: &ChunkLayout, idx: usize) -> Result<Option<SwappedRow>, XynokEcsError>
     {
-        debug_assert!(
-            !self.is_full(),
-            "Chunk is full of capacity({}), cannot push more component `{}`",
-            self.max_len,
-            std::any::type_name::<T::StorageDataType>()
-        );
-        unsafe {
-            self.write_value(layout, self.len(), value);
-            self.increase_len();
+        if idx >= self.len()
+        {
+            return Err(XynokEcsError::IdxIsOutOfChunkLen(idx, self.len()));
         }
-        Ok(())
-    }
-    #[track_caller]
-    pub unsafe fn remove_at<T: TComponent + 'static>(&mut self, layout: &ChunkLayout, idx: usize) -> Result<(), XynokEcsError>
-    {
-        debug_assert!(
-            idx < self.len(),
-            "Idx({}) is out of chunk's range [0, {}], cannot remove component `{}`",
-            idx,
-            self.len(),
-            std::any::type_name::<T::StorageDataType>()
-        );
 
-        let ptr = self.components_ptr::<T>(layout);
-        todo!()
+        let last = self.len - 1;
+        let is_last = idx == last;
+        unsafe {
+            if is_last
+            {
+                for des in layout.component_col_descriptors.values()
+                {
+                    let target_slot = self.ptr.add(des.offset).add(idx * des.item_size);
+                    (des.fn_drop)(target_slot);
+                }
+            }
+            else
+            {
+                for des in layout.component_col_descriptors.values()
+                {
+                    let target_slot = self.ptr.add(des.offset).add(idx * des.item_size);
+                    (des.fn_drop)(target_slot);
+                    let last_val = self.ptr.add(des.offset).add(last * des.item_size);
+                    std::ptr::copy_nonoverlapping(last_val, target_slot, des.item_size);
+                }
+            }
+            self.decrease_len();
+        }
+
+        if is_last
+        {
+            return Ok(None);
+        }
+
+        Ok(Some(unsafe {
+            SwappedRow {
+                e:    *self.get_entity_uncheck(layout, last),
+                from: last,
+                to:   idx,
+            }
+        }))
     }
 }
 impl Chunk
 {
-    unsafe fn increase_len(&mut self)
+    pub(crate) unsafe fn get_entity_uncheck<'a>(&self, layout: &ChunkLayout, row: usize) -> &'a Entity
+    {
+        unsafe {
+            let entities_ptr = self.ptr.add(layout.header.entities_offset);
+            &*(entities_ptr as *const Entity).add(row)
+        }
+    }
+    pub(crate) unsafe fn get_entity_uncheck_mut<'a>(&mut self, layout: &ChunkLayout, row: usize) -> &'a mut Entity
+    {
+        unsafe {
+            let entities_ptr = self.ptr.add(layout.header.entities_offset);
+            &mut *(entities_ptr as *mut Entity).add(row)
+        }
+    }
+}
+impl Chunk
+{
+    pub(crate) unsafe fn increase_len(&mut self)
     {
         self.len += 1;
     }
-    unsafe fn decrease_len(&mut self)
+    pub(crate) unsafe fn decrease_len(&mut self)
     {
         self.len -= 1;
     }
     /// Drop the old value and assign the new one
-    unsafe fn set_value<T: TComponent + 'static>(&mut self, layout: &ChunkLayout, row: usize, value: T) -> Result<(), XynokEcsError>
+    pub(crate) unsafe fn replace_at<T: TComponent + 'static>(&mut self, layout: &ChunkLayout, row: usize, value: T) -> Result<(), XynokEcsError>
     {
         let col_ptr = self.components_ptr::<T>(layout)?;
         unsafe {
@@ -170,7 +197,7 @@ impl Chunk
         Ok(())
     }
     /// Writes directly to memory without dropping the old value. Typically used when the memory has just been initialized
-    unsafe fn write_value<T: TComponent + 'static>(&mut self, layout: &ChunkLayout, row: usize, value: T) -> Result<(), XynokEcsError>
+    pub(crate) unsafe fn write_at<T: TComponent + 'static>(&mut self, layout: &ChunkLayout, row: usize, value: T) -> Result<(), XynokEcsError>
     {
         let col_ptr = self.components_ptr::<T>(layout)?;
         unsafe {

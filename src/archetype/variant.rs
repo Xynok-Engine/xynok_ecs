@@ -1,6 +1,7 @@
 use crate::{
-    apis::{TArchetype, TComponent, TComponentDescriptor},
+    apis::{TArchetype, TComponent, TComponentDescriptor, XynokEcsError},
     chunk::layout::ChunkLayout,
+    entity::Entity,
 };
 
 impl<T: TComponent + 'static> TArchetype for T
@@ -11,20 +12,13 @@ impl<T: TComponent + 'static> TArchetype for T
 
     const STORAGE_TYPE_IDS: &[std::any::TypeId] = &[std::any::TypeId::of::<T::StorageDataType>()];
 
-    fn push_to(layout: &ChunkLayout, chunk: &mut crate::chunk::Chunk, val: Self)
+    fn push_to(layout: &ChunkLayout, chunk: &mut crate::chunk::Chunk, e: Entity, val: Self) -> Result<(), XynokEcsError>
     {
         unsafe {
-            match chunk.push(layout, val)
-            {
-                Ok(_) =>
-                {}
-                Err(e) => panic!("Failed to push Archetype `{}` to chunk", std::any::type_name::<T::StorageDataType>()),
-            };
+            let write_idx = chunk.len();
+            let e_slot = chunk.get_entity_uncheck_mut(layout, write_idx);
+            *e_slot = e;
+            chunk.write_at(layout, write_idx, val)
         }
-    }
-
-    fn remove_at(layout: &ChunkLayout, chunk: &mut crate::chunk::Chunk, idx: usize)
-    {
-        todo!()
     }
 }
