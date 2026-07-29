@@ -5,6 +5,7 @@ use std::{
 
 use crate::{
     apis::{
+        component_spec::ComponentSpec,
         swapped_row::{self, SwappedRow},
         TArchetype,
     },
@@ -17,13 +18,15 @@ use crate::{
     std::queue::Queue,
     world::{arch_spec::ArchetypeSpec, entity_spec::EntitySpec, temp_allocation::WorldTempAllocation},
 };
+
 mod temp_allocation;
 mod entity_spec;
 mod arch_spec;
+
 pub struct World
 {
     archetypes:               HashMap<usize, ArchetypeSpec>,
-    component_counter:        HashMap<TypeId, usize>,
+    component_counter:        HashMap<TypeId, ComponentSpec>,
     component_set_counter:    HashMap<Vec<usize>, usize>,
     archetype_counter:        HashMap<TypeId, usize>,
     entities:                 Vec<EntitySpec>,
@@ -104,7 +107,9 @@ impl World
             (spec.arch_id(), spec.chunk_idx(), spec.idx_in_chunk())
         };
         let arch = self.archetypes.get_mut(&arch_id).unwrap();
-        match arch.arch.remove_at(arch.fn_remove, &arch.layout, chunk_idx, idx_in_chunk)
+        match arch
+            .arch
+            .remove_at(arch.fn_remove_entity, &arch.layout, &self.component_counter, chunk_idx, idx_in_chunk)
         {
             Ok(r) =>
             {
@@ -122,6 +127,20 @@ impl World
             e_spec.errase();
         };
     }
+
+    #[track_caller]
+    pub fn add_component<T: TArchetype + 'static>(&mut self, e: Entity, val: T)
+    {
+        let component_set = &mut self.temp_alloc.vec_usize;
+        component_set.clear();
+        for com in T::COMPONENT_DESCRIPTORS
+        {}
+
+        let (arch_id, arch_spec) = self.get_or_create_archetype_spec_mut::<T>();
+    }
+
+    #[track_caller]
+    pub fn remove_component<T: TArchetype + 'static>(&mut self, e: Entity) {}
 }
 
 impl World
@@ -198,15 +217,22 @@ impl World
         component_set.clear();
 
         // collect component id
-        for comp in T::STORAGE_TYPE_IDS
+        for des in T::COMPONENT_DESCRIPTORS
         {
-            if let Some(id) = self.component_counter.get(comp)
+            if let Some(spec) = self.component_counter.get(&des.storage_type_id)
             {
-                component_set.push(*id);
+                component_set.push(spec.id);
                 continue;
             }
             let id = self.component_counter.len();
-            self.component_counter.insert(*comp, id);
+
+            self.component_counter.insert(
+                des.storage_type_id,
+                ComponentSpec {
+                    id:      id,
+                    fn_drop: des.fn_drop,
+                },
+            );
             component_set.push(id);
         }
         normalize_set(component_set);

@@ -1,7 +1,7 @@
-use std::any::TypeId;
+use std::{any::TypeId, collections::HashMap};
 
 use crate::{
-    apis::{identifies::StorageLocation, swapped_row::SwappedRow, ComponentDescriptor, XynokEcsError},
+    apis::{component_spec::ComponentSpec, identifies::StorageLocation, swapped_row::SwappedRow, ComponentDescriptor, XynokEcsError},
     chunk::{layout::ChunkLayout, Chunk},
     entity::Entity,
 };
@@ -43,10 +43,15 @@ pub trait TArchetype
 
     fn push_to(layout: &ChunkLayout, chunk: &mut Chunk, e: Entity, val: Self) -> Result<(), XynokEcsError>;
 
-    fn remove_at(layout: &ChunkLayout, chunk: &mut Chunk, idx: usize) -> Result<Option<SwappedRow>, XynokEcsError>
+    fn remove_at(
+        layout: &ChunkLayout,
+        component_specs: &HashMap<TypeId, ComponentSpec>,
+        chunk: &mut Chunk,
+        idx: usize,
+    ) -> Result<Option<SwappedRow>, XynokEcsError>
     {
         unsafe {
-            match chunk.remove_at(layout, idx)
+            match chunk.remove_at(layout, component_specs, idx)
             {
                 Ok(r) => Ok(r),
                 Err(e) => Err(e),

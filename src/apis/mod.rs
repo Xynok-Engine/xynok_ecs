@@ -4,6 +4,7 @@ mod identifies;
 pub mod fn_ptr;
 mod traits;
 pub mod constants;
+pub(crate) mod component_spec;
 
 pub mod swapped_row;
 
@@ -19,5 +20,5 @@ pub struct ComponentDescriptor
     pub byte_size:        usize,
     pub align:            usize,
     pub storage_location: StorageLocation,
-    pub fn_drop:          FnDropComponent,
+    pub fn_drop:          FnComponentDropItSelf,
 }

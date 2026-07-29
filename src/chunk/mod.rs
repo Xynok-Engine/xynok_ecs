@@ -1,7 +1,11 @@
-use std::any::TypeId;
+use std::{any::TypeId, collections::HashMap};
 
 use crate::{
-    apis::{swapped_row::SwappedRow, TComponent, XynokEcsError},
+    apis::{
+        component_spec::{self, ComponentSpec},
+        swapped_row::SwappedRow,
+        TComponent, XynokEcsError,
+    },
     chunk::layout::ChunkLayout,
     entity::Entity,
 };
@@ -114,7 +118,12 @@ impl Chunk
 impl Chunk
 {
     #[track_caller]
-    pub unsafe fn remove_at(&mut self, layout: &ChunkLayout, idx: usize) -> Result<Option<SwappedRow>, XynokEcsError>
+    pub unsafe fn remove_at(
+        &mut self,
+        layout: &ChunkLayout,
+        component_specs: &HashMap<TypeId, ComponentSpec>,
+        idx: usize,
+    ) -> Result<Option<SwappedRow>, XynokEcsError>
     {
         if idx >= self.len()
         {
@@ -126,18 +135,21 @@ impl Chunk
         unsafe {
             if is_last
             {
-                for des in layout.component_col_descriptors.values()
+                for (k, des) in layout.component_col_descriptors.iter()
                 {
                     let target_slot = self.ptr.add(des.offset).add(idx * des.item_size);
-                    (des.fn_drop)(target_slot);
+                    let spec = component_specs.get(k).unwrap();
+                    (spec.fn_drop)(target_slot);
                 }
             }
             else
             {
-                for des in layout.component_col_descriptors.values()
+                for (k, des) in layout.component_col_descriptors.iter()
                 {
                     let target_slot = self.ptr.add(des.offset).add(idx * des.item_size);
-                    (des.fn_drop)(target_slot);
+                    let spec = component_specs.get(k).unwrap();
+                    (spec.fn_drop)(target_slot);
+
                     let last_val = self.ptr.add(des.offset).add(last * des.item_size);
                     std::ptr::copy_nonoverlapping(last_val, target_slot, des.item_size);
                 }

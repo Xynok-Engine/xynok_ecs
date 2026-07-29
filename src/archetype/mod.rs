@@ -1,7 +1,7 @@
-use std::collections::HashMap;
+use std::{any::TypeId, collections::HashMap};
 
 use crate::{
-    apis::{swapped_row::SwappedRow, FnRemoveEntity, TArchetype, XynokEcsError},
+    apis::{component_spec::ComponentSpec, swapped_row::SwappedRow, FnArchtypeRemoveEntity, TArchetype, XynokEcsError},
     archetype::entity_to_chunk::EntityToChunk,
     chunk::{
         layout::{self, ChunkLayout},
@@ -75,14 +75,21 @@ impl Archetype
         })
     }
 
-    pub fn remove_at(&mut self, fn_remove: FnRemoveEntity, layout: &ChunkLayout, chunk_idx: usize, idx: usize) -> Result<Option<SwappedRow>, XynokEcsError>
+    pub fn remove_at(
+        &mut self,
+        fn_remove: FnArchtypeRemoveEntity,
+        layout: &ChunkLayout,
+        component_specs: &HashMap<TypeId, ComponentSpec>,
+        chunk_idx: usize,
+        idx: usize,
+    ) -> Result<Option<SwappedRow>, XynokEcsError>
     {
         let chunk = match self.chunks.get_mut(chunk_idx)
         {
             Some(r) => r,
             None => return Err(XynokEcsError::ChunkIdxIsNotInRange(chunk_idx, self.chunks.len())),
         };
-        match (fn_remove)(layout, chunk, idx)
+        match (fn_remove)(layout, component_specs, chunk, idx)
         {
             Ok(r) => Ok(r),
             Err(e) => Err(e),
