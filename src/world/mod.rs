@@ -14,6 +14,7 @@ use crate::{
         Chunk,
     },
     entity::Entity,
+    std::queue::Queue,
     world::{arch_spec::ArchetypeSpec, entity_spec::EntitySpec, temp_allocation::WorldTempAllocation},
 };
 mod temp_allocation;
@@ -25,7 +26,8 @@ pub struct World
     component_counter:        HashMap<TypeId, usize>,
     component_set_counter:    HashMap<Vec<usize>, usize>,
     archetype_counter:        HashMap<TypeId, usize>,
-    entities:                 HashMap<Entity, EntitySpec>,
+    entities:                 Vec<EntitySpec>,
+    free_entities:            Queue<usize>,
     temp_alloc:               WorldTempAllocation,
     global_archetype_version: usize,
 }
@@ -41,11 +43,12 @@ impl Default for World
     fn default() -> Self
     {
         Self {
-            entities:                 HashMap::with_capacity(16),
+            entities:                 Vec::with_capacity(16),
             archetypes:               HashMap::new(),
             component_counter:        HashMap::new(),
             archetype_counter:        HashMap::new(),
             component_set_counter:    HashMap::new(),
+            free_entities:            Queue::new(),
             temp_alloc:               WorldTempAllocation::new(),
             global_archetype_version: 1usize,
         }
@@ -70,28 +73,26 @@ impl World
             Err(e) => panic!("{}", e),
         };
 
-        self.entities.insert(
-            new_e,
-            EntitySpec {
-                arch_id:         arch_id,
-                chunk_idx:       arch_to_chunk_spec.chunk_idx,
-                idx_in_chunk:    arch_to_chunk_spec.idx_in_chunk,
-                current_version: new_e.version(),
-            },
-        );
+        let entity_spec = unsafe { self.entities.get_unchecked_mut(new_e.idx()) };
+        *entity_spec = EntitySpec::new(arch_id, arch_to_chunk_spec.chunk_idx, arch_to_chunk_spec.idx_in_chunk, new_e.version());
         new_e
     }
 
     #[track_caller]
     pub fn destroy(&mut self, e: Entity)
     {
-        let e_spec = match self.entities.get(&e)
-        {
-            Some(r) => r,
-            None => panic!("{} does not exist to be destroyed !", e),
+        debug_assert!(e.idx() < self.entities.len(), "{} does not exist to be destroyed !", e);
+
+        let (arch_id, chunk_idx, idx_in_chunk) = unsafe {
+            let spec = self.entities.get_unchecked(e.idx());
+
+            debug_assert!(spec.has_value(), "{} does not exist to be destroyed!", e);
+            debug_assert!(e.version() == spec.version(), "{} does not match version existing!", e);
+
+            (spec.arch_id(), spec.chunk_idx(), spec.idx_in_chunk())
         };
-        let arch = self.archetypes.get_mut(&e_spec.arch_id).unwrap();
-        match arch.arch.remove_at(arch.fn_remove, &arch.layout, e_spec.chunk_idx, e_spec.chunk_idx)
+        let arch = self.archetypes.get_mut(&arch_id).unwrap();
+        match arch.arch.remove_at(arch.fn_remove, &arch.layout, chunk_idx, idx_in_chunk)
         {
             Ok(r) =>
             {
@@ -102,6 +103,12 @@ impl World
             }
             Err(e) => panic!("{}", e),
         };
+
+        self.free_entities.enqueue(e.idx());
+        unsafe {
+            let e_spec = self.entities.get_unchecked_mut(e.idx());
+            e_spec.errase();
+        };
     }
 }
 
@@ -110,23 +117,25 @@ impl World
     #[track_caller]
     fn update_entity_indices(&mut self, swapped_row: SwappedRow)
     {
-        let swapped_e_spec = match self.entities.get_mut(&swapped_row.e)
+        let swapped_e_spec = match self.entities.get_mut(swapped_row.e.idx())
         {
             Some(r) => r,
             None => panic!("Swapped {} not found to update indices !", swapped_row.e),
         };
-        debug_assert!(
-            swapped_row.from == swapped_e_spec.idx_in_chunk,
-            "{} with old idx `{}` != swapped idx `{}`",
-            swapped_row.e,
-            swapped_e_spec.idx_in_chunk,
-            swapped_row.from
-        );
-        swapped_e_spec.idx_in_chunk = swapped_row.to;
+
+        swapped_e_spec.update_idx_in_chunk(swapped_row.from, swapped_row.to);
     }
-    fn new_entity(&self) -> Entity
+    fn new_entity(&mut self) -> Entity
     {
-        Entity::new(self.entities.len(), Entity::INITIALIZE_VERSION)
+        if let Some(free_idx) = self.free_entities.dequeue()
+        {
+            let old_slot = unsafe { self.entities.get_unchecked(free_idx) };
+            let new_version = (old_slot.version() + 1).max(Entity::INITIALIZE_VERSION);
+            return Entity::new(free_idx, new_version);
+        };
+        let e = Entity::new(self.entities.len(), Entity::INITIALIZE_VERSION);
+        self.entities.push(EntitySpec::new_empty_slot(e.version()));
+        e
     }
 }
 impl World
