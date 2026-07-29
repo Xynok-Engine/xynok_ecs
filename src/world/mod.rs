@@ -78,17 +78,29 @@ impl World
         new_e
     }
 
+    pub fn exists(&mut self, e: Entity) -> bool
+    {
+        match e.idx() < self.entities.len()
+        {
+            false => false,
+            true =>
+            {
+                let spec = unsafe { self.entities.get_unchecked(e.idx()) };
+                match spec.has_value()
+                {
+                    false => false,
+                    true => spec.version() == e.version(),
+                }
+            }
+        }
+    }
     #[track_caller]
     pub fn destroy(&mut self, e: Entity)
     {
-        debug_assert!(e.idx() < self.entities.len(), "{} does not exist to be destroyed !", e);
+        debug_assert!(self.exists(e), "{} does not exist to be destroyed !", e);
 
         let (arch_id, chunk_idx, idx_in_chunk) = unsafe {
             let spec = self.entities.get_unchecked(e.idx());
-
-            debug_assert!(spec.has_value(), "{} does not exist to be destroyed!", e);
-            debug_assert!(e.version() == spec.version(), "{} does not match version existing!", e);
-
             (spec.arch_id(), spec.chunk_idx(), spec.idx_in_chunk())
         };
         let arch = self.archetypes.get_mut(&arch_id).unwrap();
