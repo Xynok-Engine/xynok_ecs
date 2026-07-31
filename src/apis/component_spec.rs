@@ -1,4 +1,4 @@
-use crate::apis::FnComponentDropItSelf;
+use crate::apis::fn_ptr::FnComponentDropItSelf;
 
 pub struct ComponentSpec
 {

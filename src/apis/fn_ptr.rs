@@ -1,7 +1,7 @@
 use std::{any::TypeId, collections::HashMap};
 
 use crate::{
-    apis::{component_spec::ComponentSpec, swapped_row::SwappedRow, XynokEcsError},
+    apis::{component_spec::ComponentSpec, identifies::XynokEcsError, swapped_row::SwappedRow},
     chunk::{layout::ChunkLayout, Chunk},
 };
 

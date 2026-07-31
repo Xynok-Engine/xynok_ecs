@@ -1,7 +1,12 @@
 use std::{any::TypeId, collections::HashMap};
 
 use crate::{
-    apis::{component_spec::ComponentSpec, identifies::StorageLocation, swapped_row::SwappedRow, ComponentDescriptor, XynokEcsError},
+    apis::{
+        component_spec::ComponentSpec,
+        identifies::{StorageLocation, XynokEcsError},
+        swapped_row::SwappedRow,
+        ComponentDescriptor,
+    },
     chunk::{layout::ChunkLayout, Chunk},
     entity::Entity,
 };

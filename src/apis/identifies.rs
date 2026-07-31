@@ -1,6 +1,7 @@
 use std::alloc::LayoutError;
 
 use thiserror::Error;
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum StorageLocation
 {
     Chunk,
@@ -30,6 +31,9 @@ pub enum XynokEcsError
 
     #[error("Chunk idx({0}) is not in range [0, {1}]")]
     ChunkIdxIsNotInRange(usize, usize),
+
+    #[error("Conflict sub Archetype indices")]
+    ConflictSubArchetype,
 }
 // src: https://crates.io/crates/thiserror
 //#[derive(Error, Debug)]

@@ -7,7 +7,7 @@ use crate::{
     apis::{
         component_spec::ComponentSpec,
         swapped_row::{self, SwappedRow},
-        TArchetype,
+        traits::TArchetype,
     },
     archetype::Archetype,
     chunk::{
@@ -109,7 +109,7 @@ impl World
         let arch = self.archetypes.get_mut(&arch_id).unwrap();
         match arch
             .arch
-            .remove_at(arch.fn_remove_entity, &arch.layout, &self.component_counter, chunk_idx, idx_in_chunk)
+            .remove_at(&arch.fn_remove_entity, &arch.layout, &self.component_counter, chunk_idx, idx_in_chunk)
         {
             Ok(r) =>
             {
@@ -131,12 +131,30 @@ impl World
     #[track_caller]
     pub fn add_component<T: TArchetype + 'static>(&mut self, e: Entity, val: T)
     {
-        let component_set = &mut self.temp_alloc.vec_usize;
-        component_set.clear();
-        for com in T::COMPONENT_DESCRIPTORS
-        {}
+        debug_assert!(self.exists(e), "{} does not exist to add component !", e);
 
-        let (arch_id, arch_spec) = self.get_or_create_archetype_spec_mut::<T>();
+        let a_arch_id = unsafe { self.entities.get_unchecked(e.idx()).arch_id() };
+        let b_arch_id = self.get_or_create_archetype_id::<T>();
+
+        let mut component_set = std::mem::take(&mut self.temp_alloc.vec_usize);
+        component_set.clear();
+        self.append_archetype_component_id_of_to(a_arch_id, &mut component_set);
+        self.append_archetype_component_id_of_to(b_arch_id, &mut component_set);
+        normalize_set(&mut component_set);
+
+        let target_arch_id = match self.component_set_counter.get(&component_set)
+        {
+            Some(r) => r,
+            None =>
+            {
+                panic!(
+                    "Target archetype after adding `{}` was not registered. Please register it before adding or removing any components from another archetype to become it.",
+                    std::any::type_name::<T>()
+                );
+            }
+        };
+        let target_arch_spec = self.archetypes.get_mut(target_arch_id).unwrap();
+        self.temp_alloc.vec_usize = component_set;
     }
 
     #[track_caller]
@@ -145,6 +163,24 @@ impl World
 
 impl World
 {
+    #[track_caller]
+    fn append_archetype_component_id_of_to(&self, arch_id: usize, component_set: &mut Vec<usize>)
+    {
+        let arch_spec = match self.archetypes.get(&arch_id)
+        {
+            Some(r) => r,
+            None => panic!("Archetype `{arch_id}` not found to collect component id !"),
+        };
+
+        for type_id in arch_spec.layout.component_col_descriptors.keys()
+        {
+            match self.component_counter.get(type_id)
+            {
+                Some(component_spec) => component_set.push(component_spec.id),
+                None => panic!("Archetype `{arch_id}` has an unregistered component to check id !"),
+            }
+        }
+    }
     #[track_caller]
     fn update_entity_indices(&mut self, swapped_row: SwappedRow)
     {

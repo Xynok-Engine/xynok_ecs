@@ -3,8 +3,9 @@ use std::{any::TypeId, collections::HashMap};
 use crate::{
     apis::{
         component_spec::{self, ComponentSpec},
+        identifies::XynokEcsError,
         swapped_row::SwappedRow,
-        TComponent, XynokEcsError,
+        traits::TComponent,
     },
     chunk::layout::ChunkLayout,
     entity::Entity,

@@ -1,5 +1,8 @@
 use crate::{
-    apis::{TArchetype, TComponent, TComponentDescriptor, XynokEcsError},
+    apis::{
+        identifies::XynokEcsError,
+        traits::{TArchetype, TComponent, TComponentDescriptor},
+    },
     chunk::layout::ChunkLayout,
     entity::Entity,
 };

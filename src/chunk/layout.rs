@@ -1,7 +1,12 @@
 use std::{alloc::Layout, any::TypeId, collections::HashMap};
 
 use crate::{
-    apis::{ComponentDescriptor, TComponentDescriptor, XynokEcsError, BITS_PER_BYTE, CHUNK_SIZE_IN_BYTE},
+    apis::{
+        constants::{BITS_PER_BYTE, CHUNK_SIZE_IN_BYTE},
+        identifies::XynokEcsError,
+        traits::TComponentDescriptor,
+        ComponentDescriptor,
+    },
     chunk::{column::ColumnDescriptor, header::Header},
     entity::Entity,
 };

@@ -4,8 +4,9 @@
 ## Features
 - [x] register archetype
 - [x] create/destroy entity
-- [ ] drop chunk data
+- [ ] merge chunk/archetype layout
 - [ ] add/remove component
+- [ ] drop chunk data
 - [ ] tuple archetypes
 - [ ] query read/write
 

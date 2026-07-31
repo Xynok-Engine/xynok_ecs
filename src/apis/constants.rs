@@ -1,5 +1,5 @@
 use crate::{
-    apis::{ComponentDescriptor, TComponentDescriptor},
+    apis::{traits::TComponentDescriptor, ComponentDescriptor},
     entity::Entity,
 };
 

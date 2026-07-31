@@ -1,5 +1,6 @@
 use crate::{
-    apis::{TComponentDescriptor, BITS_PER_BYTE, CPU_WORD},
+    apis::constants::{BITS_PER_BYTE, CPU_WORD},
+    apis::traits::TComponentDescriptor,
     entity::Entity,
 };
 

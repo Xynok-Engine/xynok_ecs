@@ -1,4 +1,4 @@
-use crate::apis::{StorageLocation, TComponent};
+use crate::apis::{identifies::StorageLocation, traits::TComponent};
 
 /// Stores an Index and Version, packed into a u64
 /// Layout: bits 0..40 = idx (up to ~1 trillion slots), bits 40..64 = version (~16 million reuses per slot)
@@ -42,12 +42,7 @@ impl Entity
     pub fn new(idx: usize, version: u32) -> Self
     {
         debug_assert!(idx <= Self::MAX_IDX, "Entity idx overflow: {} > {}", idx, Self::MAX_IDX);
-        debug_assert!(
-            version <= Self::MAX_VERSION,
-            "Entity version overflow: {} > {}",
-            version,
-            Self::MAX_VERSION
-        );
+        debug_assert!(version <= Self::MAX_VERSION, "Entity version overflow: {} > {}", version, Self::MAX_VERSION);
         let packed = (idx as u64 & Self::IDX_MASK) | ((version as u64 & Self::VERSION_MASK) << Self::IDX_BITS);
         Self(packed)
     }

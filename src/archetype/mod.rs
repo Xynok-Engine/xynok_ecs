@@ -1,11 +1,11 @@
 use std::{any::TypeId, collections::HashMap};
 
 use crate::{
-    apis::{component_spec::ComponentSpec, swapped_row::SwappedRow, FnArchtypeRemoveEntity, TArchetype, XynokEcsError},
+    apis::{component_spec::ComponentSpec, fn_ptr::FnArchtypeRemoveEntity, identifies::XynokEcsError, swapped_row::SwappedRow, traits::TArchetype},
     archetype::entity_to_chunk::EntityToChunk,
     chunk::{
-        layout::{self, ChunkLayout},
         Chunk,
+        layout::{self, ChunkLayout},
     },
     entity::Entity,
     std::queue::Queue,
@@ -77,7 +77,7 @@ impl Archetype
 
     pub fn remove_at(
         &mut self,
-        fn_remove: FnArchtypeRemoveEntity,
+        fn_removes: &Vec<FnArchtypeRemoveEntity>,
         layout: &ChunkLayout,
         component_specs: &HashMap<TypeId, ComponentSpec>,
         chunk_idx: usize,
@@ -89,10 +89,38 @@ impl Archetype
             Some(r) => r,
             None => return Err(XynokEcsError::ChunkIdxIsNotInRange(chunk_idx, self.chunks.len())),
         };
-        match (fn_remove)(layout, component_specs, chunk, idx)
+        let mut swapped_row: Option<SwappedRow> = None;
+
+        // swapped_row must be the same because the small archetypes within the larger archetype all share the same chunk and entity
+        for f in fn_removes
         {
-            Ok(r) => Ok(r),
-            Err(e) => Err(e),
+            match (f)(layout, component_specs, chunk, idx)
+            {
+                Ok(swapped) => match swapped
+                {
+                    Some(s) =>
+                    {
+                        if let Some(current_swapped) = swapped_row
+                            && s != current_swapped
+                        {
+                            return Err(XynokEcsError::ConflictSubArchetype);
+                        }
+                        swapped_row = Some(s);
+                    }
+                    None =>
+                    {
+                        if swapped_row.is_some()
+                        {
+                            return Err(XynokEcsError::ConflictSubArchetype);
+                        }
+                    }
+                },
+                Err(e) =>
+                {
+                    return Err(e);
+                }
+            }
         }
+        Ok(swapped_row)
     }
 }
