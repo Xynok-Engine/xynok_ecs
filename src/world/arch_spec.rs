@@ -4,13 +4,7 @@ use std::{
 };
 
 use crate::{
-    apis::{
-        component_spec::{self, ComponentSpec},
-        fn_ptr::FnArchtypeRemoveEntity,
-        identifies::XynokEcsError,
-        traits::TArchetype,
-        ComponentDescriptor,
-    },
+    apis::{fn_ptr::FnArchtypeRemoveEntity, identifies::XynokEcsError, params::ComponentSpec, traits::TArchetype, ComponentDescriptor},
     archetype::Archetype,
     chunk::{
         column::ColumnDescriptor,

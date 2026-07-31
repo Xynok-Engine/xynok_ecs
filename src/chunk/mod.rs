@@ -2,10 +2,8 @@ use std::{any::TypeId, collections::HashMap};
 
 use crate::{
     apis::{
-        component_spec::{self, ComponentSpec},
         identifies::XynokEcsError,
-        params::ChunkTakeComponentParams,
-        swapped_row::SwappedRow,
+        params::{ChunkTakeComponentParams, ComponentSpec, SwappedRow},
         traits::TComponent,
     },
     chunk::layout::ChunkLayout,

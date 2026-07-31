@@ -1,9 +1,7 @@
 use std::any::TypeId;
 
-pub(crate) mod component_spec;
 pub(crate) mod params;
 pub(crate) mod fn_ptr;
-pub(crate) mod swapped_row;
 
 pub mod identifies;
 pub mod constants;

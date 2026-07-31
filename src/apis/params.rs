@@ -1,12 +1,23 @@
 use std::{any::TypeId, collections::HashMap};
 
 use crate::{
-    apis::{component_spec::ComponentSpec, swapped_row::SwappedRow, traits::TArchetype},
+    apis::{traits::TArchetype, ComponentDescriptor},
     archetype::Archetype,
     chunk::{layout::ChunkLayout, Chunk},
     entity::Entity,
 };
-
+#[derive(PartialEq, Eq, Clone, Copy)]
+pub struct SwappedRow
+{
+    pub e:    Entity,
+    pub from: usize,
+    pub to:   usize,
+}
+pub struct ComponentSpec
+{
+    pub id:         usize,
+    pub descriptor: ComponentDescriptor,
+}
 #[derive(Debug, Clone, Copy)]
 pub struct EntityInChunkIndices
 {
@@ -32,13 +43,13 @@ pub struct ArchetypeTakeAndWriteComponentParams<'a, T: TArchetype + 'static>
     pub src_layout:      &'a ChunkLayout,
     pub dst_layout:      &'a ChunkLayout,
     pub component_specs: &'a HashMap<TypeId, ComponentSpec>,
-    pub val:             T,
+    pub write_val:       T,
 }
 
 pub struct ResultTakeAndWrite
 {
-    pub new_e_indices: EntityInChunkIndices,
-    pub swapped_e:     Option<SwappedRow>,
+    pub new_indices_took: EntityInChunkIndices,
+    pub swapped_e:        Option<SwappedRow>,
 }
 pub struct ChunkTakeComponentParams<'a>
 {

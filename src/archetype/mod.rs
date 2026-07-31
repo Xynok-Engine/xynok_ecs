@@ -2,11 +2,11 @@ use std::{any::TypeId, collections::HashMap};
 
 use crate::{
     apis::{
-        component_spec::ComponentSpec,
         fn_ptr::FnArchtypeRemoveEntity,
         identifies::XynokEcsError,
-        params::{ArchetypeTakeAndWriteComponentParams, ChunkTakeComponentParams, EntityInChunkIndices, EntityIndices, ResultTakeAndWrite},
-        swapped_row::SwappedRow,
+        params::{
+            ArchetypeTakeAndWriteComponentParams, ChunkTakeComponentParams, ComponentSpec, EntityInChunkIndices, EntityIndices, ResultTakeAndWrite, SwappedRow,
+        },
         traits::TArchetype,
     },
     archetype::entity_to_chunk::EntityToChunk,
@@ -166,7 +166,7 @@ impl Archetype
                     return Err(e);
                 }
             };
-            match T::write_at(params.dst_layout, chunk, idx_in_chunk, params.src_e.e, params.val)
+            match T::write_at(params.dst_layout, chunk, idx_in_chunk, params.src_e.e, params.write_val)
             {
                 Ok(_) =>
                 {}
@@ -184,11 +184,11 @@ impl Archetype
         }
 
         let result = ResultTakeAndWrite {
-            new_e_indices: EntityInChunkIndices {
+            new_indices_took: EntityInChunkIndices {
                 chunk_idx:    free_chunk_idx,
                 idx_in_chunk: idx_in_chunk,
             },
-            swapped_e:     swapped_row_at_src_chunk,
+            swapped_e:        swapped_row_at_src_chunk,
         };
         Ok(result)
     }

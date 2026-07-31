@@ -5,9 +5,7 @@ use std::{
 
 use crate::{
     apis::{
-        component_spec::ComponentSpec,
-        params::{ArchetypeTakeAndWriteComponentParams, EntityInChunkIndices, EntityIndices},
-        swapped_row::{self, SwappedRow},
+        params::{ArchetypeTakeAndWriteComponentParams, ComponentSpec, EntityInChunkIndices, EntityIndices, SwappedRow},
         traits::TArchetype,
     },
     archetype::Archetype,
@@ -191,7 +189,7 @@ impl World
             src_layout:      &src_arch_spec.layout,
             dst_layout:      &target_arch_spec.layout,
             component_specs: &self.component_counter,
-            val:             val,
+            write_val:       val,
         };
         let take_and_write_result = match target_arch_spec.arch.take_and_write_from(params)
         {
@@ -202,7 +200,7 @@ impl World
         {
             self.update_entity_indices(swapped_row);
         }
-        self.update_entity_spec(e, target_arch_id, take_and_write_result.new_e_indices);
+        self.update_entity_spec(e, target_arch_id, take_and_write_result.new_indices_took);
     }
 
     #[track_caller]
