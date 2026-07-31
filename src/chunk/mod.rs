@@ -46,7 +46,7 @@ impl Chunk
 
     pub fn is_full(&self) -> bool
     {
-        self.len() < self.max_len
+        self.len() >= self.max_len
     }
     pub fn is_empty(&self) -> bool
     {
@@ -127,25 +127,39 @@ impl Chunk
             for (k, src_col_des) in params.src_layout.component_col_descriptors.iter()
             {
                 let spec = params.component_specs.get(k).unwrap();
-                let dest_col_des = params.dst_layout.component_col_descriptors.get(k).unwrap();
                 let item_size = spec.descriptor.byte_size;
                 let src_slot = params.src_chunk.ptr().add(src_col_des.offset).add(params.from * item_size);
-                let dst_slot = self.ptr().add(dest_col_des.offset).add(params.to * item_size);
+                let src_last_val = params.src_chunk.ptr.add(src_col_des.offset).add(last * item_size);
+
+                // when removing a component, the dst often won't have all the components from the src
+                let dst_col_des = match params.dst_layout.component_col_descriptors.get(k)
+                {
+                    Some(r) => r,
+                    None =>
+                    {
+                        if !is_last
+                        {
+                            std::ptr::copy_nonoverlapping(src_last_val, src_slot, item_size);
+                        }
+                        continue;
+                    }
+                };
+
+                let dst_slot = self.ptr().add(dst_col_des.offset).add(params.to * item_size);
                 std::ptr::copy_nonoverlapping(src_slot, dst_slot, item_size);
 
                 if !is_last
                 {
-                    let last_val = params.src_chunk.ptr.add(src_col_des.offset).add(last * item_size);
-                    std::ptr::copy_nonoverlapping(last_val, src_slot, item_size);
+                    std::ptr::copy_nonoverlapping(src_last_val, src_slot, item_size);
                 }
             }
             let src_e = params.src_chunk.get_entity_uncheck_mut(params.src_layout, params.from);
-            let dst_e = self.get_entity_uncheck_mut(params.src_layout, params.to);
+            let dst_e = self.get_entity_uncheck_mut(params.dst_layout, params.to);
             *dst_e = *src_e;
             *src_e = match is_last
             {
                 true => Entity::NULL,
-                false => *self.get_entity_uncheck(params.src_layout, last),
+                false => *params.src_chunk.get_entity_uncheck(params.src_layout, last),
             };
         }
 
@@ -154,13 +168,15 @@ impl Chunk
             return Ok(None);
         }
 
-        Ok(Some(unsafe {
+        let swapped = unsafe {
             SwappedRow {
-                e:    *self.get_entity_uncheck(params.src_layout, last),
+                // get the entity from the `src.from` because we already swapped it
+                e:    *params.src_chunk.get_entity_uncheck(params.src_layout, params.from),
                 from: last,
                 to:   params.from,
             }
-        }))
+        };
+        Ok(Some(swapped))
     }
     pub(crate) unsafe fn swap_remove_at(
         &mut self,
@@ -266,6 +282,32 @@ impl Chunk
             let slot = (col_ptr as *mut T).add(row);
             Ok(slot.read())
         }
+    }
+
+    pub(crate) fn dispose(&mut self, layout: &ChunkLayout, component_specs: &HashMap<TypeId, ComponentSpec>)
+    {
+        for (k, des) in layout.component_col_descriptors.iter()
+        {
+            if let Some(spec) = component_specs.get(k)
+            {
+                let mut counter = 0usize;
+                while counter < self.len()
+                {
+                    let slot = unsafe { self.ptr().add(des.offset).add(counter * spec.descriptor.byte_size) };
+                    (spec.descriptor.fn_drop)(slot);
+                    counter += 1;
+                }
+            }
+        }
+
+        let alloc_layout = layout.alloc_layout;
+        if alloc_layout.size() != 0
+        {
+            unsafe {
+                std::alloc::dealloc(self.ptr, alloc_layout);
+            }
+        }
+        self.len = 0;
     }
 }
 impl Chunk

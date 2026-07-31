@@ -1,4 +1,7 @@
-use std::{any::TypeId, collections::HashMap};
+use std::{
+    any::TypeId,
+    collections::{HashMap, HashSet},
+};
 
 use crate::{
     apis::{
@@ -22,8 +25,9 @@ mod variant;
 
 pub struct Archetype
 {
-    chunks:      Vec<Chunk>,
-    free_chunks: Queue<usize>,
+    chunks:             Vec<Chunk>,
+    free_chunks:        Queue<usize>,
+    free_chunks_stored: HashSet<usize>,
 }
 
 impl Archetype
@@ -31,8 +35,9 @@ impl Archetype
     pub fn new() -> Self
     {
         Self {
-            chunks:      Vec::with_capacity(16),
-            free_chunks: Queue::with_capacity(8),
+            chunks:             Vec::with_capacity(16),
+            free_chunks:        Queue::with_capacity(8),
+            free_chunks_stored: HashSet::with_capacity(16),
         }
     }
 
@@ -42,35 +47,27 @@ impl Archetype
     /// Query-only wrappers (e.g. `Disabled<Hp>`, where `StorageType = Hp`) are therefore not writable.
     pub fn push<T: TArchetype + 'static>(&mut self, layout: &ChunkLayout, e: Entity, val: T) -> Result<EntityInChunkIndices, XynokEcsError>
     {
-        let free_chunk_idx = match self.free_chunks.dequeue()
-        {
-            Some(r) => r,
-            None =>
-            {
-                let new_chunk = Chunk::new(layout);
-                let idx = self.chunks.len();
-                self.chunks.push(new_chunk);
-                idx
-            }
-        };
+        let free_chunk_idx = self.take_a_free_chunk_idx(layout);
 
         let chunk = unsafe { self.chunks.get_unchecked_mut(free_chunk_idx) };
 
         let idx_in_chunk = unsafe {
             let idx_in_chunk = chunk.len();
-            match T::write_at(layout, chunk, idx_in_chunk, e, val)
+            match T::write_at(layout, chunk, idx_in_chunk, val)
             {
                 Ok(_) =>
                 {}
                 Err(e) => return Err(e),
             };
+            let dst_e = chunk.get_entity_uncheck_mut(layout, idx_in_chunk);
+            *dst_e = e;
             chunk.increase_len();
             idx_in_chunk
         };
 
         if !chunk.is_full()
         {
-            self.free_chunks.enqueue(free_chunk_idx);
+            self.cache_free_chunk(free_chunk_idx);
         }
 
         Ok(EntityInChunkIndices {
@@ -97,6 +94,7 @@ impl Archetype
         unsafe {
             chunk.decrease_len();
         }
+        self.cache_free_chunk(chunk_idx);
         Ok(swapped_row)
     }
 
@@ -105,17 +103,7 @@ impl Archetype
     pub fn take_and_write_from<T: TArchetype + 'static>(&mut self, params: ArchetypeTakeAndWriteComponentParams<T>)
         -> Result<ResultTakeAndWrite, XynokEcsError>
     {
-        let free_chunk_idx = match self.free_chunks.dequeue()
-        {
-            Some(r) => r,
-            None =>
-            {
-                let new_chunk = Chunk::new(params.dst_layout);
-                let idx = self.chunks.len();
-                self.chunks.push(new_chunk);
-                idx
-            }
-        };
+        let free_chunk_idx = self.take_a_free_chunk_idx(params.dst_layout);
 
         let chunk = unsafe { self.chunks.get_unchecked_mut(free_chunk_idx) };
 
@@ -140,16 +128,17 @@ impl Archetype
                 }
             };
 
-            T::write_at(params.dst_layout, chunk, idx_in_chunk, params.src_e.e, params.write_val)?;
+            T::write_at(params.dst_layout, chunk, idx_in_chunk, params.write_val)?;
 
             chunk.increase_len();
             src_chunk.decrease_len();
+            params.src_arch.cache_free_chunk(params.src_e.chunk_idx);
             (idx_in_chunk, swapped_row)
         };
 
         if !chunk.is_full()
         {
-            self.free_chunks.enqueue(free_chunk_idx);
+            self.cache_free_chunk(free_chunk_idx);
         }
 
         let result = ResultTakeAndWrite {
@@ -166,17 +155,7 @@ impl Archetype
         params: ArchetypeTakeAndRemoveComponentParams<T>,
     ) -> Result<ResultTakeAndRemove<T>, XynokEcsError>
     {
-        let free_chunk_idx = match self.free_chunks.dequeue()
-        {
-            Some(r) => r,
-            None =>
-            {
-                let new_chunk = Chunk::new(params.dst_layout);
-                let idx = self.chunks.len();
-                self.chunks.push(new_chunk);
-                idx
-            }
-        };
+        let free_chunk_idx = self.take_a_free_chunk_idx(params.dst_layout);
 
         let chunk = unsafe { self.chunks.get_unchecked_mut(free_chunk_idx) };
 
@@ -184,6 +163,10 @@ impl Archetype
             let idx_in_chunk = chunk.len();
 
             let src_chunk = params.src_arch.chunks.get_unchecked_mut(params.src_e.chunk_idx);
+
+            // we must get T first to avoid it being overwritten when chunk.take_from is called
+            let taken = T::take_from(params.src_layout, src_chunk, params.src_e.idx_in_chunk)?;
+
             let swapped_row = match chunk.take_from(ChunkTakeComponentParams {
                 e:               params.src_e.e,
                 from:            params.src_e.idx_in_chunk,
@@ -200,16 +183,16 @@ impl Archetype
                     return Err(e);
                 }
             };
-            let taken = T::take_from(params.dst_layout, src_chunk, params.src_e.idx_in_chunk)?;
 
             chunk.increase_len();
             src_chunk.decrease_len();
+            params.src_arch.cache_free_chunk(params.src_e.chunk_idx);
             (idx_in_chunk, swapped_row, taken)
         };
 
         if !chunk.is_full()
         {
-            self.free_chunks.enqueue(free_chunk_idx);
+            self.cache_free_chunk(free_chunk_idx);
         }
 
         let result = ResultTakeAndRemove {
@@ -221,5 +204,54 @@ impl Archetype
             val:              taken,
         };
         Ok(result)
+    }
+}
+impl Archetype
+{
+    pub(crate) fn dispose(&mut self, layout: &ChunkLayout, component_specs: &HashMap<TypeId, ComponentSpec>)
+    {
+        for c in self.chunks.iter_mut()
+        {
+            c.dispose(layout, component_specs);
+        }
+    }
+}
+impl Archetype
+{
+    fn take_a_free_chunk_idx(&mut self, layout: &ChunkLayout) -> usize
+    {
+        if let Some(free_idx) = self.free_chunks.dequeue()
+        {
+            self.free_chunks_stored.remove(&free_idx);
+            return free_idx;
+        }
+        let new_chunk = Chunk::new(layout);
+        let idx = self.chunks.len();
+        self.chunks.push(new_chunk);
+        idx
+    }
+    fn cache_free_chunk(&mut self, chunk_idx: usize)
+    {
+        if !self.free_chunks_stored.contains(&chunk_idx)
+        {
+            self.free_chunks_stored.insert(chunk_idx);
+            self.free_chunks.enqueue(chunk_idx);
+        }
+    }
+}
+#[cfg(test)]
+impl Archetype
+{
+    pub(crate) fn chunk_count(&self) -> usize
+    {
+        self.chunks.len()
+    }
+    pub(crate) fn chunk_at(&self, chunk_idx: usize) -> &Chunk
+    {
+        &self.chunks[chunk_idx]
+    }
+    pub(crate) fn free_chunk_count(&self) -> usize
+    {
+        self.free_chunks.len()
     }
 }

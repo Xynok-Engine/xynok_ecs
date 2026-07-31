@@ -27,6 +27,9 @@ mod temp_allocation;
 mod entity_spec;
 mod arch_spec;
 
+#[cfg(test)]
+mod tests;
+
 pub struct World
 {
     archetypes:               HashMap<usize, ArchetypeSpec>,
@@ -58,6 +61,16 @@ impl Default for World
             free_entities:            Queue::new(),
             temp_alloc:               WorldTempAllocation::new(),
             global_archetype_version: 1usize,
+        }
+    }
+}
+impl Drop for World
+{
+    fn drop(&mut self)
+    {
+        for arch in self.archetypes.values_mut()
+        {
+            arch.arch.dispose(&arch.layout, &self.component_counter);
         }
     }
 }
@@ -201,7 +214,7 @@ impl World
     }
 
     #[track_caller]
-    pub fn remove_component<T: TArchetype + 'static>(&mut self, e: Entity) -> Option<T>
+    pub fn remove_component<T: TArchetype + 'static>(&mut self, e: Entity) -> T
     {
         debug_assert!(self.exists(e), "{} does not exist to remove component {}", e, std::any::type_name::<T>());
         let (a_arch_id, a_chunk_idx, a_idx_in_chunk) = unsafe {
@@ -267,7 +280,7 @@ impl World
         }
         self.update_entity_spec(e, target_arch_id, result.new_indices_took);
 
-        todo!()
+        result.val
     }
 }
 
@@ -338,7 +351,7 @@ impl World
     {
         if let Some(free_idx) = self.free_entities.dequeue()
         {
-            let old_slot = unsafe { self.entities.get_unchecked(free_idx) };
+            let old_slot = unsafe { self.entities.get_unchecked_mut(free_idx) };
             let new_version = (old_slot.version() + 1).max(Entity::INITIALIZE_VERSION);
             return Entity::new(free_idx, new_version);
         };

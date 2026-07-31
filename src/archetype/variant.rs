@@ -13,7 +13,7 @@ impl<T: TComponent + 'static> TArchetype for T
     const QUERY_TYPE_IDS: &[std::any::TypeId] = &[std::any::TypeId::of::<T::QueryType>()];
     const STORAGE_TYPE_IDS: &[std::any::TypeId] = &[std::any::TypeId::of::<T::StorageType>()];
 
-    fn write_at(layout: &ChunkLayout, chunk: &mut crate::chunk::Chunk, write_idx: usize, e: Entity, val: Self) -> Result<(), XynokEcsError>
+    fn write_at(layout: &ChunkLayout, chunk: &mut crate::chunk::Chunk, write_idx: usize, val: Self) -> Result<(), XynokEcsError>
     {
         unsafe { chunk.write_at::<T>(layout, write_idx, val) }
     }
