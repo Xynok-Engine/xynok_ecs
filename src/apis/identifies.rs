@@ -40,6 +40,9 @@ pub enum XynokEcsError
 
     #[error("Duplicated component detected in this pair of Archetypes")]
     DuplicatedComponent,
+
+    #[error("Different Entity !")]
+    EntityIsNotTheSame,
 }
 // src: https://crates.io/crates/thiserror
 //#[derive(Error, Debug)]

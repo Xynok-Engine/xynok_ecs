@@ -9,9 +9,9 @@ pub struct Entity(u64);
 
 impl TComponent for Entity
 {
-    type StorageDataType = Self;
+    type StorageType = Self;
 
-    type QueryDataType = Self;
+    type QueryType = Self;
 
     const STORAGE_LOCATION: StorageLocation = StorageLocation::Chunk;
 }

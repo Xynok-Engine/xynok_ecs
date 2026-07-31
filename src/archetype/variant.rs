@@ -10,17 +10,16 @@ use crate::{
 impl<T: TComponent + 'static> TArchetype for T
 {
     const COMPONENT_DESCRIPTORS: &[crate::apis::ComponentDescriptor] = &[T::COMPONENT_DESCRIPTOR];
-
-    const QUERY_TYPE_IDS: &[std::any::TypeId] = &[std::any::TypeId::of::<T::QueryDataType>()];
-
-    const STORAGE_TYPE_IDS: &[std::any::TypeId] = &[std::any::TypeId::of::<T::StorageDataType>()];
+    const QUERY_TYPE_IDS: &[std::any::TypeId] = &[std::any::TypeId::of::<T::QueryType>()];
+    const STORAGE_TYPE_IDS: &[std::any::TypeId] = &[std::any::TypeId::of::<T::StorageType>()];
 
     fn write_at(layout: &ChunkLayout, chunk: &mut crate::chunk::Chunk, write_idx: usize, e: Entity, val: Self) -> Result<(), XynokEcsError>
     {
-        unsafe {
-            let e_slot = chunk.get_entity_uncheck_mut(layout, write_idx);
-            *e_slot = e;
-            chunk.write_at(layout, write_idx, val)
-        }
+        unsafe { chunk.write_at::<T>(layout, write_idx, val) }
+    }
+
+    fn take_from(layout: &ChunkLayout, chunk: &mut crate::chunk::Chunk, idx: usize) -> Result<Self, XynokEcsError>
+    {
+        unsafe { chunk.take_at::<T>(layout, idx) }
     }
 }

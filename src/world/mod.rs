@@ -1,11 +1,12 @@
 use std::{
     any::TypeId,
     collections::{HashMap, HashSet},
+    marker::PhantomData,
 };
 
 use crate::{
     apis::{
-        params::{ArchetypeTakeAndWriteComponentParams, ComponentSpec, EntityInChunkIndices, EntityIndices, SwappedRow},
+        params::{ArchetypeTakeAndRemoveComponentParams, ArchetypeTakeAndWriteComponentParams, ComponentSpec, EntityInChunkIndices, EntityIndices, SwappedRow},
         traits::TArchetype,
     },
     archetype::Archetype,
@@ -16,7 +17,7 @@ use crate::{
     entity::Entity,
     std::queue::Queue,
     world::{
-        arch_spec::{ArchetypeSpec, MergeArchetypeSpecParams},
+        arch_spec::{ArchetypeSpec, PairArchetypeSpecParams},
         entity_spec::EntitySpec,
         temp_allocation::WorldTempAllocation,
     },
@@ -109,9 +110,7 @@ impl World
             (spec.arch_id(), spec.chunk_idx(), spec.idx_in_chunk())
         };
         let arch = self.archetypes.get_mut(&arch_id).unwrap();
-        match arch
-            .arch
-            .remove_at(&arch.fn_remove_entity, &arch.layout, &self.component_counter, chunk_idx, idx_in_chunk)
+        match arch.arch.remove_at(&arch.layout, &self.component_counter, chunk_idx, idx_in_chunk)
         {
             Ok(r) =>
             {
@@ -142,7 +141,7 @@ impl World
             let has_any_component_duplicated = {
                 let a = self.archetypes.get(&a_arch_id).unwrap();
                 let b = self.archetypes.get(&b_arch_id).unwrap();
-                a.contains_component_of(b)
+                a.contains_any_component_of(b)
             };
             if has_any_component_duplicated
             {
@@ -173,8 +172,6 @@ impl World
         // put back
         self.temp_alloc.vec_usize = component_set;
 
-        let new_e = self.new_entity();
-
         let [src_arch_spec, target_arch_spec] = self.archetypes.get_disjoint_mut([&a_arch_id, &target_arch_id]);
         let (src_arch_spec, target_arch_spec) = (src_arch_spec.unwrap(), target_arch_spec.unwrap());
 
@@ -204,7 +201,74 @@ impl World
     }
 
     #[track_caller]
-    pub fn remove_component<T: TArchetype + 'static>(&mut self, e: Entity) {}
+    pub fn remove_component<T: TArchetype + 'static>(&mut self, e: Entity) -> Option<T>
+    {
+        debug_assert!(self.exists(e), "{} does not exist to remove component {}", e, std::any::type_name::<T>());
+        let (a_arch_id, a_chunk_idx, a_idx_in_chunk) = unsafe {
+            let e_spec = self.entities.get_unchecked(e.idx());
+            (e_spec.arch_id(), e_spec.chunk_idx(), e_spec.idx_in_chunk())
+        };
+        let b_arch_id = self.get_or_create_archetype_id::<T>();
+
+        #[cfg(debug_assertions)]
+        {
+            let contains_all_components = {
+                let a = self.archetypes.get(&a_arch_id).unwrap();
+                let b = self.archetypes.get(&b_arch_id).unwrap();
+                a.contains_all_components_of(b)
+            };
+            if !contains_all_components
+            {
+                panic!(
+                    "Cannot remove component `{}` for entity {}. Current it's components do not contain all being removed components.",
+                    std::any::type_name::<T>(),
+                    e
+                )
+            }
+        }
+        let mut component_set = std::mem::take(&mut self.temp_alloc.vec_usize);
+        component_set.clear();
+        self.append_archetype_component_id_of_to(a_arch_id, &mut component_set);
+        self.retain_archetype_component_id_of_to(b_arch_id, &mut component_set);
+        normalize_set(&mut component_set);
+        let target_arch_id = match self.component_set_counter.get(&component_set)
+        {
+            Some(r) => *r,
+            // create a new arch from these archetypes
+            None => self.create_archetype_id_for_set_of_a_exclude_b(&component_set, a_arch_id, b_arch_id),
+        };
+        // put back
+        self.temp_alloc.vec_usize = component_set;
+
+        let [src_arch_spec, target_arch_spec] = self.archetypes.get_disjoint_mut([&a_arch_id, &target_arch_id]);
+        let (src_arch_spec, target_arch_spec) = (src_arch_spec.unwrap(), target_arch_spec.unwrap());
+
+        let src_e_indices = EntityIndices {
+            e:            e,
+            chunk_idx:    a_chunk_idx,
+            idx_in_chunk: a_idx_in_chunk,
+        };
+        let params = ArchetypeTakeAndRemoveComponentParams::<T> {
+            src_e:           src_e_indices,
+            src_arch:        &mut src_arch_spec.arch,
+            src_layout:      &src_arch_spec.layout,
+            dst_layout:      &target_arch_spec.layout,
+            component_specs: &self.component_counter,
+            phantom:         PhantomData,
+        };
+        let result = match target_arch_spec.arch.take_and_remove_from(params)
+        {
+            Ok(r) => r,
+            Err(e) => panic!("{}", e),
+        };
+        if let Some(swapped_row) = result.swapped_e
+        {
+            self.update_entity_indices(swapped_row);
+        }
+        self.update_entity_spec(e, target_arch_id, result.new_indices_took);
+
+        todo!()
+    }
 }
 
 impl World
@@ -222,6 +286,25 @@ impl World
             e_spec.errase();
         };
     }
+    #[track_caller]
+    fn retain_archetype_component_id_of_to(&self, arch_id: usize, component_set: &mut Vec<usize>)
+    {
+        let arch_spec = match self.archetypes.get(&arch_id)
+        {
+            Some(r) => r,
+            None => panic!("Archetype `{arch_id}` not found to retain component id !"),
+        };
+
+        for type_id in arch_spec.layout.component_col_descriptors.keys()
+        {
+            match self.component_counter.get(type_id)
+            {
+                Some(component_spec) => component_set.retain(|e| *e != component_spec.id),
+                None => panic!("Archetype `{arch_id}` has an unregistered component to check id !"),
+            }
+        }
+    }
+
     #[track_caller]
     fn append_archetype_component_id_of_to(&self, arch_id: usize, component_set: &mut Vec<usize>)
     {
@@ -263,9 +346,7 @@ impl World
         self.entities.push(EntitySpec::new_empty_slot(e.version()));
         e
     }
-}
-impl World
-{
+
     fn get_archetype_id<T: TArchetype + 'static>(&self) -> Option<usize>
     {
         self.archetype_counter.get(&std::any::TypeId::of::<T>()).copied()
@@ -286,9 +367,7 @@ impl World
             None => None,
         }
     }
-}
-impl World
-{
+
     #[track_caller]
     fn get_or_create_archetype_spec_mut<T: TArchetype + 'static>(&mut self) -> (usize, &mut ArchetypeSpec)
     {
@@ -351,11 +430,9 @@ impl World
             }
         }
     }
-
-    #[track_caller]
-    fn create_archetype_id_from_set_of(&mut self, component_set: &[usize], a_arch_id: usize, b_arch_id: usize) -> usize
+    fn create_archetype_id_for_set_of_a_exclude_b(&mut self, component_set: &[usize], a_arch_id: usize, b_arch_id: usize) -> usize
     {
-        let merge_arch_params = MergeArchetypeSpecParams {
+        let merge_arch_params = PairArchetypeSpecParams {
             a:                              self.archetypes.get(&a_arch_id).unwrap(),
             b:                              self.archetypes.get(&b_arch_id).unwrap(),
             component_specs:                &self.component_counter,
@@ -363,7 +440,28 @@ impl World
             temp_comp_des:                  &mut self.temp_alloc.comp_descriptors,
             component_col_descriptors_temp: &mut self.temp_alloc.col_descriptors,
         };
-        let new_arch = match ArchetypeSpec::new_from(merge_arch_params)
+        let new_arch = match ArchetypeSpec::new_from_a_exclude_b_components(merge_arch_params)
+        {
+            Ok(r) => r,
+            Err(e) => panic!("{}", e),
+        };
+        let arch_id = self.component_set_counter.len();
+        self.component_set_counter.insert(component_set.to_vec(), arch_id);
+        self.archetypes.insert(arch_id, new_arch);
+        self.structure_changed();
+        arch_id
+    }
+    fn create_archetype_id_from_set_of(&mut self, component_set: &[usize], a_arch_id: usize, b_arch_id: usize) -> usize
+    {
+        let merge_arch_params = PairArchetypeSpecParams {
+            a:                              self.archetypes.get(&a_arch_id).unwrap(),
+            b:                              self.archetypes.get(&b_arch_id).unwrap(),
+            component_specs:                &self.component_counter,
+            temp_tys:                       &mut self.temp_alloc.hashset_type_ids,
+            temp_comp_des:                  &mut self.temp_alloc.comp_descriptors,
+            component_col_descriptors_temp: &mut self.temp_alloc.col_descriptors,
+        };
+        let new_arch = match ArchetypeSpec::new_from_pair(merge_arch_params)
         {
             Ok(r) => r,
             Err(e) => panic!("{}", e),
@@ -386,7 +484,7 @@ impl World
             Ok(r) => r,
             Err(e) => panic!("Create Archetype `{}` Failed: {e}", std::any::type_name::<T>()),
         };
-        let arch_spec = ArchetypeSpec::new::<T>(layout);
+        let arch_spec = ArchetypeSpec::new(layout);
         self.archetypes.insert(id, arch_spec);
     }
 

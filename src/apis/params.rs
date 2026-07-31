@@ -1,4 +1,4 @@
-use std::{any::TypeId, collections::HashMap};
+use std::{any::TypeId, collections::HashMap, marker::PhantomData};
 
 use crate::{
     apis::{traits::TArchetype, ComponentDescriptor},
@@ -45,11 +45,25 @@ pub struct ArchetypeTakeAndWriteComponentParams<'a, T: TArchetype + 'static>
     pub component_specs: &'a HashMap<TypeId, ComponentSpec>,
     pub write_val:       T,
 }
-
+pub struct ArchetypeTakeAndRemoveComponentParams<'a, T: TArchetype + 'static>
+{
+    pub src_e:           EntityIndices,
+    pub src_arch:        &'a mut Archetype,
+    pub src_layout:      &'a ChunkLayout,
+    pub dst_layout:      &'a ChunkLayout,
+    pub component_specs: &'a HashMap<TypeId, ComponentSpec>,
+    pub phantom:         PhantomData<T>,
+}
 pub struct ResultTakeAndWrite
 {
     pub new_indices_took: EntityInChunkIndices,
     pub swapped_e:        Option<SwappedRow>,
+}
+pub struct ResultTakeAndRemove<T: TArchetype + 'static>
+{
+    pub new_indices_took: EntityInChunkIndices,
+    pub swapped_e:        Option<SwappedRow>,
+    pub val:              T,
 }
 pub struct ChunkTakeComponentParams<'a>
 {

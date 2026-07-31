@@ -11,8 +11,8 @@ use crate::{
 };
 pub trait TComponent: Sized
 {
-    type StorageDataType: TComponent + 'static;
-    type QueryDataType: TComponent + 'static;
+    type QueryType: TComponent + 'static;
+    type StorageType: TComponent + 'static;
     const STORAGE_LOCATION: StorageLocation;
 }
 pub trait TComponentDescriptor
@@ -22,12 +22,12 @@ pub trait TComponentDescriptor
 impl<T: TComponent + 'static> TComponentDescriptor for T
 {
     const COMPONENT_DESCRIPTOR: ComponentDescriptor = ComponentDescriptor {
-        storage_type_id:  std::any::TypeId::of::<T::StorageDataType>(),
-        query_type_id:    std::any::TypeId::of::<T::QueryDataType>(),
-        byte_size:        std::mem::size_of::<T::StorageDataType>(),
-        align:            std::mem::align_of::<T::StorageDataType>(),
+        storage_type_id:  std::any::TypeId::of::<T::StorageType>(),
+        query_type_id:    std::any::TypeId::of::<T::QueryType>(),
+        byte_size:        std::mem::size_of::<T::StorageType>(),
+        align:            std::mem::align_of::<T::StorageType>(),
         storage_location: T::STORAGE_LOCATION,
-        fn_drop:          drop_glue::<T::StorageDataType>,
+        fn_drop:          drop_glue::<T::StorageType>,
     };
 }
 
@@ -39,29 +39,30 @@ fn drop_glue<T>(ptr: *mut u8)
     }
 }
 
-pub trait TArchetype
+pub trait TArchetype: Sized
 {
     const COMPONENT_DESCRIPTORS: &[ComponentDescriptor];
     const QUERY_TYPE_IDS: &[TypeId];
     const STORAGE_TYPE_IDS: &[TypeId];
 
     fn write_at(layout: &ChunkLayout, chunk: &mut Chunk, write_idx: usize, e: Entity, val: Self) -> Result<(), XynokEcsError>;
+    fn take_from(layout: &ChunkLayout, chunk: &mut Chunk, idx: usize) -> Result<Self, XynokEcsError>;
 
-    fn remove_at(
-        layout: &ChunkLayout,
-        component_specs: &HashMap<TypeId, ComponentSpec>,
-        chunk: &mut Chunk,
-        idx: usize,
-    ) -> Result<Option<SwappedRow>, XynokEcsError>
-    {
-        unsafe {
-            match chunk.swap_remove_at(layout, component_specs, idx)
-            {
-                Ok(r) => Ok(r),
-                Err(e) => Err(e),
-            }
-        }
-    }
+    //fn remove_at(
+    //    layout: &ChunkLayout,
+    //    component_specs: &HashMap<TypeId, ComponentSpec>,
+    //    chunk: &mut Chunk,
+    //    idx: usize,
+    //) -> Result<Option<SwappedRow>, XynokEcsError>
+    //{
+    //    unsafe {
+    //        match chunk.swap_remove_at(layout, component_specs, idx)
+    //        {
+    //            Ok(r) => Ok(r),
+    //            Err(e) => Err(e),
+    //        }
+    //    }
+    //}
 }
 
 pub trait TSystemParam {}

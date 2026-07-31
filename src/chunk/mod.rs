@@ -119,16 +119,8 @@ impl Chunk
 {
     /// Fetch data from another chunk and incorporate it into the current one
     /// Returns the swapped indices of an entity in the chunk that was taken and subsequently swapped
-    pub unsafe fn take_from(&mut self, params: ChunkTakeComponentParams) -> Result<Option<SwappedRow>, XynokEcsError>
+    pub(crate) unsafe fn take_from(&mut self, params: ChunkTakeComponentParams) -> Result<Option<SwappedRow>, XynokEcsError>
     {
-        if params.to >= self.len()
-        {
-            return Err(XynokEcsError::IdxIsOutOfChunkLen(params.to, self.len()));
-        }
-        if params.from >= params.src_chunk.len()
-        {
-            return Err(XynokEcsError::IdxIsOutOfChunkLen(params.from, params.src_chunk.len()));
-        }
         let last = params.src_chunk.len() - 1;
         let is_last = params.from == last;
         unsafe {
@@ -143,10 +135,18 @@ impl Chunk
 
                 if !is_last
                 {
-                    let last_val = self.ptr.add(src_col_des.offset).add(last * item_size);
+                    let last_val = params.src_chunk.ptr.add(src_col_des.offset).add(last * item_size);
                     std::ptr::copy_nonoverlapping(last_val, src_slot, item_size);
                 }
             }
+            let src_e = params.src_chunk.get_entity_uncheck_mut(params.src_layout, params.from);
+            let dst_e = self.get_entity_uncheck_mut(params.src_layout, params.to);
+            *dst_e = *src_e;
+            *src_e = match is_last
+            {
+                true => Entity::NULL,
+                false => *self.get_entity_uncheck(params.src_layout, last),
+            };
         }
 
         if is_last
@@ -162,7 +162,7 @@ impl Chunk
             }
         }))
     }
-    pub unsafe fn swap_remove_at(
+    pub(crate) unsafe fn swap_remove_at(
         &mut self,
         layout: &ChunkLayout,
         component_specs: &HashMap<TypeId, ComponentSpec>,
@@ -190,6 +190,12 @@ impl Chunk
                     std::ptr::copy_nonoverlapping(last_val, target_slot, item_size);
                 }
             }
+            let src_e = self.get_entity_uncheck_mut(layout, idx);
+            *src_e = match is_last
+            {
+                true => Entity::NULL,
+                false => *self.get_entity_uncheck(layout, last),
+            };
         }
 
         if is_last
@@ -253,19 +259,27 @@ impl Chunk
         }
         Ok(())
     }
+    pub(crate) unsafe fn take_at<T: TComponent + 'static>(&mut self, layout: &ChunkLayout, row: usize) -> Result<T, XynokEcsError>
+    {
+        let col_ptr = self.components_ptr::<T>(layout)?;
+        unsafe {
+            let slot = (col_ptr as *mut T).add(row);
+            Ok(slot.read())
+        }
+    }
 }
 impl Chunk
 {
-    pub(crate) fn components_ptr<T: TComponent + 'static>(&self, layout: &ChunkLayout) -> Result<*mut u8, XynokEcsError>
+    fn components_ptr<T: TComponent + 'static>(&self, layout: &ChunkLayout) -> Result<*mut u8, XynokEcsError>
     {
-        let col_des = match layout.component_col_descriptors.get(&std::any::TypeId::of::<T::StorageDataType>())
+        let col_des = match layout.component_col_descriptors.get(&std::any::TypeId::of::<T::StorageType>())
         {
             Some(des) => des,
             None =>
             {
                 return Err(XynokEcsError::ChunkDoesNotContainComponent(
-                    std::any::type_name::<T::QueryDataType>(),
-                    std::any::type_name::<T::StorageDataType>(),
+                    std::any::type_name::<T::QueryType>(),
+                    std::any::type_name::<T::StorageType>(),
                 ));
             }
         };
