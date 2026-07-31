@@ -6,6 +6,7 @@ use std::{
 use crate::{
     apis::{
         component_spec::ComponentSpec,
+        params::{ArchetypeTakeAndWriteComponentParams, EntityInChunkIndices, EntityIndices},
         swapped_row::{self, SwappedRow},
         traits::TArchetype,
     },
@@ -16,7 +17,11 @@ use crate::{
     },
     entity::Entity,
     std::queue::Queue,
-    world::{arch_spec::ArchetypeSpec, entity_spec::EntitySpec, temp_allocation::WorldTempAllocation},
+    world::{
+        arch_spec::{ArchetypeSpec, MergeArchetypeSpecParams},
+        entity_spec::EntitySpec,
+        temp_allocation::WorldTempAllocation,
+    },
 };
 
 mod temp_allocation;
@@ -70,14 +75,13 @@ impl World
         let new_e = self.new_entity();
         let (arch_id, arch_spec) = self.get_or_create_archetype_spec_mut::<T>();
 
-        let arch_to_chunk_spec = match arch_spec.arch.push(&arch_spec.layout, new_e, val)
+        let entity_chunk_indices = match arch_spec.arch.push(&arch_spec.layout, new_e, val)
         {
             Ok(r) => r,
             Err(e) => panic!("{}", e),
         };
 
-        let entity_spec = unsafe { self.entities.get_unchecked_mut(new_e.idx()) };
-        *entity_spec = EntitySpec::new(arch_id, arch_to_chunk_spec.chunk_idx, arch_to_chunk_spec.idx_in_chunk, new_e.version());
+        self.update_entity_spec(new_e, arch_id, entity_chunk_indices);
         new_e
     }
 
@@ -121,11 +125,7 @@ impl World
             Err(e) => panic!("{}", e),
         };
 
-        self.free_entities.enqueue(e.idx());
-        unsafe {
-            let e_spec = self.entities.get_unchecked_mut(e.idx());
-            e_spec.errase();
-        };
+        self.erase_entity(e);
     }
 
     #[track_caller]
@@ -133,28 +133,76 @@ impl World
     {
         debug_assert!(self.exists(e), "{} does not exist to add component !", e);
 
-        let a_arch_id = unsafe { self.entities.get_unchecked(e.idx()).arch_id() };
+        let (a_arch_id, a_chunk_idx, a_idx_in_chunk) = unsafe {
+            let e_spec = self.entities.get_unchecked(e.idx());
+            (e_spec.arch_id(), e_spec.chunk_idx(), e_spec.idx_in_chunk())
+        };
         let b_arch_id = self.get_or_create_archetype_id::<T>();
+
+        #[cfg(debug_assertions)]
+        {
+            let has_any_component_duplicated = {
+                let a = self.archetypes.get(&a_arch_id).unwrap();
+                let b = self.archetypes.get(&b_arch_id).unwrap();
+                a.contains_component_of(b)
+            };
+            if has_any_component_duplicated
+            {
+                panic!(
+                    "Cannot add component `{}` for entity {}. A component with this type already exists. 
+                    When using add_component(), you can only add components that are not already present. 
+                    If you want to add a duplicate component, use merge_component() instead.",
+                    std::any::type_name::<T>(),
+                    e
+                )
+            }
+        }
 
         let mut component_set = std::mem::take(&mut self.temp_alloc.vec_usize);
         component_set.clear();
+
         self.append_archetype_component_id_of_to(a_arch_id, &mut component_set);
         self.append_archetype_component_id_of_to(b_arch_id, &mut component_set);
+
         normalize_set(&mut component_set);
 
         let target_arch_id = match self.component_set_counter.get(&component_set)
         {
-            Some(r) => r,
-            None =>
-            {
-                panic!(
-                    "Target archetype after adding `{}` was not registered. Please register it before adding or removing any components from another archetype to become it.",
-                    std::any::type_name::<T>()
-                );
-            }
+            Some(r) => *r,
+            // create a new arch from these archetypes
+            None => self.create_archetype_id_from_set_of(&component_set, a_arch_id, b_arch_id),
         };
-        let target_arch_spec = self.archetypes.get_mut(target_arch_id).unwrap();
+        // put back
         self.temp_alloc.vec_usize = component_set;
+
+        let new_e = self.new_entity();
+
+        let [src_arch_spec, target_arch_spec] = self.archetypes.get_disjoint_mut([&a_arch_id, &target_arch_id]);
+        let (src_arch_spec, target_arch_spec) = (src_arch_spec.unwrap(), target_arch_spec.unwrap());
+
+        let src_e_indices = EntityIndices {
+            e:            e,
+            chunk_idx:    a_chunk_idx,
+            idx_in_chunk: a_idx_in_chunk,
+        };
+        let params = ArchetypeTakeAndWriteComponentParams {
+            src_e:           src_e_indices,
+            src_arch:        &mut src_arch_spec.arch,
+            src_layout:      &src_arch_spec.layout,
+            dst_layout:      &target_arch_spec.layout,
+            component_specs: &self.component_counter,
+            val:             val,
+        };
+        let take_and_write_result = match target_arch_spec.arch.take_and_write_from(params)
+        {
+            Ok(r) => r,
+            Err(e) => panic!("{}", e),
+        };
+        if let Some(swapped_row) = take_and_write_result.swapped_e
+        {
+            self.update_entity_indices(swapped_row);
+        }
+        self.update_entity_spec(e, target_arch_id, take_and_write_result.new_e_indices);
     }
 
     #[track_caller]
@@ -163,6 +211,19 @@ impl World
 
 impl World
 {
+    fn update_entity_spec(&mut self, e: Entity, arch_id: usize, indices: EntityInChunkIndices)
+    {
+        let entity_spec = unsafe { self.entities.get_unchecked_mut(e.idx()) };
+        *entity_spec = EntitySpec::new(arch_id, indices.chunk_idx, indices.idx_in_chunk, e.version());
+    }
+    fn erase_entity(&mut self, e: Entity)
+    {
+        self.free_entities.enqueue(e.idx());
+        unsafe {
+            let e_spec = self.entities.get_unchecked_mut(e.idx());
+            e_spec.errase();
+        };
+    }
     #[track_caller]
     fn append_archetype_component_id_of_to(&self, arch_id: usize, component_set: &mut Vec<usize>)
     {
@@ -265,8 +326,8 @@ impl World
             self.component_counter.insert(
                 des.storage_type_id,
                 ComponentSpec {
-                    id:      id,
-                    fn_drop: des.fn_drop,
+                    id:         id,
+                    descriptor: des.clone(),
                 },
             );
             component_set.push(id);
@@ -293,6 +354,28 @@ impl World
         }
     }
 
+    #[track_caller]
+    fn create_archetype_id_from_set_of(&mut self, component_set: &[usize], a_arch_id: usize, b_arch_id: usize) -> usize
+    {
+        let merge_arch_params = MergeArchetypeSpecParams {
+            a:                              self.archetypes.get(&a_arch_id).unwrap(),
+            b:                              self.archetypes.get(&b_arch_id).unwrap(),
+            component_specs:                &self.component_counter,
+            temp_tys:                       &mut self.temp_alloc.hashset_type_ids,
+            temp_comp_des:                  &mut self.temp_alloc.comp_descriptors,
+            component_col_descriptors_temp: &mut self.temp_alloc.col_descriptors,
+        };
+        let new_arch = match ArchetypeSpec::new_from(merge_arch_params)
+        {
+            Ok(r) => r,
+            Err(e) => panic!("{}", e),
+        };
+        let arch_id = self.component_set_counter.len();
+        self.component_set_counter.insert(component_set.to_vec(), arch_id);
+        self.archetypes.insert(arch_id, new_arch);
+        self.structure_changed();
+        arch_id
+    }
     #[track_caller]
     fn create_archetype<T: TArchetype + 'static>(&mut self, id: usize)
     {

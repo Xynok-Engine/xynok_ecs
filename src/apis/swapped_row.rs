@@ -1,6 +1,6 @@
 use crate::entity::Entity;
 
-#[derive(Hash, PartialEq, Eq, Clone, Copy)]
+#[derive(PartialEq, Eq, Clone, Copy)]
 pub struct SwappedRow
 {
     pub e:    Entity,

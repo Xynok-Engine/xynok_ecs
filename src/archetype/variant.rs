@@ -15,10 +15,9 @@ impl<T: TComponent + 'static> TArchetype for T
 
     const STORAGE_TYPE_IDS: &[std::any::TypeId] = &[std::any::TypeId::of::<T::StorageDataType>()];
 
-    fn push_to(layout: &ChunkLayout, chunk: &mut crate::chunk::Chunk, e: Entity, val: Self) -> Result<(), XynokEcsError>
+    fn write_at(layout: &ChunkLayout, chunk: &mut crate::chunk::Chunk, write_idx: usize, e: Entity, val: Self) -> Result<(), XynokEcsError>
     {
         unsafe {
-            let write_idx = chunk.len();
             let e_slot = chunk.get_entity_uncheck_mut(layout, write_idx);
             *e_slot = e;
             chunk.write_at(layout, write_idx, val)

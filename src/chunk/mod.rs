@@ -4,6 +4,7 @@ use crate::{
     apis::{
         component_spec::{self, ComponentSpec},
         identifies::XynokEcsError,
+        params::ChunkTakeComponentParams,
         swapped_row::SwappedRow,
         traits::TComponent,
     },
@@ -118,8 +119,52 @@ impl Chunk
 
 impl Chunk
 {
-    #[track_caller]
-    pub unsafe fn remove_at(
+    /// Fetch data from another chunk and incorporate it into the current one
+    /// Returns the swapped indices of an entity in the chunk that was taken and subsequently swapped
+    pub unsafe fn take_from(&mut self, params: ChunkTakeComponentParams) -> Result<Option<SwappedRow>, XynokEcsError>
+    {
+        if params.to >= self.len()
+        {
+            return Err(XynokEcsError::IdxIsOutOfChunkLen(params.to, self.len()));
+        }
+        if params.from >= params.src_chunk.len()
+        {
+            return Err(XynokEcsError::IdxIsOutOfChunkLen(params.from, params.src_chunk.len()));
+        }
+        let last = params.src_chunk.len() - 1;
+        let is_last = params.from == last;
+        unsafe {
+            for (k, src_col_des) in params.src_layout.component_col_descriptors.iter()
+            {
+                let spec = params.component_specs.get(k).unwrap();
+                let dest_col_des = params.dst_layout.component_col_descriptors.get(k).unwrap();
+                let item_size = spec.descriptor.byte_size;
+                let src_slot = params.src_chunk.ptr().add(src_col_des.offset).add(params.from * item_size);
+                let dst_slot = self.ptr().add(dest_col_des.offset).add(params.to * item_size);
+                std::ptr::copy_nonoverlapping(src_slot, dst_slot, item_size);
+
+                if !is_last
+                {
+                    let last_val = self.ptr.add(src_col_des.offset).add(last * item_size);
+                    std::ptr::copy_nonoverlapping(last_val, src_slot, item_size);
+                }
+            }
+        }
+
+        if is_last
+        {
+            return Ok(None);
+        }
+
+        Ok(Some(unsafe {
+            SwappedRow {
+                e:    *self.get_entity_uncheck(params.src_layout, last),
+                from: last,
+                to:   params.from,
+            }
+        }))
+    }
+    pub unsafe fn swap_remove_at(
         &mut self,
         layout: &ChunkLayout,
         component_specs: &HashMap<TypeId, ComponentSpec>,
@@ -134,28 +179,19 @@ impl Chunk
         let last = self.len - 1;
         let is_last = idx == last;
         unsafe {
-            if is_last
+            for (k, des) in layout.component_col_descriptors.iter()
             {
-                for (k, des) in layout.component_col_descriptors.iter()
-                {
-                    let target_slot = self.ptr.add(des.offset).add(idx * des.item_size);
-                    let spec = component_specs.get(k).unwrap();
-                    (spec.fn_drop)(target_slot);
-                }
-            }
-            else
-            {
-                for (k, des) in layout.component_col_descriptors.iter()
-                {
-                    let target_slot = self.ptr.add(des.offset).add(idx * des.item_size);
-                    let spec = component_specs.get(k).unwrap();
-                    (spec.fn_drop)(target_slot);
+                let spec = component_specs.get(k).unwrap();
+                let item_size = spec.descriptor.byte_size;
+                let target_slot = self.ptr.add(des.offset).add(idx * item_size);
+                (spec.descriptor.fn_drop)(target_slot);
 
-                    let last_val = self.ptr.add(des.offset).add(last * des.item_size);
-                    std::ptr::copy_nonoverlapping(last_val, target_slot, des.item_size);
+                if !is_last
+                {
+                    let last_val = self.ptr.add(des.offset).add(last * item_size);
+                    std::ptr::copy_nonoverlapping(last_val, target_slot, item_size);
                 }
             }
-            self.decrease_len();
         }
 
         if is_last

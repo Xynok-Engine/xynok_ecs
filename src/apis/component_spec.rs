@@ -1,7 +1,7 @@
-use crate::apis::fn_ptr::FnComponentDropItSelf;
+use crate::apis::{fn_ptr::FnComponentDropItSelf, ComponentDescriptor};
 
 pub struct ComponentSpec
 {
-    pub id:      usize,
-    pub fn_drop: FnComponentDropItSelf,
+    pub id:         usize,
+    pub descriptor: ComponentDescriptor,
 }

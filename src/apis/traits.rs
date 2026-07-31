@@ -46,7 +46,7 @@ pub trait TArchetype
     const QUERY_TYPE_IDS: &[TypeId];
     const STORAGE_TYPE_IDS: &[TypeId];
 
-    fn push_to(layout: &ChunkLayout, chunk: &mut Chunk, e: Entity, val: Self) -> Result<(), XynokEcsError>;
+    fn write_at(layout: &ChunkLayout, chunk: &mut Chunk, write_idx: usize, e: Entity, val: Self) -> Result<(), XynokEcsError>;
 
     fn remove_at(
         layout: &ChunkLayout,
@@ -56,7 +56,7 @@ pub trait TArchetype
     ) -> Result<Option<SwappedRow>, XynokEcsError>
     {
         unsafe {
-            match chunk.remove_at(layout, component_specs, idx)
+            match chunk.swap_remove_at(layout, component_specs, idx)
             {
                 Ok(r) => Ok(r),
                 Err(e) => Err(e),

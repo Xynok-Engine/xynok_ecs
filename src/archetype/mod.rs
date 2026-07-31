@@ -1,7 +1,14 @@
 use std::{any::TypeId, collections::HashMap};
 
 use crate::{
-    apis::{component_spec::ComponentSpec, fn_ptr::FnArchtypeRemoveEntity, identifies::XynokEcsError, swapped_row::SwappedRow, traits::TArchetype},
+    apis::{
+        component_spec::ComponentSpec,
+        fn_ptr::FnArchtypeRemoveEntity,
+        identifies::XynokEcsError,
+        params::{ArchetypeTakeAndWriteComponentParams, ChunkTakeComponentParams, EntityInChunkIndices, EntityIndices, ResultTakeAndWrite},
+        swapped_row::SwappedRow,
+        traits::TArchetype,
+    },
     archetype::entity_to_chunk::EntityToChunk,
     chunk::{
         Chunk,
@@ -20,12 +27,6 @@ pub struct Archetype
     free_chunks: Queue<usize>,
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct EntityInChunkIndices
-{
-    pub chunk_idx:    usize,
-    pub idx_in_chunk: usize,
-}
 impl Archetype
 {
     pub fn new() -> Self
@@ -36,6 +37,7 @@ impl Archetype
         }
     }
 
+    /// Write to a free chunk and increment its length
     pub fn push<T: TArchetype + 'static>(&mut self, layout: &ChunkLayout, e: Entity, val: T) -> Result<EntityInChunkIndices, XynokEcsError>
     {
         let free_chunk_idx = match self.free_chunks.dequeue()
@@ -53,13 +55,13 @@ impl Archetype
         let chunk = unsafe { self.chunks.get_unchecked_mut(free_chunk_idx) };
 
         let idx_in_chunk = unsafe {
-            match T::push_to(layout, chunk, e, val)
+            let idx_in_chunk = chunk.len();
+            match T::write_at(layout, chunk, idx_in_chunk, e, val)
             {
                 Ok(_) =>
                 {}
                 Err(e) => return Err(e),
             };
-            let idx_in_chunk = chunk.len();
             chunk.increase_len();
             idx_in_chunk
         };
@@ -121,6 +123,73 @@ impl Archetype
                 }
             }
         }
+        unsafe {
+            chunk.decrease_len();
+        }
         Ok(swapped_row)
+    }
+
+    pub fn take_and_write_from<T: TArchetype + 'static>(&mut self, params: ArchetypeTakeAndWriteComponentParams<T>)
+    -> Result<ResultTakeAndWrite, XynokEcsError>
+    {
+        let free_chunk_idx = match self.free_chunks.dequeue()
+        {
+            Some(r) => r,
+            None =>
+            {
+                let new_chunk = Chunk::new(params.dst_layout);
+                let idx = self.chunks.len();
+                self.chunks.push(new_chunk);
+                idx
+            }
+        };
+
+        let chunk = unsafe { self.chunks.get_unchecked_mut(free_chunk_idx) };
+
+        let (idx_in_chunk, swapped_row_at_src_chunk) = unsafe {
+            let idx_in_chunk = chunk.len();
+
+            let src_chunk = params.src_arch.chunks.get_unchecked_mut(params.src_e.chunk_idx);
+            let swapped_row = match chunk.take_from(ChunkTakeComponentParams {
+                e:               params.src_e.e,
+                from:            params.src_e.idx_in_chunk,
+                to:              idx_in_chunk,
+                src_chunk:       src_chunk,
+                src_layout:      params.src_layout,
+                dst_layout:      params.dst_layout,
+                component_specs: params.component_specs,
+            })
+            {
+                Ok(r) => r,
+                Err(e) =>
+                {
+                    return Err(e);
+                }
+            };
+            match T::write_at(params.dst_layout, chunk, idx_in_chunk, params.src_e.e, params.val)
+            {
+                Ok(_) =>
+                {}
+                Err(e) => return Err(e),
+            };
+
+            chunk.increase_len();
+            src_chunk.decrease_len();
+            (idx_in_chunk, swapped_row)
+        };
+
+        if !chunk.is_full()
+        {
+            self.free_chunks.enqueue(free_chunk_idx);
+        }
+
+        let result = ResultTakeAndWrite {
+            new_e_indices: EntityInChunkIndices {
+                chunk_idx:    free_chunk_idx,
+                idx_in_chunk: idx_in_chunk,
+            },
+            swapped_e:     swapped_row_at_src_chunk,
+        };
+        Ok(result)
     }
 }

@@ -34,6 +34,12 @@ pub enum XynokEcsError
 
     #[error("Conflict sub Archetype indices")]
     ConflictSubArchetype,
+
+    #[error("ComponentSpec is not registered")]
+    ComponentSpecIsNotRegistered,
+
+    #[error("Duplicated component detected in this pair of Archetypes")]
+    DuplicatedComponent,
 }
 // src: https://crates.io/crates/thiserror
 //#[derive(Error, Debug)]
