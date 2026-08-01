@@ -1,19 +1,12 @@
-use std::{
-    any::TypeId,
-    collections::{HashMap, HashSet},
-    marker::PhantomData,
-};
+use std::{any::TypeId, collections::HashMap, marker::PhantomData};
 
 use crate::{
     apis::{
+        identifies::XynokEcsError,
         params::{ArchetypeTakeAndRemoveComponentParams, ArchetypeTakeAndWriteComponentParams, ComponentSpec, EntityInChunkIndices, EntityIndices, SwappedRow},
         traits::TArchetype,
     },
-    archetype::Archetype,
-    chunk::{
-        layout::{ChunkLayout, ChunkLayoutParams},
-        Chunk,
-    },
+    chunk::layout::{ChunkLayout, ChunkLayoutParams},
     entity::Entity,
     std::queue::Queue,
     world::{
@@ -84,7 +77,11 @@ impl World
     #[track_caller]
     pub fn create<T: TArchetype + 'static>(&mut self, val: T) -> Entity
     {
-        let new_e = self.new_entity();
+        let new_e = match self.new_entity()
+        {
+            Ok(r) => r,
+            Err(e) => panic!("{}", e),
+        };
         let (arch_id, arch_spec) = self.get_or_create_archetype_spec_mut::<T>();
 
         let entity_chunk_indices = match arch_spec.arch.push(&arch_spec.layout, new_e, val)
@@ -189,7 +186,6 @@ impl World
         let (src_arch_spec, target_arch_spec) = (src_arch_spec.unwrap(), target_arch_spec.unwrap());
 
         let src_e_indices = EntityIndices {
-            e:            e,
             chunk_idx:    a_chunk_idx,
             idx_in_chunk: a_idx_in_chunk,
         };
@@ -212,6 +208,9 @@ impl World
         }
         self.update_entity_spec(e, target_arch_id, take_and_write_result.new_indices_took);
     }
+
+    //#[track_caller]
+    //pub fn merge_component<T: TArchetype + 'static>(&mut self, e: Entity, val: T) {}
 
     #[track_caller]
     pub fn remove_component<T: TArchetype + 'static>(&mut self, e: Entity) -> T
@@ -257,7 +256,6 @@ impl World
         let (src_arch_spec, target_arch_spec) = (src_arch_spec.unwrap(), target_arch_spec.unwrap());
 
         let src_e_indices = EntityIndices {
-            e:            e,
             chunk_idx:    a_chunk_idx,
             idx_in_chunk: a_idx_in_chunk,
         };
@@ -347,38 +345,22 @@ impl World
 
         swapped_e_spec.update_idx_in_chunk(swapped_row.from, swapped_row.to);
     }
-    fn new_entity(&mut self) -> Entity
+
+    fn new_entity(&mut self) -> Result<Entity, XynokEcsError>
     {
         if let Some(free_idx) = self.free_entities.dequeue()
         {
             let old_slot = unsafe { self.entities.get_unchecked_mut(free_idx) };
-            let new_version = (old_slot.version() + 1).max(Entity::INITIALIZE_VERSION);
-            return Entity::new(free_idx, new_version);
+            return Entity::new(free_idx, old_slot.version() + 1);
         };
-        let e = Entity::new(self.entities.len(), Entity::INITIALIZE_VERSION);
+        let e = Entity::new(self.entities.len(), Entity::INITIALIZE_VERSION)?;
         self.entities.push(EntitySpec::new_empty_slot(e.version()));
-        e
+        Ok(e)
     }
 
     fn get_archetype_id<T: TArchetype + 'static>(&self) -> Option<usize>
     {
         self.archetype_counter.get(&std::any::TypeId::of::<T>()).copied()
-    }
-    fn get_archetype_spec<T: TArchetype + 'static>(&self) -> Option<&ArchetypeSpec>
-    {
-        match self.get_archetype_id::<T>()
-        {
-            Some(arch_id) => self.archetypes.get(&arch_id),
-            None => None,
-        }
-    }
-    fn get_archetype_spec_mut<T: TArchetype + 'static>(&mut self) -> Option<&mut ArchetypeSpec>
-    {
-        match self.get_archetype_id::<T>()
-        {
-            Some(arch_id) => self.archetypes.get_mut(&arch_id),
-            None => None,
-        }
     }
 
     #[track_caller]

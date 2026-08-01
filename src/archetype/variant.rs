@@ -4,7 +4,6 @@ use crate::{
         traits::{TArchetype, TComponent, TComponentDescriptor},
     },
     chunk::layout::ChunkLayout,
-    entity::Entity,
 };
 
 impl<T: TComponent + 'static> TArchetype for T

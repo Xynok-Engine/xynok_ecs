@@ -41,11 +41,15 @@ impl ChunkLayout
         {
             return Err(XynokEcsError::EmptyArchetype);
         }
-        let mut bytes_per_entity = Entity::COMPONENT_DESCRIPTOR.byte_size;
+        // Each entity costs its handle in the header plus one slot in every component column
+        let bytes_per_entity = params
+            .arch
+            .iter()
+            .fold(Entity::COMPONENT_DESCRIPTOR.byte_size, |acc, des| acc.saturating_add(des.byte_size));
 
         // arch.len() represents the number of components. We use this count to store the
         // enabled/disabled state of each component as a single bit
-        let bits_per_entity = bytes_per_entity * BITS_PER_BYTE + params.arch.len();
+        let bits_per_entity = bytes_per_entity.saturating_mul(BITS_PER_BYTE).saturating_add(params.arch.len());
 
         let mut max_entities = (CHUNK_SIZE_IN_BYTE * BITS_PER_BYTE) / bits_per_entity;
 
@@ -80,7 +84,7 @@ impl ChunkLayout
             {
                 return Err(XynokEcsError::ArchetypeIsTooLarge);
             }
-            params.component_descriptors_temp.insert(des.query_type_id, des.as_column_descriptor(cursor));
+            params.component_descriptors_temp.insert(des.storage_type_id, des.as_column_descriptor(cursor));
 
             let column_bytes = match des.byte_size.checked_mul(max_entities)
             {

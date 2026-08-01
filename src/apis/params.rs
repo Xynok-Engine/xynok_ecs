@@ -26,16 +26,10 @@ pub struct EntityInChunkIndices
 }
 pub struct EntityIndices
 {
-    pub e:            Entity,
     pub chunk_idx:    usize,
     pub idx_in_chunk: usize,
 }
-pub struct TakeComponentParams
-{
-    e:    Entity,
-    from: EntityInChunkIndices,
-    to:   EntityInChunkIndices,
-}
+
 pub struct ArchetypeTakeAndWriteComponentParams<'a, T: TArchetype + 'static>
 {
     pub src_e:           EntityIndices,
@@ -67,7 +61,6 @@ pub struct ResultTakeAndRemove<T: TArchetype + 'static>
 }
 pub struct ChunkTakeComponentParams<'a>
 {
-    pub e:               Entity,
     pub from:            usize,
     pub to:              usize,
     pub src_chunk:       &'a mut Chunk,

@@ -256,6 +256,7 @@ impl Chunk
         self.len -= 1;
     }
     /// Drop the old value and assign the new one
+    #[allow(unused)]
     pub(crate) unsafe fn replace_at<T: TComponent + 'static>(&mut self, layout: &ChunkLayout, row: usize, value: T) -> Result<(), XynokEcsError>
     {
         let col_ptr = self.components_ptr::<T>(layout)?;

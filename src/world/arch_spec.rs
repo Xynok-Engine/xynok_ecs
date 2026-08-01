@@ -4,11 +4,11 @@ use std::{
 };
 
 use crate::{
-    apis::{fn_ptr::FnArchtypeRemoveEntity, identifies::XynokEcsError, params::ComponentSpec, traits::TArchetype, ComponentDescriptor},
+    apis::{identifies::XynokEcsError, params::ComponentSpec, ComponentDescriptor},
     archetype::Archetype,
     chunk::{
         column::ColumnDescriptor,
-        layout::{self, ChunkLayout, ChunkLayoutParams},
+        layout::{ChunkLayout, ChunkLayoutParams},
     },
 };
 

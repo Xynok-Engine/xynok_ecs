@@ -10,3 +10,12 @@
 - [ ] tuple archetypes
 - [ ] query read/write
 
+## Examples
+**Cmd:** 
+```bash
+cargo run --example <name_of_rust_file_in_examples_folder>
+```
+**Example:** This command runs the file `examples/archetype.rs`.
+```bash
+cargo run --example archetype
+```

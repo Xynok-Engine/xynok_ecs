@@ -3,13 +3,13 @@ pub struct EntitySpec
     arch_id:      usize,
     chunk_idx:    usize,
     idx_in_chunk: usize,
-    version:      u32,
+    version:      usize,
     has_value:    bool,
 }
 
 impl EntitySpec
 {
-    pub fn version(&self) -> u32
+    pub fn version(&self) -> usize
     {
         self.version
     }
@@ -32,7 +32,7 @@ impl EntitySpec
 }
 impl EntitySpec
 {
-    pub fn new_empty_slot(version: u32) -> Self
+    pub fn new_empty_slot(version: usize) -> Self
     {
         Self {
             arch_id:      0,
@@ -42,7 +42,7 @@ impl EntitySpec
             has_value:    false,
         }
     }
-    pub fn new(arch_id: usize, chunk_idx: usize, idx_in_chunk: usize, version: u32) -> Self
+    pub fn new(arch_id: usize, chunk_idx: usize, idx_in_chunk: usize, version: usize) -> Self
     {
         Self {
             arch_id,

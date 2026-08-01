@@ -36,13 +36,6 @@ pub const fn align_up(offset: usize, align: usize) -> usize
     (offset + align - 1) & !(align - 1)
 }
 
-/// Maps a `row` to a bitmask within a `u64` word (a `row` can exceed 63 when the header contains multiple words or flags)
-#[inline(always)]
-pub const fn row_to_bit_mask(row: usize) -> u64
-{
-    1u64 << (row % CPU_WORD)
-}
-
 #[cfg(test)]
 mod test
 {

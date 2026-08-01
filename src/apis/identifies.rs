@@ -11,6 +11,9 @@ pub enum StorageLocation
 #[derive(Error, Debug)]
 pub enum XynokEcsError
 {
+    #[error("Exceeded the maximum number of entities: {0}")]
+    EntityAmountOverflow(usize),
+
     #[error("Archetype contains ZERO component")]
     EmptyArchetype,
 

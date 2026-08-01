@@ -5,18 +5,14 @@ use std::{
 
 use crate::{
     apis::{
-        fn_ptr::FnArchtypeRemoveEntity,
         identifies::XynokEcsError,
         params::{
             ArchetypeTakeAndRemoveComponentParams, ArchetypeTakeAndWriteComponentParams, ChunkTakeComponentParams, ComponentSpec, EntityInChunkIndices,
-            EntityIndices, ResultTakeAndRemove, ResultTakeAndWrite, SwappedRow,
+            ResultTakeAndRemove, ResultTakeAndWrite, SwappedRow,
         },
         traits::TArchetype,
     },
-    chunk::{
-        layout::{self, ChunkLayout},
-        Chunk,
-    },
+    chunk::{layout::ChunkLayout, Chunk},
     entity::Entity,
     std::queue::Queue,
 };
@@ -112,7 +108,6 @@ impl Archetype
 
             let src_chunk = params.src_arch.chunks.get_unchecked_mut(params.src_e.chunk_idx);
             let swapped_row = match chunk.take_from(ChunkTakeComponentParams {
-                e:               params.src_e.e,
                 from:            params.src_e.idx_in_chunk,
                 to:              idx_in_chunk,
                 src_chunk:       src_chunk,
@@ -168,7 +163,6 @@ impl Archetype
             let taken = T::take_from(params.src_layout, src_chunk, params.src_e.idx_in_chunk)?;
 
             let swapped_row = match chunk.take_from(ChunkTakeComponentParams {
-                e:               params.src_e.e,
                 from:            params.src_e.idx_in_chunk,
                 to:              idx_in_chunk,
                 src_chunk:       src_chunk,

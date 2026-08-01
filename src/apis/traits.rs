@@ -1,13 +1,11 @@
-use std::{any::TypeId, collections::HashMap};
+use std::any::TypeId;
 
 use crate::{
     apis::{
         identifies::{StorageLocation, XynokEcsError},
-        params::{ComponentSpec, SwappedRow},
         ComponentDescriptor,
     },
     chunk::{layout::ChunkLayout, Chunk},
-    entity::Entity,
 };
 pub trait TComponent: Sized
 {

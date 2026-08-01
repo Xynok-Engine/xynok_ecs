@@ -19,7 +19,7 @@
 //! * Memory — the drop-counter tests only prove the drop glue ran; they stay green even if
 //!   the 16 KB buffer leaks. Actual reclamation is measured through the chunk-counting global
 //!   allocator in the `alloc_probe` module at the bottom of this file.
-
+#![allow(unused)]
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
     Mutex,
@@ -83,7 +83,8 @@ declare_component!(Aligned32);
 /// Component with a non-trivial `Drop`, used to verify the drop glue is invoked
 /// exactly once per stored value.
 #[derive(Debug)]
-struct Tracked(u32);
+#[allow(unused)]
+struct Tracked(pub u32);
 declare_component!(Tracked);
 
 static DROP_COUNT: AtomicUsize = AtomicUsize::new(0);
@@ -227,9 +228,9 @@ fn assert_entity_mapping_is_consistent(w: &World, live: &[Entity])
 #[test]
 fn t_entity_pack_roundtrip()
 {
-    for (idx, version) in [(0usize, 1u32), (1, 1), (42, 7), (1_000_000, 3), (Entity::MAX_IDX, 5)]
+    for (idx, version) in [(0usize, 1usize), (1, 1), (42, 7), (1_000_000, 3), (Entity::MAX_IDX, 5)]
     {
-        let e = Entity::new(idx, version);
+        let e = Entity::new(idx, version).unwrap();
         assert_eq!(e.idx(), idx, "idx must survive packing");
         assert_eq!(e.version(), version, "version must survive packing");
     }
@@ -238,7 +239,7 @@ fn t_entity_pack_roundtrip()
 #[test]
 fn t_entity_max_bounds_are_representable()
 {
-    let e = Entity::new(Entity::MAX_IDX, Entity::MAX_VERSION);
+    let e = Entity::new(Entity::MAX_IDX, Entity::MAX_VERSION).unwrap();
     assert_eq!(e.idx(), Entity::MAX_IDX);
     assert_eq!(e.version(), Entity::MAX_VERSION);
 }
@@ -249,7 +250,7 @@ fn t_entity_null_is_distinct_from_any_live_handle()
     assert_eq!(Entity::NULL.raw(), 0);
     assert_eq!(Entity::default(), Entity::NULL);
     // A live handle always carries version >= 1, so it can never collide with NULL.
-    assert_ne!(Entity::new(0, Entity::INITIALIZE_VERSION), Entity::NULL);
+    assert_ne!(Entity::new(0, Entity::INITIALIZE_VERSION).unwrap(), Entity::NULL);
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -417,7 +418,7 @@ fn t_exists_tracks_the_entity_lifecycle()
 fn t_exists_rejects_an_unknown_handle()
 {
     let mut w = World::default();
-    assert!(!w.exists(Entity::new(999, 1)), "an index past the entity table must not exist");
+    assert!(!w.exists(Entity::new(999, 1).unwrap()), "an index past the entity table must not exist");
     assert!(!w.exists(Entity::NULL), "the null handle must never exist");
 }
 
@@ -1132,7 +1133,11 @@ fn t_freeing_rows_must_not_enqueue_the_same_chunk_twice()
     {
         entities.push(w.create(Hp(i)));
     }
-    assert_eq!(arch_spec_of(&w, probe).arch.free_chunk_count(), 0, "a chunk filled to max_len must not stay in the free list");
+    assert_eq!(
+        arch_spec_of(&w, probe).arch.free_chunk_count(),
+        0,
+        "a chunk filled to max_len must not stay in the free list"
+    );
 
     for &e in entities.iter().take(3)
     {
@@ -1247,5 +1252,9 @@ fn t_dropping_the_world_releases_chunks_created_by_migrations()
         let _ = w.remove_component::<Mana>(e);
     }
 
-    assert_eq!(alloc_probe::live_chunks(), before, "every archetype's chunks must be released, not just the first");
+    assert_eq!(
+        alloc_probe::live_chunks(),
+        before,
+        "every archetype's chunks must be released, not just the first"
+    );
 }
