@@ -61,10 +61,13 @@ pub struct ResultTakeAndRemove<T: TArchetype + 'static>
 }
 pub struct ChunkTakeComponentParams<'a>
 {
-    pub from:            usize,
-    pub to:              usize,
-    pub src_chunk:       &'a mut Chunk,
-    pub src_layout:      &'a ChunkLayout,
-    pub dst_layout:      &'a ChunkLayout,
-    pub component_specs: &'a HashMap<TypeId, ComponentSpec>,
+    pub from:                 usize,
+    pub to:                   usize,
+    pub src_chunk:            &'a mut Chunk,
+    pub src_layout:           &'a ChunkLayout,
+    pub dst_layout:           &'a ChunkLayout,
+    pub component_specs:      &'a HashMap<TypeId, ComponentSpec>,
+    /// Component types that the caller will overwrite right after this call (e.g. merge_component's `T`).
+    /// Their old values in `src_chunk` are dropped in place instead of being migrated into `dst_layout`.
+    pub overwritten_type_ids: &'a [TypeId],
 }

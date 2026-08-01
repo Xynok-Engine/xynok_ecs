@@ -1,8 +1,10 @@
 //#![allow(unused)]
 pub mod apis;
 pub mod world;
+pub mod query;
+pub mod entity;
+
 mod std;
-mod entity;
 mod chunk;
 mod archetype;
 

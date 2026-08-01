@@ -131,6 +131,18 @@ impl Chunk
                 let src_slot = params.src_chunk.ptr().add(src_col_des.offset).add(params.from * item_size);
                 let src_last_val = params.src_chunk.ptr.add(src_col_des.offset).add(last * item_size);
 
+                // the caller (e.g. merge_component) is about to overwrite this column with a new value right
+                // after this call, so drop the old one in place instead of migrating it into dst
+                if params.overwritten_type_ids.contains(k)
+                {
+                    (spec.descriptor.fn_drop)(src_slot);
+                    if !is_last
+                    {
+                        std::ptr::copy_nonoverlapping(src_last_val, src_slot, item_size);
+                    }
+                    continue;
+                }
+
                 // when removing a component, the dst often won't have all the components from the src
                 let dst_col_des = match params.dst_layout.component_col_descriptors.get(k)
                 {
@@ -256,7 +268,6 @@ impl Chunk
         self.len -= 1;
     }
     /// Drop the old value and assign the new one
-    #[allow(unused)]
     pub(crate) unsafe fn replace_at<T: TComponent + 'static>(&mut self, layout: &ChunkLayout, row: usize, value: T) -> Result<(), XynokEcsError>
     {
         let col_ptr = self.components_ptr::<T>(layout)?;

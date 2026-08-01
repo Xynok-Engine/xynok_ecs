@@ -21,6 +21,11 @@ impl<T: TComponent + 'static> TArchetype for T
     {
         unsafe { chunk.take_at::<T>(layout, idx) }
     }
+
+    fn replace_at(layout: &ChunkLayout, chunk: &mut crate::chunk::Chunk, row: usize, val: Self) -> Result<(), XynokEcsError>
+    {
+        unsafe { chunk.replace_at::<T>(layout, row, val) }
+    }
 }
 
 macro_rules! tuple_arch {
@@ -47,6 +52,15 @@ macro_rules! tuple_arch {
             fn take_from(layout: &ChunkLayout, chunk: &mut crate::chunk::Chunk, idx: usize) -> Result<Self, XynokEcsError>
             {
                 unsafe { Ok(($(chunk.take_at::<$component>(layout, idx)?,)*)) }
+            }
+
+            fn replace_at(layout: &ChunkLayout, chunk: &mut crate::chunk::Chunk, row: usize, val: Self) -> Result<(), XynokEcsError>
+            {
+                unsafe
+                {
+                    $(chunk.replace_at::<$component>(layout, row, val.$idx)?;)*
+                }
+                Ok(())
             }
 
         }

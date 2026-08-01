@@ -19,7 +19,6 @@ use crate::{
 mod temp_allocation;
 mod entity_spec;
 mod arch_spec;
-
 #[cfg(test)]
 mod tests;
 
@@ -209,8 +208,75 @@ impl World
         self.update_entity_spec(e, target_arch_id, take_and_write_result.new_indices_took);
     }
 
-    //#[track_caller]
-    //pub fn merge_component<T: TArchetype + 'static>(&mut self, e: Entity, val: T) {}
+    /// Adds the components of `T` to `e` if they are not already present, otherwise overwrites the
+    /// existing values. Unlike `add_component`, this allows `T` to share components with `e`'s current
+    /// archetype.
+    #[track_caller]
+    pub fn merge_component<T: TArchetype + 'static>(&mut self, e: Entity, val: T)
+    {
+        debug_assert!(self.exists(e), "{} does not exist to merge component !", e);
+
+        let (a_arch_id, a_chunk_idx, a_idx_in_chunk) = unsafe {
+            let e_spec = self.entities.get_unchecked(e.idx());
+            (e_spec.arch_id(), e_spec.chunk_idx(), e_spec.idx_in_chunk())
+        };
+        let b_arch_id = self.get_or_create_archetype_id::<T>();
+
+        let mut component_set = std::mem::take(&mut self.temp_alloc.vec_usize);
+        component_set.clear();
+
+        self.append_archetype_component_id_of_to(a_arch_id, &mut component_set);
+        self.append_archetype_component_id_of_to(b_arch_id, &mut component_set);
+
+        normalize_set(&mut component_set);
+
+        let target_arch_id = match self.component_set_counter.get(&component_set)
+        {
+            Some(r) => *r,
+            // create a new arch from these archetypes
+            None => self.create_archetype_id_from_set_of(&component_set, a_arch_id, b_arch_id),
+        };
+        // put back
+        self.temp_alloc.vec_usize = component_set;
+
+        // every component of `T` is already part of `e`'s archetype: overwrite the row in place, no move needed
+        if target_arch_id == a_arch_id
+        {
+            let arch_spec = self.archetypes.get_mut(&a_arch_id).unwrap();
+            match arch_spec.arch.replace_at(&arch_spec.layout, a_chunk_idx, a_idx_in_chunk, val)
+            {
+                Ok(_) => {}
+                Err(e) => panic!("{}", e),
+            }
+            return;
+        }
+
+        let [src_arch_spec, target_arch_spec] = self.archetypes.get_disjoint_mut([&a_arch_id, &target_arch_id]);
+        let (src_arch_spec, target_arch_spec) = (src_arch_spec.unwrap(), target_arch_spec.unwrap());
+
+        let src_e_indices = EntityIndices {
+            chunk_idx:    a_chunk_idx,
+            idx_in_chunk: a_idx_in_chunk,
+        };
+        let params = ArchetypeTakeAndWriteComponentParams {
+            src_e:           src_e_indices,
+            src_arch:        &mut src_arch_spec.arch,
+            src_layout:      &src_arch_spec.layout,
+            dst_layout:      &target_arch_spec.layout,
+            component_specs: &self.component_counter,
+            write_val:       val,
+        };
+        let take_and_write_result = match target_arch_spec.arch.take_and_write_from(params)
+        {
+            Ok(r) => r,
+            Err(e) => panic!("{}", e),
+        };
+        if let Some(swapped_row) = take_and_write_result.swapped_e
+        {
+            self.update_entity_indices(swapped_row);
+        }
+        self.update_entity_spec(e, target_arch_id, take_and_write_result.new_indices_took);
+    }
 
     #[track_caller]
     pub fn remove_component<T: TArchetype + 'static>(&mut self, e: Entity) -> T

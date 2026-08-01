@@ -108,12 +108,15 @@ impl Archetype
 
             let src_chunk = params.src_arch.chunks.get_unchecked_mut(params.src_e.chunk_idx);
             let swapped_row = match chunk.take_from(ChunkTakeComponentParams {
-                from:            params.src_e.idx_in_chunk,
-                to:              idx_in_chunk,
-                src_chunk:       src_chunk,
-                src_layout:      params.src_layout,
-                dst_layout:      params.dst_layout,
-                component_specs: params.component_specs,
+                from:                 params.src_e.idx_in_chunk,
+                to:                   idx_in_chunk,
+                src_chunk:            src_chunk,
+                src_layout:           params.src_layout,
+                dst_layout:           params.dst_layout,
+                component_specs:      params.component_specs,
+                // `T`'s own columns are about to be written below; any old value src shares with T must be
+                // dropped instead of migrated, otherwise it would be silently leaked when write_at overwrites it
+                overwritten_type_ids: T::STORAGE_TYPE_IDS,
             })
             {
                 Ok(r) => r,
@@ -145,6 +148,13 @@ impl Archetype
         };
         Ok(result)
     }
+    /// used by merge_component() when every component of `T` is already present in this archetype:
+    /// overwrites the existing values of the row in place, dropping the old ones, without moving the entity
+    pub fn replace_at<T: TArchetype + 'static>(&mut self, layout: &ChunkLayout, chunk_idx: usize, idx_in_chunk: usize, val: T) -> Result<(), XynokEcsError>
+    {
+        let chunk = unsafe { self.chunks.get_unchecked_mut(chunk_idx) };
+        T::replace_at(layout, chunk, idx_in_chunk, val)
+    }
     pub fn take_and_remove_from<T: TArchetype + 'static>(
         &mut self,
         params: ArchetypeTakeAndRemoveComponentParams<T>,
@@ -163,12 +173,13 @@ impl Archetype
             let taken = T::take_from(params.src_layout, src_chunk, params.src_e.idx_in_chunk)?;
 
             let swapped_row = match chunk.take_from(ChunkTakeComponentParams {
-                from:            params.src_e.idx_in_chunk,
-                to:              idx_in_chunk,
-                src_chunk:       src_chunk,
-                src_layout:      params.src_layout,
-                dst_layout:      params.dst_layout,
-                component_specs: params.component_specs,
+                from:                 params.src_e.idx_in_chunk,
+                to:                   idx_in_chunk,
+                src_chunk:            src_chunk,
+                src_layout:           params.src_layout,
+                dst_layout:           params.dst_layout,
+                component_specs:      params.component_specs,
+                overwritten_type_ids: &[],
             })
             {
                 Ok(r) => r,
