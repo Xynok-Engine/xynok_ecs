@@ -27,9 +27,9 @@ They explain the core concepts and the most important ideas that the codebase im
 I might update them in the future, but for now, they are a close match to the current state of the code.
 
 
-| #0 Archetype ECS Explained: Chunk Storage & Memory Layout | ![youtube link](https://youtu.be/FT-aXDIjDUU) |
+| #0 Archetype ECS Explained: Chunk Storage & Memory Layout | [youtube link](https://youtu.be/FT-aXDIjDUU) |
 | -------------- | --------------- |
-| #1 ECS Entities Explained: Packing ID + Version into One U64 | ![youtube link](https://youtu.be/rAe-KCWtnhk) |
-| #2 Building an ECS World: Slot Tables, Archetypes & Versioning | ![youtube link](https://youtu.be/xa1Jea7789I) |
-| #3 Add, Merge, Remove - The 3 ECS Component Ops | ![youtube link](https://youtu.be/ANyV3GwRIeU) |
+| #1 ECS Entities Explained: Packing ID + Version into One U64 | [youtube link](https://youtu.be/rAe-KCWtnhk) |
+| #2 Building an ECS World: Slot Tables, Archetypes & Versioning | [youtube link](https://youtu.be/xa1Jea7789I) |
+| #3 Add, Merge, Remove - The 3 ECS Component Ops | [youtube link](https://youtu.be/ANyV3GwRIeU) |
 
