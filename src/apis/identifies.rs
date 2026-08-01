@@ -43,6 +43,9 @@ pub enum XynokEcsError
 
     #[error("Different Entity !")]
     EntityIsNotTheSame,
+
+    #[error("Query contains duplicated components !")]
+    QueryAccessScopeConflict,
 }
 // src: https://crates.io/crates/thiserror
 //#[derive(Error, Debug)]

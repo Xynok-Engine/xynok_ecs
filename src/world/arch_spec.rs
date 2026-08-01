@@ -93,6 +93,29 @@ impl ArchetypeSpec
         }
         true
     }
+    #[allow(unused)]
+    pub fn contains_any_type_id_component_of(&self, other: &[TypeId]) -> bool
+    {
+        for e in other
+        {
+            if self.layout.component_col_descriptors.contains_key(e)
+            {
+                return true;
+            }
+        }
+        false
+    }
+    pub fn contains_all_type_id_components_of(&self, other: &[TypeId]) -> bool
+    {
+        for e in other
+        {
+            if !self.layout.component_col_descriptors.contains_key(e)
+            {
+                return false;
+            }
+        }
+        true
+    }
 }
 
 fn build_component_descriptors_from_src_a_exclude_src_b(

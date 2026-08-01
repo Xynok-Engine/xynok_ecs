@@ -17,8 +17,8 @@ use crate::{
 };
 
 mod temp_allocation;
-mod entity_spec;
-mod arch_spec;
+pub(crate) mod entity_spec;
+pub(crate) mod arch_spec;
 #[cfg(test)]
 mod tests;
 
@@ -245,7 +245,8 @@ impl World
             let arch_spec = self.archetypes.get_mut(&a_arch_id).unwrap();
             match arch_spec.arch.replace_at(&arch_spec.layout, a_chunk_idx, a_idx_in_chunk, val)
             {
-                Ok(_) => {}
+                Ok(_) =>
+                {}
                 Err(e) => panic!("{}", e),
             }
             return;

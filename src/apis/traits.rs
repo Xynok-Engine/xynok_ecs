@@ -6,6 +6,7 @@ use crate::{
         ComponentDescriptor,
     },
     chunk::{layout::ChunkLayout, Chunk},
+    query::access_scope::AccessScope,
 };
 pub trait TComponent: Sized
 {
@@ -67,4 +68,7 @@ pub trait TArchetype: Sized
 }
 
 pub trait TSystemParam {}
-pub trait TQueryParam {}
+pub trait TQueryParam
+{
+    fn access_scope() -> Result<AccessScope, XynokEcsError>;
+}
