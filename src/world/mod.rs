@@ -232,7 +232,7 @@ impl World
             if !contains_all_components
             {
                 panic!(
-                    "Cannot remove component `{}` for entity {}. Current it's components do not contain all being removed components.",
+                    "Cannot remove component `{}` for entity {}. Missing component to remove.",
                     std::any::type_name::<T>(),
                     e
                 )

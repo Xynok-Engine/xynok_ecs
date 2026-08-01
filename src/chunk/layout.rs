@@ -2,7 +2,7 @@ use std::{alloc::Layout, any::TypeId, collections::HashMap};
 
 use crate::{
     apis::{
-        constants::{BITS_PER_BYTE, CHUNK_SIZE_IN_BYTE},
+        constants::{BITS_PER_BYTE, CHUNK_SIZE_IN_BYTE, CPU_WORD},
         identifies::XynokEcsError,
         traits::TComponentDescriptor,
         ComponentDescriptor,
@@ -37,10 +37,10 @@ impl ChunkLayout
 {
     fn compute_layout(params: &mut ChunkLayoutParams) -> Result<Self, XynokEcsError>
     {
-        if params.arch.is_empty()
-        {
-            return Err(XynokEcsError::EmptyArchetype);
-        }
+        //if params.arch.is_empty()
+        //{
+        //    return Err(XynokEcsError::EmptyArchetype);
+        //}
         // Each entity costs its handle in the header plus one slot in every component column
         let bytes_per_entity = params
             .arch
@@ -73,7 +73,9 @@ impl ChunkLayout
     {
         let header = Header::new(max_entities, params.arch.len());
         let mut cursor = header.size;
-        let mut max_align = 0;
+        // Header's own bitset requires CPU_WORD alignment, so this is the floor even when
+        // the archetype has no components (and thus no des.align to fold over)
+        let mut max_align = CPU_WORD;
         params.component_descriptors_temp.clear();
 
         for des in params.arch

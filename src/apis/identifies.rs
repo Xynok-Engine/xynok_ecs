@@ -14,9 +14,6 @@ pub enum XynokEcsError
     #[error("Exceeded the maximum number of entities: {0}")]
     EntityAmountOverflow(usize),
 
-    #[error("Archetype contains ZERO component")]
-    EmptyArchetype,
-
     #[error("Archetype's component total size exceeds 16kB")]
     ArchetypeIsTooLarge,
 

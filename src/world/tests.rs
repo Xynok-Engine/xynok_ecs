@@ -253,20 +253,6 @@ fn t_entity_null_is_distinct_from_any_live_handle()
     assert_ne!(Entity::new(0, Entity::INITIALIZE_VERSION).unwrap(), Entity::NULL);
 }
 
-// ------------------------------------------------------------------------------------------------
-// ChunkLayout
-// ------------------------------------------------------------------------------------------------
-
-#[test]
-fn t_layout_rejects_empty_archetype()
-{
-    match layout_of(&[])
-    {
-        Ok(_) => panic!("an archetype without components must be rejected"),
-        Err(err) => assert!(matches!(err, XynokEcsError::EmptyArchetype), "unexpected error: {err}"),
-    }
-}
-
 #[test]
 fn t_layout_column_offsets_respect_alignment()
 {
@@ -842,10 +828,7 @@ fn t_remove_component_repairs_the_mapping_of_the_swapped_entity()
     assert_entity_mapping_is_consistent(&w, &[entities[0], entities[2], entities[3], moved]);
 }
 
-/// Documents a current limitation: an entity is not allowed to end up with zero components,
-/// because `ChunkLayout::compute_layout` rejects an empty archetype.
 #[test]
-#[should_panic]
 fn t_removing_the_last_component_is_unsupported()
 {
     let mut w = World::default();
