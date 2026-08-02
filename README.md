@@ -8,10 +8,14 @@
 | ✅ | create/destroy | create and destroy entities and their associated data |
 | ✅ | add/remove/merge component | add, remove, and merge components for an entity. Merging will override existing components. |
 | ✅ | tuple archetype | clients can create an archetype with varying numbers of components. Currently, the maximum is 16 components per archetype. |
-| ✅ | persistent query | queries can have a static lifetime, initialized once and reused indefinitely |
+| ✅ | query | an iterator for querying components from an archetype |
+| in progress | Shared - Archetype Component | A component shared by an archetype. It uses a single allocation and persists for the lifetime of that archetype. |
 | in progress | changed/added detection | the foundation for the observer pattern and architectures related to asset and resource pipelines (mesh, texture, sound, etc.) |
+| todo | persistent query | queries can have a static lifetime, initialized once and reused indefinitely |
 | todo | system & scheduler | a distributed modifier component system where users can register or remove systems for scheduling |
-
+| Item1.2 | Item2.2 | Item3.2 |
+| Item1.2 | Item2.2 | Item3.2 |
+| Item1.2 | Item2.2 | Item3.2 |
 
 
 ## Concepts

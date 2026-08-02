@@ -2,7 +2,7 @@
 members = ["proc_macro", "benches"]
 
 [profile.release]
-lto           = "thin"
+lto = "thin"
 codegen-units = 1
 
 [package]

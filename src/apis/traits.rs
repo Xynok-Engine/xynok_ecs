@@ -4,14 +4,14 @@ use crate::apis::identifies::{StorageLocation, XynokEcsError};
 use crate::apis::ComponentDescriptor;
 use crate::chunk::layout::ChunkLayout;
 use crate::chunk::Chunk;
-pub trait TChunkComponent {}
-pub trait TArchetypeComponent {}
+
 pub trait TComponent: Sized
 {
     type QueryType: TComponent + 'static;
     type StorageType: TComponent + 'static;
     const STORAGE_LOCATION: StorageLocation;
 }
+
 pub trait TComponentDescriptor
 {
     const COMPONENT_DESCRIPTOR: ComponentDescriptor;
