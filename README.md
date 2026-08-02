@@ -7,8 +7,9 @@
 - [x] add/remove component
 - [x] drop chunk data
 - [x] tuple archetypes
-- [ ] merge chunk/archetype layout
+- [x] merge chunk/archetype layout
 - [ ] query read/write
+- [ ] system scheduler
 
 ## Examples
 **Cmd:** 

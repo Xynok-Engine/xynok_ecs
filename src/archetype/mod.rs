@@ -1,21 +1,16 @@
-use std::{
-    any::TypeId,
-    collections::{HashMap, HashSet},
-};
+use std::any::TypeId;
+use std::collections::{HashMap, HashSet};
 
-use crate::{
-    apis::{
-        identifies::XynokEcsError,
-        params::{
-            ArchetypeTakeAndRemoveComponentParams, ArchetypeTakeAndWriteComponentParams, ChunkTakeComponentParams, ComponentSpec, EntityInChunkIndices,
-            ResultTakeAndRemove, ResultTakeAndWrite, SwappedRow,
-        },
-        traits::TArchetype,
-    },
-    chunk::{layout::ChunkLayout, Chunk},
-    entity::Entity,
-    std::queue::Queue,
+use crate::apis::identifies::XynokEcsError;
+use crate::apis::params::{
+    ArchetypeTakeAndRemoveComponentParams, ArchetypeTakeAndWriteComponentParams, ChunkTakeComponentParams, ComponentSpec, EntityInChunkIndices,
+    ResultTakeAndRemove, ResultTakeAndWrite, SwappedRow,
 };
+use crate::apis::traits::TArchetype;
+use crate::chunk::layout::ChunkLayout;
+use crate::chunk::Chunk;
+use crate::entity::Entity;
+use crate::std::queue::Queue;
 
 mod variant;
 
@@ -213,6 +208,10 @@ impl Archetype
 }
 impl Archetype
 {
+    pub(crate) fn chunk_count(&self) -> usize
+    {
+        self.chunks.len()
+    }
     pub(crate) fn dispose(&mut self, layout: &ChunkLayout, component_specs: &HashMap<TypeId, ComponentSpec>)
     {
         for c in self.chunks.iter_mut()
@@ -247,10 +246,6 @@ impl Archetype
 #[cfg(test)]
 impl Archetype
 {
-    pub(crate) fn chunk_count(&self) -> usize
-    {
-        self.chunks.len()
-    }
     pub(crate) fn chunk_at(&self, chunk_idx: usize) -> &Chunk
     {
         &self.chunks[chunk_idx]

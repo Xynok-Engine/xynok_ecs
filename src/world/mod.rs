@@ -1,24 +1,27 @@
-use std::{any::TypeId, collections::HashMap, marker::PhantomData};
+use std::any::TypeId;
+use std::collections::HashMap;
+use std::marker::PhantomData;
 
-use crate::{
-    apis::{
-        identifies::XynokEcsError,
-        params::{ArchetypeTakeAndRemoveComponentParams, ArchetypeTakeAndWriteComponentParams, ComponentSpec, EntityInChunkIndices, EntityIndices, SwappedRow},
-        traits::TArchetype,
-    },
-    chunk::layout::{ChunkLayout, ChunkLayoutParams},
-    entity::Entity,
-    std::queue::Queue,
-    world::{
-        arch_spec::{ArchetypeSpec, PairArchetypeSpecParams},
-        entity_spec::EntitySpec,
-        temp_allocation::WorldTempAllocation,
-    },
+use crate::apis::identifies::XynokEcsError;
+use crate::apis::internal_traits::TQueryParam;
+use crate::apis::params::{
+    ArchetypeTakeAndRemoveComponentParams, ArchetypeTakeAndWriteComponentParams, ComponentSpec, EntityInChunkIndices, EntityIndices, SwappedRow,
 };
-
+use crate::apis::safe_counter::SafeCounter;
+use crate::apis::traits::TArchetype;
+use crate::chunk::layout::{ChunkLayout, ChunkLayoutParams};
+use crate::entity::Entity;
+use crate::std::queue::Queue;
+use crate::utils::normalize_set;
+use crate::world::arch_spec::{ArchetypeSpec, PairArchetypeSpecParams};
+use crate::world::entity_spec::EntitySpec;
+use crate::world::query_spec::{QuerySpec, QuerySpecAccessor};
+use crate::world::temp_allocation::WorldTempAllocation;
 mod temp_allocation;
 pub(crate) mod entity_spec;
 pub(crate) mod arch_spec;
+pub(crate) mod query_spec;
+
 #[cfg(test)]
 mod tests;
 
@@ -28,18 +31,12 @@ pub struct World
     component_counter:        HashMap<TypeId, ComponentSpec>,
     component_set_counter:    HashMap<Vec<usize>, usize>,
     archetype_counter:        HashMap<TypeId, usize>,
+    query_counter:            HashMap<TypeId, QuerySpec>,
     entities:                 Vec<EntitySpec>,
     free_entities:            Queue<usize>,
     temp_alloc:               WorldTempAllocation,
-    global_archetype_version: usize,
+    global_archetype_version: SafeCounter,
 }
-
-fn normalize_set(set: &mut Vec<usize>)
-{
-    set.sort();
-    set.dedup();
-}
-
 impl Default for World
 {
     fn default() -> Self
@@ -50,9 +47,10 @@ impl Default for World
             component_counter:        HashMap::new(),
             archetype_counter:        HashMap::new(),
             component_set_counter:    HashMap::new(),
+            query_counter:            HashMap::new(),
             free_entities:            Queue::new(),
             temp_alloc:               WorldTempAllocation::new(),
-            global_archetype_version: 1usize,
+            global_archetype_version: SafeCounter::new(1, usize::MAX - 1),
         }
     }
 }
@@ -351,6 +349,37 @@ impl World
 
 impl World
 {
+    pub(crate) fn get_or_create_query_src_access<T: TQueryParam + 'static>(&mut self) -> Result<QuerySpecAccessor, XynokEcsError>
+    {
+        let current_global_arch_version = self.global_archetype_version.current_val();
+        if let Some(query_spec) = self.query_counter.get_mut(&T::TYPE_ID)
+        {
+            if current_global_arch_version == query_spec.version
+            {
+                return Ok(query_spec.as_accessor());
+            }
+
+            query_spec.archetypes.clear();
+            crate::utils::build_archetype_which_contains(&mut self.archetypes, &mut query_spec.archetypes, &query_spec.access_scope);
+            query_spec.version = current_global_arch_version;
+            return Ok(query_spec.as_accessor());
+        }
+        let mut target_archetypes: Vec<*mut ArchetypeSpec> = Vec::new();
+        let access_scope = T::access_scope()?;
+        crate::utils::build_archetype_which_contains(&mut self.archetypes, &mut target_archetypes, &access_scope);
+        let mut spec = QuerySpec {
+            access_scope: access_scope,
+            archetypes:   target_archetypes,
+            version:      current_global_arch_version,
+        };
+
+        let result = spec.as_accessor();
+        self.query_counter.insert(T::TYPE_ID, spec);
+        Ok(result)
+    }
+}
+impl World
+{
     fn update_entity_spec(&mut self, e: Entity, arch_id: usize, indices: EntityInChunkIndices)
     {
         let entity_spec = unsafe { self.entities.get_unchecked_mut(e.idx()) };
@@ -552,7 +581,7 @@ impl World
 
     fn structure_changed(&mut self)
     {
-        self.global_archetype_version += 1;
+        self.global_archetype_version.increase();
     }
 }
 

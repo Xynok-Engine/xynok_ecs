@@ -6,7 +6,6 @@ use crate::{
         ComponentDescriptor,
     },
     chunk::{layout::ChunkLayout, Chunk},
-    query::access_scope::AccessScope,
 };
 pub trait TComponent: Sized
 {
@@ -30,7 +29,6 @@ impl<T: TComponent + 'static> TComponentDescriptor for T
     };
 }
 
-/// Drop glue: Calls the Drop implementation for T at the specified slot. This is a no-op for ZSTs or types that don't require dropping.
 fn drop_glue<T>(ptr: *mut u8)
 {
     unsafe {
@@ -46,8 +44,7 @@ pub trait TArchetype: Sized
 
     fn write_at(layout: &ChunkLayout, chunk: &mut Chunk, write_idx: usize, val: Self) -> Result<(), XynokEcsError>;
     fn take_from(layout: &ChunkLayout, chunk: &mut Chunk, idx: usize) -> Result<Self, XynokEcsError>;
-    /// Drops the old values already stored at `row` and writes `val` in their place. Used when merging
-    /// components into an entity whose archetype already contains every component of `Self`.
+    /// drops the old values already stored at `row` and writes `val` in their place. Used when merging
     fn replace_at(layout: &ChunkLayout, chunk: &mut Chunk, row: usize, val: Self) -> Result<(), XynokEcsError>;
 
     //fn remove_at(
@@ -65,10 +62,4 @@ pub trait TArchetype: Sized
     //        }
     //    }
     //}
-}
-
-pub trait TSystemParam {}
-pub trait TQueryParam
-{
-    fn access_scope() -> Result<AccessScope, XynokEcsError>;
 }

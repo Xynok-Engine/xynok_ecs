@@ -2,6 +2,8 @@ use std::any::TypeId;
 
 pub(crate) mod params;
 pub(crate) mod fn_ptr;
+pub(crate) mod internal_traits;
+pub(crate) mod safe_counter;
 
 pub mod identifies;
 pub mod constants;

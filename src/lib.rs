@@ -4,6 +4,7 @@ pub mod world;
 pub mod query;
 pub mod entity;
 
+mod utils;
 mod std;
 mod chunk;
 mod archetype;

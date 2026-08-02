@@ -1,26 +1,18 @@
 # src: https://rust-lang.github.io/rustfmt/
 
 unstable_features = true
-brace_style = "AlwaysNextLine" # func brace {}
-
+brace_style = "AlwaysNextLine"         # func brace {}
 control_brace_style = "AlwaysNextLine" # if else brace {}
 fn_single_line = false
-
 struct_field_align_threshold = 30
-
 format_code_in_doc_comments = true
-
-max_width = 160 # line length default 100
-
+max_width = 160                        # line length default 100
 where_single_line = true
-
 enum_discrim_align_threshold = 20
-
 inline_attribute_width = 50
-
-reorder_modules = false # macro #[enum_dispatcher] requires this
-
+reorder_modules = false                # macro #[enum_dispatcher] requires this
 use_field_init_shorthand = false
+pimports_layout = "Vertical"
+imports_granularity = "Module"
 use_try_shorthand = true
-# default attr_fn_like_width = 70
-attr_fn_like_width = 160
+attr_fn_like_width = 160               # default attr_fn_like_width = 70
