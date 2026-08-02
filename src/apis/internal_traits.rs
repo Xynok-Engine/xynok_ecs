@@ -1,16 +1,27 @@
 use std::any::TypeId;
+use std::collections::HashMap;
 
 use crate::apis::identifies::XynokEcsError;
+use crate::apis::params::ComponentSpec;
 use crate::query::access_scope::AccessScope;
+use crate::world::arch_spec::ArchetypeSpec;
 use crate::world::query_spec::QuerySpecAccessor;
 
+pub trait TQuerySrcAccess
+{
+    fn new(arch: *mut Vec<*mut ArchetypeSpec>, specs: *const HashMap<TypeId, ComponentSpec>) -> Self;
+}
 pub trait TQueryParam
 {
     type QueryItem<'a>;
-    type SrcAccess;
+    type SrcAccess<'a>: TQuerySrcAccess;
     const TYPE_ID: TypeId;
     fn access_scope() -> Result<AccessScope, XynokEcsError>;
-    fn build_src_access(src_access: &QuerySpecAccessor) -> Self::SrcAccess;
-    fn next<'a>(src_access: &mut Self::SrcAccess) -> Option<Self::QueryItem<'a>>;
+    fn next<'a>(src_access: &mut Self::SrcAccess<'a>) -> Option<Self::QueryItem<'a>>;
+    fn build_src_access<'a>(src_access: &QuerySpecAccessor) -> Self::SrcAccess<'a>
+    {
+        Self::SrcAccess::new(src_access.archetypes, src_access.component_specs)
+    }
 }
+
 pub trait TSystemParam {}

@@ -352,17 +352,19 @@ impl World
     pub(crate) fn get_or_create_query_src_access<T: TQueryParam + 'static>(&mut self) -> Result<QuerySpecAccessor, XynokEcsError>
     {
         let current_global_arch_version = self.global_archetype_version.current_val();
+        let component_specs = &self.component_counter as *const _;
+
         if let Some(query_spec) = self.query_counter.get_mut(&T::TYPE_ID)
         {
             if current_global_arch_version == query_spec.version
             {
-                return Ok(query_spec.as_accessor());
+                return Ok(query_spec.as_accessor(component_specs));
             }
 
             query_spec.archetypes.clear();
             crate::utils::build_archetype_which_contains(&mut self.archetypes, &mut query_spec.archetypes, &query_spec.access_scope);
             query_spec.version = current_global_arch_version;
-            return Ok(query_spec.as_accessor());
+            return Ok(query_spec.as_accessor(component_specs));
         }
         let mut target_archetypes: Vec<*mut ArchetypeSpec> = Vec::new();
         let access_scope = T::access_scope()?;
@@ -373,7 +375,7 @@ impl World
             version:      current_global_arch_version,
         };
 
-        let result = spec.as_accessor();
+        let result = spec.as_accessor(component_specs);
         self.query_counter.insert(T::TYPE_ID, spec);
         Ok(result)
     }

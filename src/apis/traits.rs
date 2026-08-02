@@ -1,12 +1,11 @@
 use std::any::TypeId;
 
-use crate::{
-    apis::{
-        identifies::{StorageLocation, XynokEcsError},
-        ComponentDescriptor,
-    },
-    chunk::{layout::ChunkLayout, Chunk},
-};
+use crate::apis::identifies::{StorageLocation, XynokEcsError};
+use crate::apis::ComponentDescriptor;
+use crate::chunk::layout::ChunkLayout;
+use crate::chunk::Chunk;
+pub trait TChunkComponent {}
+pub trait TArchetypeComponent {}
 pub trait TComponent: Sized
 {
     type QueryType: TComponent + 'static;

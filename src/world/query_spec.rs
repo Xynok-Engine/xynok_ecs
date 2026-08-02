@@ -1,3 +1,7 @@
+use std::any::TypeId;
+use std::collections::HashMap;
+
+use crate::apis::params::ComponentSpec;
 use crate::query::access_scope::AccessScope;
 use crate::world::arch_spec::ArchetypeSpec;
 
@@ -10,14 +14,16 @@ pub struct QuerySpec
 #[derive(Clone, Copy)]
 pub struct QuerySpecAccessor
 {
-    pub archetypes: *mut Vec<*mut ArchetypeSpec>,
+    pub archetypes:      *mut Vec<*mut ArchetypeSpec>,
+    pub component_specs: *const HashMap<TypeId, ComponentSpec>,
 }
 impl QuerySpec
 {
-    pub fn as_accessor(&mut self) -> QuerySpecAccessor
+    pub fn as_accessor(&mut self, component_specs: *const HashMap<TypeId, ComponentSpec>) -> QuerySpecAccessor
     {
         QuerySpecAccessor {
-            archetypes: &mut self.archetypes as *mut _,
+            archetypes:      &mut self.archetypes as *mut _,
+            component_specs: component_specs,
         }
     }
 }

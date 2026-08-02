@@ -1,6 +1,6 @@
 #![allow(unused)]
 use crate::apis::identifies::XynokEcsError;
-use crate::apis::internal_traits::TQueryParam;
+use crate::apis::internal_traits::{TQueryParam, TQuerySrcAccess};
 use crate::apis::traits::TComponent;
 use crate::query::access_scope::AccessScope;
 use crate::query::src_access::SrcAccess;
@@ -13,7 +13,7 @@ impl<T: TComponent + 'static> TQueryParam for &T
 {
     type QueryItem<'a> = &'a T;
 
-    type SrcAccess = SrcAccess;
+    type SrcAccess<'a> = SrcAccess<'a>;
 
     const TYPE_ID: TypeId = TypeId::of::<T::StorageType>();
 
@@ -26,31 +26,8 @@ impl<T: TComponent + 'static> TQueryParam for &T
         })
     }
 
-    fn build_src_access(src_access: &QuerySpecAccessor) -> Self::SrcAccess
+    fn next<'a>(src_access: &mut Self::SrcAccess<'a>) -> Option<Self::QueryItem<'a>>
     {
-        let current_chunk_len = match src_access.len() > 0
-        {
-            true =>
-            {
-                let first_arch = unsafe { &**(src_access.as_mut_ptr()) };
-                first_arch.arch.chunk_count()
-            }
-            false => 0usize,
-        };
-        SrcAccess {
-            archetypes:        src_access.as_mut_ptr(),
-            total_arch:        src_access.len(),
-            current_arch_idx:  0,
-            current_chunk_len: 0,
-            current_chunk_idx: 0,
-        }
-    }
-
-    fn next<'a>(src_access: &mut Self::SrcAccess) -> Option<Self::QueryItem<'a>>
-    {
-        let current_chunk_len = src_access.current_chunk_len;
-        let current_chunk_len = src_access.current_chunk_len;
-        let current_chunk_len = src_access.current_chunk_len;
         todo!()
     }
 }

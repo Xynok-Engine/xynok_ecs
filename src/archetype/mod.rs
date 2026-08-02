@@ -212,6 +212,10 @@ impl Archetype
     {
         self.chunks.len()
     }
+    pub(crate) fn chunk_at(&self, chunk_idx: usize) -> &Chunk
+    {
+        &self.chunks[chunk_idx]
+    }
     pub(crate) fn dispose(&mut self, layout: &ChunkLayout, component_specs: &HashMap<TypeId, ComponentSpec>)
     {
         for c in self.chunks.iter_mut()
@@ -246,10 +250,6 @@ impl Archetype
 #[cfg(test)]
 impl Archetype
 {
-    pub(crate) fn chunk_at(&self, chunk_idx: usize) -> &Chunk
-    {
-        &self.chunks[chunk_idx]
-    }
     pub(crate) fn free_chunk_count(&self) -> usize
     {
         self.free_chunks.len()

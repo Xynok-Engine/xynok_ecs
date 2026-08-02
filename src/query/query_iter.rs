@@ -5,8 +5,7 @@ use crate::world::query_spec::QuerySpecAccessor;
 
 pub struct QueryIter<'a, T: TQueryParam + 'static>
 {
-    accessor:   QuerySpecAccessor,
-    src_access: T::SrcAccess,
+    src_access: T::SrcAccess<'a>,
     phantom:    PhantomData<(&'a (), T)>,
 }
 
@@ -24,10 +23,8 @@ impl<'a, T: TQueryParam + 'static> QueryIter<'a, T>
 {
     pub(crate) fn new(access: QuerySpecAccessor) -> Self
     {
-        let src_access = T::build_src_access(&access);
         Self {
-            accessor:   access,
-            src_access: src_access,
+            src_access: T::build_src_access(&access),
             phantom:    PhantomData,
         }
     }
