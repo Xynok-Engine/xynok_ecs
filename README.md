@@ -16,7 +16,8 @@
 | todo | persistent query | queries can have a static lifetime, initialized once and reused indefinitely |
 | todo | system & scheduler | a distributed modifier component system where users can register or remove systems for scheduling |
 | todo | singleton |  |
-| Item1.2 | Item2.2 | Item3.2 |
+| todo | Benchmark with flec |  |
+| todo | entity graph | |
 | Item1.2 | Item2.2 | Item3.2 |
 | Item1.2 | Item2.2 | Item3.2 |
 
