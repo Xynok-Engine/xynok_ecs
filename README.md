@@ -1,5 +1,7 @@
 # xynok_ecs
 [![discord invite link](https://img.shields.io/discord/1495504680711880714?logo=discord)](https://discord.gg/a2qzfrFzWT)
+## Current Benchmark(v0.1.0)
+![almost_faster_2x_bevy_ecs](assets/benchmark_v0.1.0.png)
 
 ## Features
 | status | feature | description |
