@@ -62,4 +62,21 @@ no extra flags are needed to run them.
 cargo test
 ```
 
+### Benchmarks
+`benches/` is a separate crate (`xynok_ecs_benches`) comparing single-threaded query iteration
+against `bevy_ecs` and a plain `std::Vec` baseline — named `query_single_thread` since
+`xynok_ecs` has no system scheduler or parallelism yet. For every entity count it measures:
+- **allocation**: bytes/allocations made while creating the entities (setup only)
+- **speed**: time per query pass, timed only after a warmup and with the sample buffer
+  pre-allocated, so no allocation from the harness itself can leak into the measurement
+- **leak**: live bytes still allocated after the storage is dropped (should be 0)
+
+Results print as a table in the terminal and are also written to `benches/output/results.json`
+and `benches/output/report.html` (a self-contained page with charts comparing all three).
+
+**Cmd:** (always use `--release`; a debug build makes the speed numbers meaningless)
+```bash
+cargo run --release -p xynok_ecs_benches
+```
+
 

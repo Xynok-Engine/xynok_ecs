@@ -1,7 +1,10 @@
 # default build files of Rust for all folders
 **/target/
 
-# macOS 
+# macOS
 *.DS_Store
+
+# generated benchmark reports
+benches/output/
 
 

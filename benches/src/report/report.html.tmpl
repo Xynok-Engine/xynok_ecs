@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>xynok_ecs query_single_thread benchmark</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --fg: #1a1a1a;
+    --muted: #6b7280;
+    --card-bg: #f7f7f8;
+    --border: #e5e7eb;
+    --c0: #4f7cff; /* xynok_ecs */
+    --c1: #ff8a3d; /* bevy_ecs */
+    --c2: #35b06b; /* std::Vec */
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14161a;
+      --fg: #eaeaea;
+      --muted: #9aa0aa;
+      --card-bg: #1c1f26;
+      --border: #2a2e37;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 2rem;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  }
+  h1 { font-size: 1.4rem; margin-bottom: 0.25rem; }
+  .subtitle { color: var(--muted); margin-bottom: 1.5rem; font-size: 0.9rem; }
+  .legend { display: flex; gap: 1.25rem; margin-bottom: 1.5rem; flex-wrap: wrap; }
+  .legend-item { display: flex; align-items: center; gap: 0.4rem; font-size: 0.85rem; }
+  .swatch { width: 0.8rem; height: 0.8rem; border-radius: 2px; display: inline-block; }
+  section { margin-bottom: 2.5rem; }
+  section > h2 { font-size: 1.05rem; margin-bottom: 0.2rem; }
+  section > p.desc { color: var(--muted); font-size: 0.85rem; margin-top: 0; margin-bottom: 1rem; }
+  .chart-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 1rem;
+  }
+  .chart-card {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1rem;
+    overflow-x: auto;
+  }
+  .chart-card h3 {
+    margin: 0 0 0.75rem 0;
+    font-size: 0.85rem;
+    color: var(--muted);
+    font-weight: 600;
+  }
+  .bar-label { font-size: 0.72rem; fill: var(--fg); }
+  .bar-value { font-size: 0.72rem; fill: var(--muted); }
+  table { border-collapse: collapse; width: 100%; font-size: 0.82rem; }
+  th, td { text-align: right; padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--border); }
+  th:first-child, td:first-child { text-align: left; }
+  th { color: var(--muted); font-weight: 600; }
+  .table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 10px; }
+</style>
+</head>
+<body>
+  <h1>xynok_ecs — query_single_thread benchmark</h1>
+  <p class="subtitle">
+    Comparing single-threaded query iteration across <code>xynok_ecs</code>, <code>bevy_ecs</code>,
+    and a plain <code>std::Vec</code> baseline. The query loop is timed in isolation from setup:
+    allocation observed during setup is reported separately from allocation (if any) observed
+    during the timed query loop itself.
+  </p>
+  <div class="legend" id="legend"></div>
+
+  <section>
+    <h2>Query speed (mean time per pass, lower is better)</h2>
+    <p class="desc">Time to run one full "position += velocity" pass over every matching entity.</p>
+    <div class="chart-grid" id="chart-speed"></div>
+  </section>
+
+  <section>
+    <h2>Setup allocation (lower is better)</h2>
+    <p class="desc">Bytes allocated while creating every entity/component, before any query runs.</p>
+    <div class="chart-grid" id="chart-setup-alloc"></div>
+  </section>
+
+  <section>
+    <h2>Query-loop allocation (isolation check, should be ~0)</h2>
+    <p class="desc">
+      Bytes allocated strictly inside the timed query loop. Non-zero here means the measured
+      "speed" above is not query-only for that competitor at that size.
+    </p>
+    <div class="chart-grid" id="chart-query-alloc"></div>
+  </section>
+
+  <section>
+    <h2>Leaked bytes after drop (should be 0)</h2>
+    <p class="desc">Live bytes still allocated after the storage was dropped, relative to before setup.</p>
+    <div class="chart-grid" id="chart-leak"></div>
+  </section>
+
+  <section>
+    <h2>Raw results</h2>
+    <div class="table-wrap">
+      <table id="raw-table"></table>
+    </div>
+  </section>
+
+<script>
+const DATA = __BENCH_DATA_JSON__;
+const COLORS = { "xynok_ecs": "var(--c0)", "bevy_ecs": "var(--c1)", "std::Vec": "var(--c2)" };
+const SVGNS = "http://www.w3.org/2000/svg";
+
+function libraries() {
+  return [...new Set(DATA.map(r => r.library))];
+}
+function entityCounts() {
+  return [...new Set(DATA.map(r => r.entity_count))].sort((a, b) => a - b);
+}
+
+function fmtBytes(bytes) {
+  if (bytes >= 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(2) + " MB";
+  if (bytes >= 1024) return (bytes / 1024).toFixed(2) + " KB";
+  return bytes + " B";
+}
+function fmtNs(ns) {
+  if (ns >= 1_000_000) return (ns / 1_000_000).toFixed(3) + " ms";
+  if (ns >= 1_000) return (ns / 1_000).toFixed(2) + " us";
+  return ns + " ns";
+}
+
+function renderLegend() {
+  const el = document.getElementById("legend");
+  for (const lib of libraries()) {
+    const item = document.createElement("div");
+    item.className = "legend-item";
+    item.innerHTML = `<span class="swatch" style="background:${COLORS[lib] ?? "#999"}"></span>${lib}`;
+    el.appendChild(item);
+  }
+}
+
+/// Draws one grouped-bar SVG chart (one bar per library) for a single entity count, scaled to
+/// the max value within this chart only, so small entity counts stay readable.
+function renderBarChart(container, entityCount, values, formatter) {
+  const width = 300, height = 170, padding = { top: 10, right: 10, bottom: 34, left: 10 };
+  const plotW = width - padding.left - padding.right;
+  const plotH = height - padding.top - padding.bottom;
+  const libs = libraries();
+  const maxVal = Math.max(1, ...libs.map(l => values[l] ?? 0));
+  const barW = plotW / libs.length;
+
+  const svg = document.createElementNS(SVGNS, "svg");
+  svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+  svg.setAttribute("width", "100%");
+  svg.setAttribute("height", height);
+
+  libs.forEach((lib, i) => {
+    const val = values[lib] ?? 0;
+    const barH = maxVal > 0 ? (val / maxVal) * plotH : 0;
+    const x = padding.left + i * barW + barW * 0.15;
+    const w = barW * 0.7;
+    const y = padding.top + (plotH - barH);
+
+    const rect = document.createElementNS(SVGNS, "rect");
+    rect.setAttribute("x", x);
+    rect.setAttribute("y", y);
+    rect.setAttribute("width", w);
+    rect.setAttribute("height", Math.max(barH, 1));
+    rect.setAttribute("fill", COLORS[lib] ?? "#999");
+    rect.setAttribute("rx", "3");
+    const title = document.createElementNS(SVGNS, "title");
+    title.textContent = `${lib}: ${formatter(val)}`;
+    rect.appendChild(title);
+    svg.appendChild(rect);
+
+    const valueLabel = document.createElementNS(SVGNS, "text");
+    valueLabel.setAttribute("x", x + w / 2);
+    valueLabel.setAttribute("y", Math.max(y - 4, 10));
+    valueLabel.setAttribute("text-anchor", "middle");
+    valueLabel.setAttribute("class", "bar-value");
+    valueLabel.textContent = formatter(val);
+    svg.appendChild(valueLabel);
+
+    const nameLabel = document.createElementNS(SVGNS, "text");
+    nameLabel.setAttribute("x", x + w / 2);
+    nameLabel.setAttribute("y", height - padding.bottom + 16);
+    nameLabel.setAttribute("text-anchor", "middle");
+    nameLabel.setAttribute("class", "bar-label");
+    nameLabel.textContent = lib;
+    svg.appendChild(nameLabel);
+  });
+
+  const card = document.createElement("div");
+  card.className = "chart-card";
+  card.innerHTML = `<h3>${entityCount.toLocaleString()} entities</h3>`;
+  card.appendChild(svg);
+  container.appendChild(card);
+}
+
+function renderMetric(containerId, pick, formatter) {
+  const container = document.getElementById(containerId);
+  for (const ec of entityCounts()) {
+    const values = {};
+    for (const r of DATA.filter(r => r.entity_count === ec)) {
+      values[r.library] = pick(r);
+    }
+    renderBarChart(container, ec, values, formatter);
+  }
+}
+
+function renderRawTable() {
+  const table = document.getElementById("raw-table");
+  const headers = [
+    "library", "entities", "setup alloc", "setup allocs",
+    "query min", "query mean", "query median", "query max",
+    "query-loop alloc", "leaked bytes",
+  ];
+  const thead = document.createElement("thead");
+  thead.innerHTML = "<tr>" + headers.map(h => `<th>${h}</th>`).join("") + "</tr>";
+  table.appendChild(thead);
+
+  const tbody = document.createElement("tbody");
+  const rows = [...DATA].sort((a, b) => a.entity_count - b.entity_count || a.library.localeCompare(b.library));
+  for (const r of rows) {
+    const tr = document.createElement("tr");
+    const cells = [
+      r.library,
+      r.entity_count.toLocaleString(),
+      fmtBytes(r.setup_alloc.bytes),
+      r.setup_alloc.allocations.toLocaleString(),
+      fmtNs(r.query_timing.min_ns),
+      fmtNs(r.query_timing.mean_ns),
+      fmtNs(r.query_timing.median_ns),
+      fmtNs(r.query_timing.max_ns),
+      fmtBytes(r.query_alloc.bytes),
+      r.leaked_bytes.toLocaleString(),
+    ];
+    tr.innerHTML = cells.map(c => `<td>${c}</td>`).join("");
+    tbody.appendChild(tr);
+  }
+  table.appendChild(tbody);
+}
+
+renderLegend();
+renderMetric("chart-speed", r => r.query_timing.mean_ns, fmtNs);
+renderMetric("chart-setup-alloc", r => r.setup_alloc.bytes, fmtBytes);
+renderMetric("chart-query-alloc", r => r.query_alloc.bytes, fmtBytes);
+renderMetric("chart-leak", r => r.leaked_bytes, v => v.toLocaleString() + " B");
+renderRawTable();
+</script>
+</body>
+</html>
