@@ -208,10 +208,12 @@ impl Archetype
 }
 impl Archetype
 {
+    #[inline]
     pub(crate) fn chunk_count(&self) -> usize
     {
         self.chunks.len()
     }
+    #[inline]
     pub(crate) fn chunk_at(&self, chunk_idx: usize) -> &Chunk
     {
         &self.chunks[chunk_idx]

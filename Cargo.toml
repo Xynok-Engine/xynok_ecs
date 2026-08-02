@@ -1,6 +1,10 @@
 [workspace]
 members = ["proc_macro", "benches"]
 
+[profile.release]
+lto           = "thin"
+codegen-units = 1
+
 [package]
 name = "xynok_ecs"
 version = "0.1.0"

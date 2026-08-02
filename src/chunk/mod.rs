@@ -35,24 +35,29 @@ impl Chunk
         }
     }
 
+    #[inline]
     pub fn ptr(&self) -> *mut u8
     {
         self.ptr
     }
+    #[inline]
     pub fn len(&self) -> usize
     {
         self.len
     }
 
+    #[inline]
     pub fn is_full(&self) -> bool
     {
         self.len() >= self.max_len
     }
+    #[inline]
     pub fn is_empty(&self) -> bool
     {
         self.len < 1
     }
 
+    #[inline]
     pub fn get_component<'a, C: TComponent + 'static>(&self, layout: &ChunkLayout, row: usize) -> Result<&'a C, XynokEcsError>
     {
         if row >= self.len()
@@ -62,6 +67,7 @@ impl Chunk
         let base = self.components_ptr::<C>(layout)?;
         Ok(unsafe { &*(base as *const C).add(row) })
     }
+    #[inline]
     pub fn get_component_mut<'a, C: TComponent + 'static>(&mut self, layout: &ChunkLayout, row: usize) -> Result<&'a mut C, XynokEcsError>
     {
         if row >= self.len()
@@ -73,18 +79,21 @@ impl Chunk
     }
 
     /// A slice `&[C]` of the component column `C` (inline) within the chunk, containing all rows
+    #[inline]
     pub fn get_components<'a, C: TComponent + 'static>(&self, layout: &ChunkLayout) -> Result<&'a [C], XynokEcsError>
     {
         let base = self.components_ptr::<C>(layout)?;
         Ok(unsafe { std::slice::from_raw_parts(base as *const C, self.len()) })
     }
 
+    #[inline]
     pub fn get_components_mut<'a, C: TComponent + 'static>(&mut self, layout: &ChunkLayout) -> Result<&'a mut [C], XynokEcsError>
     {
         let base = self.components_ptr::<C>(layout)?;
         Ok(unsafe { std::slice::from_raw_parts_mut(base as *mut C, self.len()) })
     }
 
+    #[inline]
     pub fn get_entity<'a>(&self, layout: &ChunkLayout, row: usize) -> Result<&'a Entity, XynokEcsError>
     {
         if row >= self.len()
@@ -93,6 +102,7 @@ impl Chunk
         }
         Ok(unsafe { self.get_entity_uncheck(layout, row) })
     }
+    #[inline]
     pub fn get_entities<'a>(&self, layout: &ChunkLayout) -> Result<&'a [Entity], XynokEcsError>
     {
         unsafe {
@@ -242,6 +252,7 @@ impl Chunk
 }
 impl Chunk
 {
+    #[inline]
     pub(crate) unsafe fn get_entity_uncheck<'a>(&self, layout: &ChunkLayout, row: usize) -> &'a Entity
     {
         unsafe {
@@ -249,6 +260,7 @@ impl Chunk
             &*(entities_ptr as *const Entity).add(row)
         }
     }
+    #[inline]
     pub(crate) unsafe fn get_entity_uncheck_mut<'a>(&mut self, layout: &ChunkLayout, row: usize) -> &'a mut Entity
     {
         unsafe {
@@ -259,10 +271,12 @@ impl Chunk
 }
 impl Chunk
 {
+    #[inline]
     pub(crate) unsafe fn increase_len(&mut self)
     {
         self.len += 1;
     }
+    #[inline]
     pub(crate) unsafe fn decrease_len(&mut self)
     {
         self.len -= 1;
@@ -324,6 +338,7 @@ impl Chunk
 }
 impl Chunk
 {
+    #[inline]
     fn components_ptr<T: TComponent + 'static>(&self, layout: &ChunkLayout) -> Result<*mut u8, XynokEcsError>
     {
         let col_des = match layout.component_col_descriptors.get(&std::any::TypeId::of::<T::StorageType>())

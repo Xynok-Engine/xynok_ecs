@@ -41,6 +41,7 @@ impl<'a> TQuerySrcAccess for SrcAccess<'a>
 }
 impl<'a> SrcAccess<'a>
 {
+    #[inline]
     #[track_caller]
     pub(crate) fn next<T: TComponent + 'static>(&mut self) -> Option<&'a T>
     {
@@ -59,6 +60,7 @@ impl<'a> SrcAccess<'a>
             }
         }
     }
+    #[inline]
     #[track_caller]
     pub(crate) fn next_mut<T: TComponent + 'static>(&mut self) -> Option<&'a mut T>
     {
@@ -78,6 +80,7 @@ impl<'a> SrcAccess<'a>
         }
     }
 
+    #[inline]
     #[track_caller]
     fn advance_to_next_chunk<T: TComponent + 'static>(&mut self) -> bool
     {

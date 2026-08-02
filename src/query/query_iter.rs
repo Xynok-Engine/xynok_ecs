@@ -13,6 +13,7 @@ impl<'a, T: TQueryParam + 'static> Iterator for QueryIter<'a, T>
 {
     type Item = T::QueryItem<'a>;
 
+    #[inline]
     #[track_caller]
     fn next(&mut self) -> Option<Self::Item>
     {

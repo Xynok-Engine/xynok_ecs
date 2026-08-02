@@ -44,6 +44,7 @@ macro_rules! impl_tuple_query_param {
         }
         impl<'a, $($q: TQueryColumn),+> $src<'a, $($q,)+>
         {
+            #[inline]
             #[track_caller]
             pub(crate) fn next(&mut self) -> Option<($($q::QueryItem<'a>,)+)>
             {
@@ -66,6 +67,7 @@ macro_rules! impl_tuple_query_param {
             /// Crosses into the next non-empty chunk, resolving every column's base pointer in
             /// one pass so the archetype/chunk pointer chain is only walked once per chunk, not
             /// once per component.
+            #[inline]
             #[track_caller]
             fn advance_to_next_chunk(&mut self) -> bool
             {
