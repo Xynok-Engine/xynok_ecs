@@ -4,7 +4,7 @@
 ![almost_faster_2x_bevy_ecs](assets/benchmark_v0.1.0.png)
 
 ## Features
-| status | feature | description |
+| status | feature | description or note |
 | --------------- | --------------- | --------------- |
 | ✅ | register archetype | register an archetype without spawning any data |
 | ✅ | create/destroy | create and destroy entities and their associated data |
@@ -16,8 +16,8 @@
 | todo | persistent query | queries can have a static lifetime, initialized once and reused indefinitely |
 | todo | system & scheduler | a distributed modifier component system where users can register or remove systems for scheduling |
 | todo | singleton |  |
-| todo | Benchmark with flec |  |
-| todo | entity graph | |
+| todo | Benchmark with flec | https://www.flecs.dev/flecs/md_docs_2Docs.html |
+| todo | entity graph |  |
 | Item1.2 | Item2.2 | Item3.2 |
 | Item1.2 | Item2.2 | Item3.2 |
 
