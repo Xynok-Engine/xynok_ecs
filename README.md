@@ -21,9 +21,8 @@
 ## Concepts
 To understand how the entire codebase works, you can check out these [videos](https://www.youtube.com/@xynok_youtube/playlists). I created them when I first started this repo. They explain the core concepts and the most important ideas that the codebase implements. I might update them in the future, but for now, they are a close match to the current state of the code.
 
-
-## For Contributors
-### Examples
+## Examples
+You can find all the examples in the [examples directory](./examples). To run an example:
 **Cmd:** 
 ```bash
 cargo run --example <name_of_rust_file_in_examples_folder>
@@ -32,6 +31,8 @@ cargo run --example <name_of_rust_file_in_examples_folder>
 ```bash
 cargo run --example archetype
 ```
+
+## For Contributors
 
 ### Tests
 Storage-layout unit tests (chunk alignment, entity packing) live inline next to the code they
