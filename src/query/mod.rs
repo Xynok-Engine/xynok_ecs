@@ -11,12 +11,22 @@ pub(crate) mod access_scope;
 mod src_access;
 mod tuple;
 mod variant;
-#[derive(Clone, Copy)]
 pub struct Query<T: TQueryParam + 'static>
 {
     accessor: QuerySpecAccessor,
     phantom:  PhantomData<T>,
 }
+
+// Not derived: `#[derive(Clone, Copy)]` would add a spurious `T: Clone + Copy` bound, which
+// breaks queries like `Query<&mut Hp>` even though neither field actually depends on it.
+impl<T: TQueryParam + 'static> Clone for Query<T>
+{
+    fn clone(&self) -> Self
+    {
+        *self
+    }
+}
+impl<T: TQueryParam + 'static> Copy for Query<T> {}
 
 impl<T: TQueryParam + 'static> Query<T>
 {
@@ -30,11 +40,11 @@ impl<T: TQueryParam + 'static> Query<T>
     }
 }
 
-impl<'a, T: TQueryParam + 'static> IntoIterator for &'a Query<T>
+impl<T: TQueryParam + 'static> IntoIterator for Query<T>
 {
-    type Item = T::QueryItem<'a>;
+    type Item = T::QueryItem<'static>;
 
-    type IntoIter = QueryIter<'a, T>;
+    type IntoIter = QueryIter<'static, T>;
 
     fn into_iter(self) -> Self::IntoIter
     {

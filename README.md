@@ -4,11 +4,12 @@
 ## Features
 - [x] register archetype
 - [x] create/destroy entity
-- [x] add/remove component
+- [x] add/remove/merge component
 - [x] drop chunk data
 - [x] tuple archetypes
 - [x] merge chunk/archetype layout
 - [x] query read/write
+    - [x] persistent query
 - [ ] system scheduler
 
 

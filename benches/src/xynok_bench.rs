@@ -29,7 +29,7 @@ impl EcsBenchmark for XynokBenchmark
 
     fn run_query_once(_storage: &mut World, query: &mut Self::PreparedQuery)
     {
-        for (pos, vel) in &*query
+        for (pos, vel) in *query
         {
             pos.x += vel.x;
             pos.y += vel.y;
