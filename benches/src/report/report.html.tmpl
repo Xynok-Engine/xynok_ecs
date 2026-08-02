@@ -32,10 +32,23 @@
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
   }
   h1 { font-size: 1.4rem; margin-bottom: 0.25rem; }
-  .subtitle { color: var(--muted); margin-bottom: 1.5rem; font-size: 0.9rem; }
-  .legend { display: flex; gap: 1.25rem; margin-bottom: 1.5rem; flex-wrap: wrap; }
+  .subtitle { color: var(--muted); margin-bottom: 1.5rem; font-size: 0.9rem; max-width: 70rem; }
+  .legend { display: flex; gap: 1.25rem; margin-bottom: 1.25rem; flex-wrap: wrap; }
   .legend-item { display: flex; align-items: center; gap: 0.4rem; font-size: 0.85rem; }
   .swatch { width: 0.8rem; height: 0.8rem; border-radius: 2px; display: inline-block; }
+  .controls { display: flex; gap: 1.5rem; margin-bottom: 1.75rem; flex-wrap: wrap; align-items: center; }
+  .control-group { display: flex; gap: 0.5rem; align-items: center; font-size: 0.85rem; }
+  .control-group span { color: var(--muted); }
+  .control-group button {
+    border: 1px solid var(--border);
+    background: var(--card-bg);
+    color: var(--fg);
+    border-radius: 6px;
+    padding: 0.3rem 0.7rem;
+    font-size: 0.82rem;
+    cursor: pointer;
+  }
+  .control-group button.active { background: var(--c0); color: #fff; border-color: var(--c0); }
   section { margin-bottom: 2.5rem; }
   section > h2 { font-size: 1.05rem; margin-bottom: 0.2rem; }
   section > p.desc { color: var(--muted); font-size: 0.85rem; margin-top: 0; margin-bottom: 1rem; }
@@ -59,8 +72,8 @@
   }
   .bar-label { font-size: 0.72rem; fill: var(--fg); }
   .bar-value { font-size: 0.72rem; fill: var(--muted); }
-  table { border-collapse: collapse; width: 100%; font-size: 0.82rem; }
-  th, td { text-align: right; padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--border); }
+  table { border-collapse: collapse; width: 100%; font-size: 0.8rem; }
+  th, td { text-align: right; padding: 0.35rem 0.55rem; border-bottom: 1px solid var(--border); white-space: nowrap; }
   th:first-child, td:first-child { text-align: left; }
   th { color: var(--muted); font-weight: 600; }
   .table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 10px; }
@@ -70,16 +83,31 @@
   <h1>xynok_ecs — query_single_thread benchmark</h1>
   <p class="subtitle">
     Comparing single-threaded query iteration across <code>xynok_ecs</code>, <code>bevy_ecs</code>,
-    and a plain <code>std::Vec</code> baseline. The query loop is timed in isolation from setup:
-    allocation observed during setup is reported separately from allocation (if any) observed
-    during the timed query loop itself.
+    and a plain <code>std::Vec</code> baseline, across every combination of query arity (1, 2, or 3
+    components) and archetype layout (all entities in one archetype, or fanned out across 5
+    archetypes that all carry the queried components). The query loop is timed in isolation from
+    setup: allocation observed during setup is reported separately from allocation (if any)
+    observed during the timed query loop itself. Each timed sample batches enough back-to-back
+    calls to outlast timer overhead, and library run order is randomized within each scenario to
+    avoid systematically penalizing whichever one happens to run under CPU throttling.
   </p>
   <div class="legend" id="legend"></div>
 
+  <div class="controls">
+    <div class="control-group"><span>components:</span><div id="filter-components"></div></div>
+    <div class="control-group"><span>layout:</span><div id="filter-layout"></div></div>
+  </div>
+
   <section>
     <h2>Query speed (mean time per pass, lower is better)</h2>
-    <p class="desc">Time to run one full "position += velocity" pass over every matching entity.</p>
+    <p class="desc">Time to run one full read/write pass over every matching entity, for the selected scenario.</p>
     <div class="chart-grid" id="chart-speed"></div>
+  </section>
+
+  <section>
+    <h2>Query speed, p99 (tail latency, lower is better)</h2>
+    <p class="desc">99th-percentile time per pass — how bad the slow samples get, not just the average.</p>
+    <div class="chart-grid" id="chart-p99"></div>
   </section>
 
   <section>
@@ -104,7 +132,7 @@
   </section>
 
   <section>
-    <h2>Raw results</h2>
+    <h2>Raw results (all scenarios)</h2>
     <div class="table-wrap">
       <table id="raw-table"></table>
     </div>
@@ -115,11 +143,22 @@ const DATA = __BENCH_DATA_JSON__;
 const COLORS = { "xynok_ecs": "var(--c0)", "bevy_ecs": "var(--c1)", "std::Vec": "var(--c2)" };
 const SVGNS = "http://www.w3.org/2000/svg";
 
+const state = { componentCount: null, layout: null };
+
 function libraries() {
   return [...new Set(DATA.map(r => r.library))];
 }
 function entityCounts() {
   return [...new Set(DATA.map(r => r.entity_count))].sort((a, b) => a - b);
+}
+function componentCounts() {
+  return [...new Set(DATA.map(r => r.component_count))].sort((a, b) => a - b);
+}
+function layouts() {
+  return [...new Set(DATA.map(r => r.archetype_layout))];
+}
+function scenarioData() {
+  return DATA.filter(r => r.component_count === state.componentCount && r.archetype_layout === state.layout);
 }
 
 function fmtBytes(bytes) {
@@ -130,16 +169,40 @@ function fmtBytes(bytes) {
 function fmtNs(ns) {
   if (ns >= 1_000_000) return (ns / 1_000_000).toFixed(3) + " ms";
   if (ns >= 1_000) return (ns / 1_000).toFixed(2) + " us";
-  return ns + " ns";
+  return Math.round(ns) + " ns";
 }
 
 function renderLegend() {
   const el = document.getElementById("legend");
+  el.innerHTML = "";
   for (const lib of libraries()) {
     const item = document.createElement("div");
     item.className = "legend-item";
     item.innerHTML = `<span class="swatch" style="background:${COLORS[lib] ?? "#999"}"></span>${lib}`;
     el.appendChild(item);
+  }
+}
+
+function renderFilters() {
+  const compEl = document.getElementById("filter-components");
+  compEl.innerHTML = "";
+  for (const c of componentCounts()) {
+    const btn = document.createElement("button");
+    btn.textContent = `${c} component${c > 1 ? "s" : ""}`;
+    btn.className = c === state.componentCount ? "active" : "";
+    btn.onclick = () => { state.componentCount = c; renderAll(); };
+    compEl.appendChild(btn);
+  }
+
+  const layoutEl = document.getElementById("filter-layout");
+  layoutEl.innerHTML = "";
+  const layoutLabels = { "Single": "1 archetype", "Fragmented5": "5 archetypes" };
+  for (const l of layouts()) {
+    const btn = document.createElement("button");
+    btn.textContent = layoutLabels[l] ?? l;
+    btn.className = l === state.layout ? "active" : "";
+    btn.onclick = () => { state.layout = l; renderAll(); };
+    layoutEl.appendChild(btn);
   }
 }
 
@@ -203,9 +266,11 @@ function renderBarChart(container, entityCount, values, formatter) {
 
 function renderMetric(containerId, pick, formatter) {
   const container = document.getElementById(containerId);
+  container.innerHTML = "";
+  const data = scenarioData();
   for (const ec of entityCounts()) {
     const values = {};
-    for (const r of DATA.filter(r => r.entity_count === ec)) {
+    for (const r of data.filter(r => r.entity_count === ec)) {
       values[r.library] = pick(r);
     }
     renderBarChart(container, ec, values, formatter);
@@ -214,28 +279,41 @@ function renderMetric(containerId, pick, formatter) {
 
 function renderRawTable() {
   const table = document.getElementById("raw-table");
+  table.innerHTML = "";
   const headers = [
-    "library", "entities", "setup alloc", "setup allocs",
-    "query min", "query mean", "query median", "query max",
+    "library", "entities", "components", "layout", "setup alloc", "setup allocs",
+    "min", "mean", "median", "p95", "p99", "max", "stddev", "batch size",
     "query-loop alloc", "leaked bytes",
   ];
   const thead = document.createElement("thead");
   thead.innerHTML = "<tr>" + headers.map(h => `<th>${h}</th>`).join("") + "</tr>";
   table.appendChild(thead);
 
+  const layoutLabels = { "Single": "1 archetype", "Fragmented5": "5 archetypes" };
   const tbody = document.createElement("tbody");
-  const rows = [...DATA].sort((a, b) => a.entity_count - b.entity_count || a.library.localeCompare(b.library));
+  const rows = [...DATA].sort((a, b) =>
+    a.entity_count - b.entity_count
+    || a.component_count - b.component_count
+    || a.archetype_layout.localeCompare(b.archetype_layout)
+    || a.library.localeCompare(b.library)
+  );
   for (const r of rows) {
     const tr = document.createElement("tr");
     const cells = [
       r.library,
       r.entity_count.toLocaleString(),
+      r.component_count,
+      layoutLabels[r.archetype_layout] ?? r.archetype_layout,
       fmtBytes(r.setup_alloc.bytes),
       r.setup_alloc.allocations.toLocaleString(),
       fmtNs(r.query_timing.min_ns),
       fmtNs(r.query_timing.mean_ns),
       fmtNs(r.query_timing.median_ns),
+      fmtNs(r.query_timing.p95_ns),
+      fmtNs(r.query_timing.p99_ns),
       fmtNs(r.query_timing.max_ns),
+      fmtNs(r.query_timing.stddev_ns),
+      r.query_timing.batch_size,
       fmtBytes(r.query_alloc.bytes),
       r.leaked_bytes.toLocaleString(),
     ];
@@ -245,11 +323,19 @@ function renderRawTable() {
   table.appendChild(tbody);
 }
 
+function renderAll() {
+  renderFilters();
+  renderMetric("chart-speed", r => r.query_timing.mean_ns, fmtNs);
+  renderMetric("chart-p99", r => r.query_timing.p99_ns, fmtNs);
+  renderMetric("chart-setup-alloc", r => r.setup_alloc.bytes, fmtBytes);
+  renderMetric("chart-query-alloc", r => r.query_alloc.bytes, fmtBytes);
+  renderMetric("chart-leak", r => r.leaked_bytes, v => v.toLocaleString() + " B");
+}
+
+state.componentCount = componentCounts()[0];
+state.layout = layouts()[0];
 renderLegend();
-renderMetric("chart-speed", r => r.query_timing.mean_ns, fmtNs);
-renderMetric("chart-setup-alloc", r => r.setup_alloc.bytes, fmtBytes);
-renderMetric("chart-query-alloc", r => r.query_alloc.bytes, fmtBytes);
-renderMetric("chart-leak", r => r.leaked_bytes, v => v.toLocaleString() + " B");
+renderAll();
 renderRawTable();
 </script>
 </body>
