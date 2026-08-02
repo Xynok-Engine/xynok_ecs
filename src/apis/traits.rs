@@ -43,7 +43,6 @@ pub trait TArchetype: Sized
 
     fn write_at(layout: &ChunkLayout, chunk: &mut Chunk, write_idx: usize, val: Self) -> Result<(), XynokEcsError>;
     fn take_from(layout: &ChunkLayout, chunk: &mut Chunk, idx: usize) -> Result<Self, XynokEcsError>;
-    /// drops the old values already stored at `row` and writes `val` in their place. Used when merging
     fn replace_at(layout: &ChunkLayout, chunk: &mut Chunk, row: usize, val: Self) -> Result<(), XynokEcsError>;
 
     //fn remove_at(

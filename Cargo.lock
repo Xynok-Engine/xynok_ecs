@@ -69,6 +69,7 @@ version = "0.1.0"
 dependencies = [
  "log",
  "thiserror",
+ "xynok_ecs",
  "xynok_ecs_proc_macro",
 ]
 

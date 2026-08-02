@@ -103,4 +103,32 @@ mod test
         println!("ver: {}", e.version());
         debug_assert!(e.version() == Entity::MAX_VERSION);
     }
+
+    #[test]
+    fn pack_roundtrip()
+    {
+        for (idx, version) in [(0usize, 1usize), (1, 1), (42, 7), (1_000_000, 3), (Entity::MAX_IDX, 5)]
+        {
+            let e = Entity::new(idx, version).unwrap();
+            assert_eq!(e.idx(), idx, "idx must survive packing");
+            assert_eq!(e.version(), version, "version must survive packing");
+        }
+    }
+
+    #[test]
+    fn max_bounds_are_representable()
+    {
+        let e = Entity::new(Entity::MAX_IDX, Entity::MAX_VERSION).unwrap();
+        assert_eq!(e.idx(), Entity::MAX_IDX);
+        assert_eq!(e.version(), Entity::MAX_VERSION);
+    }
+
+    #[test]
+    fn null_is_distinct_from_any_live_handle()
+    {
+        assert_eq!(Entity::NULL.raw(), 0);
+        assert_eq!(Entity::default(), Entity::NULL);
+        // A live handle always carries version >= 1, so it can never collide with NULL.
+        assert_ne!(Entity::new(0, Entity::INITIALIZE_VERSION).unwrap(), Entity::NULL);
+    }
 }

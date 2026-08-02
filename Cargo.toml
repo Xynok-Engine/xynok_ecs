@@ -11,3 +11,11 @@ too_many_arguments = "allow"
 log = "0.4.33"
 thiserror = "2.0.18"
 xynok_ecs_proc_macro = { path = "proc_macro" }
+
+[dev-dependencies]
+xynok_ecs = { path = ".", features = ["test-util"] }
+
+[features]
+# Read-only introspection into World/Archetype/Chunk internals, used only by the
+# integration tests under `tests/` which can't otherwise reach private storage state.
+test-util = []

@@ -11,6 +11,7 @@ use crate::apis::safe_counter::SafeCounter;
 use crate::apis::traits::TArchetype;
 use crate::chunk::layout::{ChunkLayout, ChunkLayoutParams};
 use crate::entity::Entity;
+use crate::query::Query;
 use crate::std::queue::Queue;
 use crate::utils::normalize_set;
 use crate::world::arch_spec::{ArchetypeSpec, PairArchetypeSpecParams};
@@ -22,8 +23,10 @@ pub(crate) mod entity_spec;
 pub(crate) mod arch_spec;
 pub(crate) mod query_spec;
 
-#[cfg(test)]
-mod tests;
+/// Read-only introspection into `World`'s private storage state, for the integration tests
+/// under `tests/` (which only ever see the crate's normal public API otherwise).
+#[cfg(feature = "test-util")]
+pub mod testing;
 
 pub struct World
 {
@@ -345,6 +348,16 @@ impl World
 
         result.val
     }
+
+    #[track_caller]
+    pub fn create_query<T: TQueryParam + 'static>(&mut self) -> Query<T>
+    {
+        match Query::new(self)
+        {
+            Ok(r) => r,
+            Err(e) => panic!("{}", e),
+        }
+    }
 }
 
 impl World
@@ -584,32 +597,5 @@ impl World
     fn structure_changed(&mut self)
     {
         self.global_archetype_version.increase();
-    }
-}
-
-#[cfg(test)]
-mod test
-{
-    use std::collections::HashSet;
-
-    use crate::world::normalize_set;
-
-    #[test]
-    fn unique_component_set()
-    {
-        let mut a = Vec::from([1, 2, 3]);
-        let mut b = Vec::from([1, 3, 2]);
-        let mut c = Vec::from([1, 3, 2, 3]);
-        normalize_set(&mut a);
-        normalize_set(&mut b);
-        normalize_set(&mut c);
-        let dict = HashSet::from([a, b, c]);
-        assert!(dict.len() == 1);
-
-        let mut d = Vec::from([1, 1, 2, 3, 2, 3]);
-        assert!(!dict.contains(&d));
-        normalize_set(&mut d);
-        assert!(dict.contains(&d));
-        println!("dict: {:?}", dict);
     }
 }

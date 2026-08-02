@@ -9,6 +9,7 @@ use crate::world::World;
 pub mod query_iter;
 pub(crate) mod access_scope;
 mod src_access;
+mod tuple;
 mod variant;
 #[derive(Clone, Copy)]
 pub struct Query<T: TQueryParam + 'static>
@@ -16,6 +17,7 @@ pub struct Query<T: TQueryParam + 'static>
     accessor: QuerySpecAccessor,
     phantom:  PhantomData<T>,
 }
+
 impl<T: TQueryParam + 'static> Query<T>
 {
     pub(crate) fn new(world: &mut World) -> Result<Self, XynokEcsError>

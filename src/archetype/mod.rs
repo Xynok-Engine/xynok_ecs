@@ -247,7 +247,7 @@ impl Archetype
         }
     }
 }
-#[cfg(test)]
+#[cfg(any(test, feature = "test-util"))]
 impl Archetype
 {
     pub(crate) fn free_chunk_count(&self) -> usize

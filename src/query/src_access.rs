@@ -1,3 +1,4 @@
+//#![allow(unused)]
 use std::any::TypeId;
 use std::collections::HashMap;
 use std::marker::PhantomData;
@@ -40,6 +41,7 @@ impl<'a> TQuerySrcAccess for SrcAccess<'a>
 }
 impl<'a> SrcAccess<'a>
 {
+    #[track_caller]
     pub(crate) fn next<T: TComponent + 'static>(&mut self) -> Option<&'a T>
     {
         loop
@@ -57,6 +59,7 @@ impl<'a> SrcAccess<'a>
             }
         }
     }
+    #[track_caller]
     pub(crate) fn next_mut<T: TComponent + 'static>(&mut self) -> Option<&'a mut T>
     {
         loop
@@ -75,6 +78,7 @@ impl<'a> SrcAccess<'a>
         }
     }
 
+    #[track_caller]
     fn advance_to_next_chunk<T: TComponent + 'static>(&mut self) -> bool
     {
         while self.current_arch_idx < self.total_arch
@@ -96,11 +100,14 @@ impl<'a> SrcAccess<'a>
                 continue;
             }
 
-            let col_des = arch_spec
-                .layout
-                .component_col_descriptors
-                .get(&TypeId::of::<T::StorageType>())
-                .expect("archetype was pre-filtered to contain T's column");
+            let col_des = match arch_spec.layout.component_col_descriptors.get(&TypeId::of::<T::StorageType>())
+            {
+                Some(col_des) => col_des,
+                None => panic!(
+                    "archetype does not carry a column for component `{}` even though it was pre-filtered to contain it",
+                    std::any::type_name::<T::StorageType>()
+                ),
+            };
 
             self.current_col_ptr = unsafe { chunk.ptr().add(col_des.offset) };
             self.current_chunk_len = chunk.len();
