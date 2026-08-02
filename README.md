@@ -8,18 +8,10 @@
 - [x] drop chunk data
 - [x] tuple archetypes
 - [x] merge chunk/archetype layout
-- [ ] query read/write
+- [x] query read/write
 - [ ] system scheduler
 
-## Examples
-**Cmd:** 
-```bash
-cargo run --example <name_of_rust_file_in_examples_folder>
-```
-**Example:** This command runs the file `examples/archetype.rs`.
-```bash
-cargo run --example archetype
-```
+
 
 ## Concepts
 To understand how the entire codebase works, you can check out these videos. 
@@ -33,4 +25,41 @@ I might update them in the future, but for now, they are a close match to the cu
 | #1 ECS Entities Explained: Packing ID + Version into One U64 | [youtube link](https://youtu.be/rAe-KCWtnhk) |
 | #2 Building an ECS World: Slot Tables, Archetypes & Versioning | [youtube link](https://youtu.be/xa1Jea7789I) |
 | #3 Add, Merge, Remove - The 3 ECS Component Ops | [youtube link](https://youtu.be/ANyV3GwRIeU) |
+
+
+## For Contributors
+### Examples
+**Cmd:** 
+```bash
+cargo run --example <name_of_rust_file_in_examples_folder>
+```
+**Example:** This command runs the file `examples/archetype.rs`.
+```bash
+cargo run --example archetype
+```
+
+### Tests
+Storage-layout unit tests (chunk alignment, entity packing) live inline next to the code they
+test in `src/` (`#[cfg(test)] mod test`), since they need private access that code outside the
+crate can't have.
+
+**Cmd:**
+```bash
+cargo test --lib
+```
+
+World-behavior tests (create/destroy, add/remove/merge component, drop glue, query, stress) are
+integration tests under `tests/`, split by topic (`tests/create_destroy.rs`, `tests/chunk.rs`,
+`tests/add_component.rs`, `tests/query.rs`, ...) with shared fixtures in `tests/common/mod.rs`.
+They only use the crate's public API, plus a narrow read-only introspection module
+(`xynok_ecs::world::testing`) gated behind the `test-util` Cargo feature, for checking storage
+invariants the public API can't observe directly (row-swap mapping, chunk reuse, free-chunk
+count). `Cargo.toml` already enables `test-util` for this crate's own `[dev-dependencies]`, so
+no extra flags are needed to run them.
+
+**Cmd:**
+```bash
+cargo test
+```
+
 

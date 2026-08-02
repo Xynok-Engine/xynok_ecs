@@ -382,15 +382,14 @@ impl World
         let mut target_archetypes: Vec<*mut ArchetypeSpec> = Vec::new();
         let access_scope = T::access_scope()?;
         crate::utils::build_archetype_which_contains(&mut self.archetypes, &mut target_archetypes, &access_scope);
-        let mut spec = QuerySpec {
+        let spec = QuerySpec {
             access_scope: access_scope,
             archetypes:   target_archetypes,
             version:      current_global_arch_version,
         };
 
-        let result = spec.as_accessor(component_specs);
-        self.query_counter.insert(T::TYPE_ID, spec);
-        Ok(result)
+        let query_spec = self.query_counter.entry(T::TYPE_ID).or_insert(spec);
+        Ok(query_spec.as_accessor(component_specs))
     }
 }
 impl World
