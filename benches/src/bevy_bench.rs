@@ -2,8 +2,8 @@ use bevy_ecs::prelude::World;
 use bevy_ecs::query::QueryState;
 
 use crate::common::{
-    seed_health, seed_position, seed_velocity, split_counts, ArchetypeLayout, EcsBenchmark, Health, MarkerA, MarkerB, MarkerC, MarkerD, Position, Velocity,
-    FRAGMENTED_ARCHETYPES,
+    ArchetypeLayout, EcsBenchmark, FRAGMENTED_ARCHETYPES, Health, MarkerA, MarkerB, MarkerC, MarkerD, Position, Velocity, seed_health, seed_position,
+    seed_velocity, split_counts,
 };
 
 fn build_world(entity_count: usize, layout: ArchetypeLayout) -> World

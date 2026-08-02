@@ -2,15 +2,15 @@
 [![discord invite link](https://img.shields.io/discord/1495504680711880714?logo=discord)](https://discord.gg/a2qzfrFzWT)
 
 ## Features
-- [x] register archetype
-- [x] create/destroy entity
-- [x] add/remove/merge component
-- [x] drop chunk data
-- [x] tuple archetypes
-- [x] merge chunk/archetype layout
-- [x] query read/write
-    - [x] persistent query
-- [ ] system scheduler
+| status | feature | description |
+| --------------- | --------------- | --------------- |
+| ✅ | register archetype | register an archetype without spawning any data |
+| ✅ | create/destroy | create and destroy entities and their associated data |
+| ✅ | add/remove/merge component | add, remove, and merge components for an entity. Merging will override existing components. |
+| ✅ | tuple archetype | clients can create an archetype with varying numbers of components. Currently, the maximum is 16 components per archetype. |
+| ✅ | persistent query | queries can have a static lifetime, initialized once and reused indefinitely |
+| in progress | changed/added detection | the foundation for the observer pattern and architectures related to asset and resource pipelines (mesh, texture, sound, etc.) |
+| todo | system & scheduler | a distributed modifier component system where users can register or remove systems for scheduling |
 
 
 
