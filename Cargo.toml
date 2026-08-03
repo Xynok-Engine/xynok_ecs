@@ -7,7 +7,7 @@ codegen-units = 1
 
 [package]
 name = "xynok_ecs"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 
 [lints.clippy]
@@ -15,7 +15,7 @@ redundant_field_names = "allow"
 too_many_arguments = "allow"
 
 [dependencies]
-xynok_std = { git = "https://github.com/Xynok-Engine/xynok_std.git" }
+xynok_std = { git = "https://github.com/Xynok-Engine/xynok_std.git", rev = "e998132b766c3f37b20c2ccb3cdf93fafbb45837" }
 log = "0.4.33"
 thiserror = "2.0.18"
 xynok_ecs_proc_macro = { path = "proc_macro" }
