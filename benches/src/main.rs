@@ -9,8 +9,8 @@ use std::hint::black_box;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-use common::{ArchetypeLayout, EcsBenchmark, ENTITY_COUNTS, MEASURED_SAMPLES, MIN_SAMPLE_NANOS, WARMUP_ITERS};
-use report::{mean_ns, percentile_of_sorted, stddev_ns, AllocStats, BenchResult, QueryTiming};
+use common::{ArchetypeLayout, ENTITY_COUNTS, EcsBenchmark, MEASURED_SAMPLES, MIN_SAMPLE_NANOS, WARMUP_ITERS};
+use report::{AllocStats, BenchResult, QueryTiming, mean_ns, percentile_of_sorted, stddev_ns};
 
 #[global_allocator]
 static ALLOC_PROBE: alloc_probe::CountingAllocator = alloc_probe::CountingAllocator;
@@ -165,19 +165,19 @@ fn runners_for_arity(component_count: u8) -> Vec<Runner>
     match component_count
     {
         1 => vec![
-            Box::new(|ec, l| run_benchmark::<xynok_bench::XynokBenchmark1>(ec, l)),
-            Box::new(|ec, l| run_benchmark::<bevy_bench::BevyBenchmark1>(ec, l)),
-            Box::new(|ec, l| run_benchmark::<vec_bench::VecBenchmark1>(ec, l)),
+            Box::new(run_benchmark::<xynok_bench::XynokBenchmark1>),
+            Box::new(run_benchmark::<bevy_bench::BevyBenchmark1>),
+            Box::new(run_benchmark::<vec_bench::VecBenchmark1>),
         ],
         2 => vec![
-            Box::new(|ec, l| run_benchmark::<xynok_bench::XynokBenchmark2>(ec, l)),
-            Box::new(|ec, l| run_benchmark::<bevy_bench::BevyBenchmark2>(ec, l)),
-            Box::new(|ec, l| run_benchmark::<vec_bench::VecBenchmark2>(ec, l)),
+            Box::new(run_benchmark::<xynok_bench::XynokBenchmark2>),
+            Box::new(run_benchmark::<bevy_bench::BevyBenchmark2>),
+            Box::new(run_benchmark::<vec_bench::VecBenchmark2>),
         ],
         3 => vec![
-            Box::new(|ec, l| run_benchmark::<xynok_bench::XynokBenchmark3>(ec, l)),
-            Box::new(|ec, l| run_benchmark::<bevy_bench::BevyBenchmark3>(ec, l)),
-            Box::new(|ec, l| run_benchmark::<vec_bench::VecBenchmark3>(ec, l)),
+            Box::new(run_benchmark::<xynok_bench::XynokBenchmark3>),
+            Box::new(run_benchmark::<bevy_bench::BevyBenchmark3>),
+            Box::new(run_benchmark::<vec_bench::VecBenchmark3>),
         ],
         _ => unreachable!("only 1..=3 component queries are benchmarked"),
     }

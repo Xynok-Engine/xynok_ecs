@@ -1,5 +1,6 @@
 [workspace]
-members = ["proc_macro", "benches"]
+members = ["proc_macro"]
+exclude = ["benches"]
 
 [profile.release]
 lto = "thin"
@@ -7,7 +8,7 @@ codegen-units = 1
 
 [package]
 name = "xynok_ecs"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
 
 [lints.clippy]
@@ -15,7 +16,7 @@ redundant_field_names = "allow"
 too_many_arguments = "allow"
 
 [dependencies]
-xynok_std = { git = "https://github.com/Xynok-Engine/xynok_std.git", rev = "e998132b766c3f37b20c2ccb3cdf93fafbb45837" }
+xynok_std = { git = "https://github.com/Xynok-Engine/xynok_std.git", tag = "v0.1.14" }
 log = "0.4.33"
 thiserror = "2.0.18"
 xynok_ecs_proc_macro = { path = "proc_macro" }

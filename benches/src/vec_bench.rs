@@ -3,7 +3,9 @@
 //! archetype matching to do, so this is roughly the speed of the loop itself, plus — for the
 //! fragmented layout — the cost of looping over several separate contiguous buffers instead of
 //! one, with none of the real ECS's archetype-lookup overhead.
-use crate::common::{seed_health, seed_position, seed_velocity, split_counts, ArchetypeLayout, EcsBenchmark, Health, Position, Velocity, FRAGMENTED_ARCHETYPES};
+use crate::common::{
+    seed_health, seed_position, seed_velocity, split_counts, ArchetypeLayout, EcsBenchmark, Health, Position, Velocity, FRAGMENTED_ARCHETYPES,
+};
 
 pub struct Row
 {

@@ -61,7 +61,9 @@ pub fn seed_velocity(_i: usize) -> Velocity
 }
 pub fn seed_health(i: usize) -> Health
 {
-    Health { value: 100.0 + (i % 50) as f32 }
+    Health {
+        value: 100.0 + (i % 50) as f32,
+    }
 }
 
 /// Splits `total` into `groups` near-equal-sized buckets (the first `total % groups` buckets get
