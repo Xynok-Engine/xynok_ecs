@@ -43,6 +43,12 @@ cargo run --example archetype
 
 ## For Contributors
 
+**step 1:** join the [discord](https://discord.gg/a2qzfrFzWT) server to get in touch with the maintainers.
+
+**step 2:**: After that, You can track our progress on the [issues list](https://github.com/Xynok-Engine/xynok_ecs/issues).
+> [IMPORTANT!] Only pick tasks that haven't been assigned yet.
+
+
 ### Tests
 Storage-layout unit tests (chunk alignment, entity packing) live inline next to the code they
 test in `src/` (`#[cfg(test)] mod test`), since they need private access that code outside the

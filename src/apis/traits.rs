@@ -11,7 +11,10 @@ pub trait TComponent: Sized
     type StorageType: TComponent + 'static;
     const STORAGE_LOCATION: StorageLocation;
 }
-
+pub trait TSharedComponent
+{
+    fn get_hash_value_id(&self) -> usize;
+}
 pub trait TComponentDescriptor
 {
     const COMPONENT_DESCRIPTOR: ComponentDescriptor;

@@ -1,6 +1,21 @@
-use crate::{query::access_scope::AccessScope, world::arch_spec::ArchetypeSpec};
+use crate::apis::identifies::StorageLocation;
+use crate::apis::traits::TArchetype;
+use crate::apis::ComponentDescriptor;
+use crate::query::access_scope::AccessScope;
+use crate::world::arch_spec::ArchetypeSpec;
 use std::collections::HashMap;
 
+pub(crate) fn build_component_descriptors_with<T: TArchetype + 'static>(storage_location: StorageLocation, dst: &mut Vec<ComponentDescriptor>)
+{
+    dst.clear();
+    for e in T::COMPONENT_DESCRIPTORS
+    {
+        if e.storage_location == storage_location
+        {
+            dst.push(e.clone());
+        }
+    }
+}
 pub(crate) fn normalize_set(set: &mut Vec<usize>)
 {
     set.sort();
@@ -17,13 +32,28 @@ pub(crate) fn build_archetype_which_contains(archetypes: &mut HashMap<usize, Arc
         }
     }
 }
-
+/// Rounds up `offset` to the nearest multiple of `align` (align must be a power of 2)
+#[inline(always)]
+pub const fn align_up(offset: usize, align: usize) -> usize
+{
+    (offset + align - 1) & !(align - 1)
+}
 #[cfg(test)]
 mod test
 {
     use std::collections::HashSet;
+    #[test]
+    fn t_align_up()
+    {
+        assert!(align_up(45, 64) == 64);
+        assert!(align_up(2, 8) == 8);
+        assert!(align_up(8, 8) == 8);
+        assert!(align_up(9, 8) == 16);
+        assert!(align_up(1024, 64) == 1024);
+        assert!(align_up(1021, 64) == 1024);
+    }
 
-    use crate::utils::normalize_set;
+    use crate::utils::{align_up, normalize_set};
 
     #[test]
     fn unique_component_set()

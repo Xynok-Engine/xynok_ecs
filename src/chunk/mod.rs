@@ -1,16 +1,15 @@
-use std::{any::TypeId, collections::HashMap};
+use crate::apis::identifies::XynokEcsError;
+use crate::apis::params::{ChunkTakeComponentParams, ComponentSpec, SwappedRow};
+use crate::apis::traits::TComponent;
+use crate::chunk::layout::ChunkLayout;
+use crate::entity::Entity;
+use std::any::TypeId;
+use std::collections::HashMap;
 
-use crate::{
-    apis::{
-        identifies::XynokEcsError,
-        params::{ChunkTakeComponentParams, ComponentSpec, SwappedRow},
-        traits::TComponent,
-    },
-    chunk::layout::ChunkLayout,
-    entity::Entity,
-};
 pub(crate) mod layout;
+pub(crate) mod shared_layout;
 pub(crate) mod column;
+
 mod header;
 
 pub struct Chunk

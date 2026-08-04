@@ -1,5 +1,6 @@
 use crate::apis::identifies::XynokEcsError;
 use crate::apis::internal_traits::TQueryParam;
+use crate::apis::traits::TArchetype;
 use crate::query::query_iter::QueryIter;
 use crate::world::query_spec::QuerySpecAccessor;
 use crate::world::World;
@@ -51,4 +52,9 @@ impl<T: TQueryParam + 'static> IntoIterator for Query<T>
     {
         QueryIter::new(self.accessor)
     }
+}
+
+impl<T: TQueryParam + 'static> Query<T>
+{
+    pub fn with_shared_component_filter<TFilter: TArchetype>() {}
 }

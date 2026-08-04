@@ -46,6 +46,12 @@ pub enum XynokEcsError
 
     #[error("Query contains duplicated components !")]
     QueryAccessScopeConflict,
+
+    #[error("This Archetype contains shareable component")]
+    ThisArchetypeContainsShareAbleComponent,
+
+    #[error("This Archetype does not contain shareable component")]
+    ThisArchetypeDoesNotContainShareAbleComponent,
 }
 // src: https://crates.io/crates/thiserror
 //#[derive(Error, Debug)]

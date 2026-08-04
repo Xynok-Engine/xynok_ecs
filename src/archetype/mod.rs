@@ -20,10 +20,9 @@ pub struct Archetype
     free_chunks:        Queue<usize>,
     free_chunks_stored: HashSet<usize>,
 }
-
-impl Archetype
+impl Default for Archetype
 {
-    pub fn new() -> Self
+    fn default() -> Self
     {
         Self {
             chunks:             Vec::with_capacity(16),
@@ -31,7 +30,9 @@ impl Archetype
             free_chunks_stored: HashSet::with_capacity(16),
         }
     }
-
+}
+impl Archetype
+{
     /// Write to a free chunk and increment its length
     ///
     /// `StorageType = T` restricts this to archetypes whose value is already in storage form.
@@ -44,12 +45,7 @@ impl Archetype
 
         let idx_in_chunk = unsafe {
             let idx_in_chunk = chunk.len();
-            match T::write_at(layout, chunk, idx_in_chunk, val)
-            {
-                Ok(_) =>
-                {}
-                Err(e) => return Err(e),
-            };
+            T::write_at(layout, chunk, idx_in_chunk, val)?;
             let dst_e = chunk.get_entity_uncheck_mut(layout, idx_in_chunk);
             *dst_e = e;
             chunk.increase_len();

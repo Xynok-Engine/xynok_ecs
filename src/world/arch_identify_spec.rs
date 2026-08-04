@@ -2,6 +2,7 @@ pub struct ArchetypeIdentifySpec
 {
     pub id: usize,
 }
+#[allow(unused)]
 #[cfg(test)]
 mod test
 {

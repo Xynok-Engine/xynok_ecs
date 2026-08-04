@@ -1,8 +1,7 @@
-use crate::{
-    apis::constants::{BITS_PER_BYTE, CPU_WORD},
-    apis::traits::TComponentDescriptor,
-    entity::Entity,
-};
+use crate::apis::constants::{BITS_PER_BYTE, CPU_WORD};
+use crate::apis::traits::TComponentDescriptor;
+use crate::entity::Entity;
+use crate::utils::align_up;
 
 pub struct Header
 {
@@ -11,7 +10,7 @@ pub struct Header
 }
 impl Header
 {
-    pub const fn new(max_entities: usize, component_count: usize) -> Self
+    pub fn new(max_entities: usize, component_count: usize) -> Self
     {
         // enable value bits
         let bit_count = max_entities * component_count;
@@ -26,28 +25,5 @@ impl Header
             entities_offset: entities_offset,
             size:            size,
         }
-    }
-}
-
-/// Rounds up `offset` to the nearest multiple of `align` (align must be a power of 2)
-#[inline(always)]
-pub const fn align_up(offset: usize, align: usize) -> usize
-{
-    (offset + align - 1) & !(align - 1)
-}
-
-#[cfg(test)]
-mod test
-{
-    use crate::chunk::header::*;
-    #[test]
-    fn t_align_up()
-    {
-        assert!(align_up(45, 64) == 64);
-        assert!(align_up(2, 8) == 8);
-        assert!(align_up(8, 8) == 8);
-        assert!(align_up(9, 8) == 16);
-        assert!(align_up(1024, 64) == 1024);
-        assert!(align_up(1021, 64) == 1024);
     }
 }

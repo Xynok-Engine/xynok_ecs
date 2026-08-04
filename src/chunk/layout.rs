@@ -1,15 +1,15 @@
-use std::{alloc::Layout, any::TypeId, collections::HashMap};
+use std::alloc::Layout;
+use std::any::TypeId;
+use std::collections::HashMap;
 
-use crate::{
-    apis::{
-        constants::{BITS_PER_BYTE, CHUNK_SIZE_IN_BYTE, CPU_WORD},
-        identifies::XynokEcsError,
-        traits::TComponentDescriptor,
-        ComponentDescriptor,
-    },
-    chunk::{column::ColumnDescriptor, header::Header},
-    entity::Entity,
-};
+use crate::apis::constants::{BITS_PER_BYTE, CHUNK_SIZE_IN_BYTE, CPU_WORD};
+use crate::apis::identifies::XynokEcsError;
+use crate::apis::traits::TComponentDescriptor;
+use crate::apis::ComponentDescriptor;
+use crate::chunk::column::ColumnDescriptor;
+use crate::chunk::header::Header;
+use crate::entity::Entity;
+use crate::utils::align_up;
 
 pub struct ChunkLayout
 {
@@ -21,7 +21,7 @@ pub struct ChunkLayout
 
 pub struct ChunkLayoutParams<'a>
 {
-    pub arch:                       &'a [ComponentDescriptor],
+    pub components:                 &'a [ComponentDescriptor],
     pub component_descriptors_temp: &'a mut HashMap<TypeId, ColumnDescriptor>,
 }
 
@@ -29,93 +29,94 @@ impl ChunkLayout
 {
     pub fn new(mut params: ChunkLayoutParams) -> Result<Self, XynokEcsError>
     {
-        let result = Self::compute_layout(&mut params)?;
+        #[cfg(debug_assertions)]
+        {
+            use crate::apis::identifies::StorageLocation;
+            if params.components.iter().any(|e| e.storage_location != StorageLocation::Chunk)
+            {
+                return Err(XynokEcsError::ThisArchetypeContainsShareAbleComponent);
+            }
+        }
+
+        let result = compute_layout(&mut params)?;
         Ok(result)
     }
 }
-impl ChunkLayout
+fn compute_layout(params: &mut ChunkLayoutParams) -> Result<ChunkLayout, XynokEcsError>
 {
-    fn compute_layout(params: &mut ChunkLayoutParams) -> Result<Self, XynokEcsError>
+    // Each entity costs its handle in the header plus one slot in every component column
+    let bytes_per_entity = params
+        .components
+        .iter()
+        .fold(Entity::COMPONENT_DESCRIPTOR.byte_size, |acc, des| acc.saturating_add(des.byte_size));
+
+    // arch.len() represents the number of components. We use this count to store the
+    // enabled/disabled state of each component as a single bit
+    let bits_per_entity = bytes_per_entity.saturating_mul(BITS_PER_BYTE).saturating_add(params.components.len());
+
+    let mut max_entities = (CHUNK_SIZE_IN_BYTE * BITS_PER_BYTE) / bits_per_entity;
+
+    loop
     {
-        //if params.arch.is_empty()
-        //{
-        //    return Err(XynokEcsError::EmptyArchetype);
-        //}
-        // Each entity costs its handle in the header plus one slot in every component column
-        let bytes_per_entity = params
-            .arch
-            .iter()
-            .fold(Entity::COMPONENT_DESCRIPTOR.byte_size, |acc, des| acc.saturating_add(des.byte_size));
-
-        // arch.len() represents the number of components. We use this count to store the
-        // enabled/disabled state of each component as a single bit
-        let bits_per_entity = bytes_per_entity.saturating_mul(BITS_PER_BYTE).saturating_add(params.arch.len());
-
-        let mut max_entities = (CHUNK_SIZE_IN_BYTE * BITS_PER_BYTE) / bits_per_entity;
-
-        loop
+        if max_entities == 0
         {
-            if max_entities == 0
-            {
-                return Err(XynokEcsError::ArchetypeIsTooLarge);
-            }
-
-            if let Ok(valid_layout) = Self::try_layout(max_entities, params)
-            {
-                return Ok(valid_layout);
-            }
-            max_entities -= 1;
+            return Err(XynokEcsError::ArchetypeIsTooLarge);
         }
+
+        if let Ok(valid_layout) = try_layout(max_entities, params)
+        {
+            return Ok(valid_layout);
+        }
+        max_entities -= 1;
     }
+}
+/// Attempts to build a layout for `max_entities` rows, returns `None` if the total size exceeds [`CHUNK_SIZE_IN_BYTE`]
+fn try_layout(max_entities: usize, params: &mut ChunkLayoutParams) -> Result<ChunkLayout, XynokEcsError>
+{
+    let header = Header::new(max_entities, params.components.len());
+    let mut cursor = header.size;
+    // Header's own bitset requires CPU_WORD alignment, so this is the floor even when
+    // the archetype has no components (and thus no des.align to fold over)
+    let mut max_align = CPU_WORD;
+    params.component_descriptors_temp.clear();
 
-    /// Attempts to build a layout for `max_entities` rows, returns `None` if the total size exceeds [`CHUNK_SIZE_IN_BYTE`]
-    fn try_layout(max_entities: usize, params: &mut ChunkLayoutParams) -> Result<ChunkLayout, XynokEcsError>
+    for des in params.components
     {
-        let header = Header::new(max_entities, params.arch.len());
-        let mut cursor = header.size;
-        // Header's own bitset requires CPU_WORD alignment, so this is the floor even when
-        // the archetype has no components (and thus no des.align to fold over)
-        let mut max_align = CPU_WORD;
-        params.component_descriptors_temp.clear();
+        cursor = align_up(cursor, des.align);
 
-        for des in params.arch
+        if cursor > CHUNK_SIZE_IN_BYTE
         {
-            cursor = crate::chunk::header::align_up(cursor, des.align);
-
-            if cursor > CHUNK_SIZE_IN_BYTE
-            {
-                return Err(XynokEcsError::ArchetypeIsTooLarge);
-            }
-            params.component_descriptors_temp.insert(des.storage_type_id, des.as_column_descriptor(cursor));
-
-            let column_bytes = match des.byte_size.checked_mul(max_entities)
-            {
-                Some(r) => r,
-                None => return Err(XynokEcsError::ArchetypeIsTooLarge),
-            };
-            cursor = match cursor.checked_add(column_bytes)
-            {
-                Some(r) => r,
-                None => return Err(XynokEcsError::ArchetypeIsTooLarge),
-            };
-            if cursor > CHUNK_SIZE_IN_BYTE
-            {
-                return Err(XynokEcsError::ArchetypeIsTooLarge);
-            }
-            max_align = max_align.max(des.align);
+            return Err(XynokEcsError::ArchetypeIsTooLarge);
         }
-        let alloc_layout = match Layout::from_size_align(CHUNK_SIZE_IN_BYTE, max_align)
+        params.component_descriptors_temp.insert(des.storage_type_id, des.as_column_descriptor(cursor));
+
+        let column_bytes = match des.byte_size.checked_mul(max_entities)
         {
-            Ok(l) => l,
-            Err(e) => return Err(XynokEcsError::ChunkLayoutAllocation(e)),
+            Some(r) => r,
+            None => return Err(XynokEcsError::ArchetypeIsTooLarge),
         };
-        Ok(ChunkLayout {
-            max_len:                   max_entities,
-            component_col_descriptors: params.component_descriptors_temp.clone(),
-            header:                    header,
-            alloc_layout:              alloc_layout,
-        })
+        cursor = match cursor.checked_add(column_bytes)
+        {
+            Some(r) => r,
+            None => return Err(XynokEcsError::ArchetypeIsTooLarge),
+        };
+        if cursor > CHUNK_SIZE_IN_BYTE
+        {
+            return Err(XynokEcsError::ArchetypeIsTooLarge);
+        }
+        max_align = max_align.max(des.align);
     }
+    let alloc_layout = match Layout::from_size_align(CHUNK_SIZE_IN_BYTE, max_align)
+    {
+        Ok(l) => l,
+        Err(e) => return Err(XynokEcsError::ChunkLayoutAllocation(e)),
+    };
+    Ok(ChunkLayout {
+        max_len:                   max_entities,
+        component_col_descriptors: params.component_descriptors_temp.clone(),
+        header:                    header,
+        alloc_layout:              alloc_layout,
+    })
 }
 
 #[cfg(test)]
@@ -166,7 +167,7 @@ mod test
     {
         let mut temp = HashMap::new();
         ChunkLayout::new(ChunkLayoutParams {
-            arch:                       descriptors,
+            components:                 descriptors,
             component_descriptors_temp: &mut temp,
         })
     }
@@ -266,7 +267,7 @@ mod test
             layout.header.size
         );
         assert_eq!(
-            layout.header.entities_offset % crate::chunk::header::align_up(align_of::<Entity>(), align_of::<Entity>()),
+            layout.header.entities_offset % align_up(align_of::<Entity>(), align_of::<Entity>()),
             0,
             "the entity column must be aligned"
         );

@@ -1,21 +1,19 @@
-use std::{
-    any::TypeId,
-    collections::{HashMap, HashSet},
-};
+use std::any::TypeId;
+use std::collections::{HashMap, HashSet};
 
-use crate::{
-    apis::{identifies::XynokEcsError, params::ComponentSpec, ComponentDescriptor},
-    archetype::Archetype,
-    chunk::{
-        column::ColumnDescriptor,
-        layout::{ChunkLayout, ChunkLayoutParams},
-    },
-};
+use crate::apis::identifies::XynokEcsError;
+use crate::apis::params::ComponentSpec;
+use crate::apis::ComponentDescriptor;
+use crate::archetype::Archetype;
+use crate::chunk::column::ColumnDescriptor;
+use crate::chunk::layout::{ChunkLayout, ChunkLayoutParams};
 
 pub struct ArchetypeSpec
 {
-    pub arch:   Archetype,
-    pub layout: ChunkLayout,
+    pub arch:       Archetype,
+    pub layout:     ChunkLayout,
+    pub shared_ids: HashSet<usize>,
+    //pub archetypes: HashMap<usize, Archetype>,
 }
 pub struct PairArchetypeSpecParams<'a>
 {
@@ -32,8 +30,9 @@ impl ArchetypeSpec
     pub fn new(layout: ChunkLayout) -> Self
     {
         Self {
-            arch:   Archetype::new(),
-            layout: layout,
+            arch:       Archetype::default(),
+            layout:     layout,
+            shared_ids: HashSet::new(),
         }
     }
     pub fn new_from_pair(params: PairArchetypeSpecParams) -> Result<Self, XynokEcsError>
@@ -42,13 +41,15 @@ impl ArchetypeSpec
         build_component_descriptors_from(components_des, params.component_specs, params.temp_tys, params.a, params.b)?;
 
         let target_layout = ChunkLayout::new(ChunkLayoutParams {
-            arch:                       components_des,
+            components:                 components_des,
             component_descriptors_temp: params.component_col_descriptors_temp,
         })?;
 
         Ok(Self {
-            arch:   Archetype::new(),
+            arch:   Archetype::default(),
             layout: target_layout,
+
+            shared_ids: HashSet::new(),
         })
     }
 
@@ -59,13 +60,14 @@ impl ArchetypeSpec
         build_component_descriptors_from_src_a_exclude_src_b(components_des, params.component_specs, params.temp_tys, params.a, params.b)?;
 
         let target_layout = ChunkLayout::new(ChunkLayoutParams {
-            arch:                       components_des,
+            components:                 components_des,
             component_descriptors_temp: params.component_col_descriptors_temp,
         })?;
 
         Ok(Self {
-            arch:   Archetype::new(),
-            layout: target_layout,
+            arch:       Archetype::default(),
+            layout:     target_layout,
+            shared_ids: HashSet::new(),
         })
     }
 }

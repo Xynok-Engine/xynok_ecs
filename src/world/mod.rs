@@ -589,7 +589,7 @@ impl World
     fn create_archetype<T: TArchetype + 'static>(&mut self, id: usize)
     {
         let params = ChunkLayoutParams {
-            arch:                       T::COMPONENT_DESCRIPTORS,
+            components:                 T::COMPONENT_DESCRIPTORS,
             component_descriptors_temp: &mut self.temp_alloc.col_descriptors,
         };
         let layout = match ChunkLayout::new(params)
