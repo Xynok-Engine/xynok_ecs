@@ -7,7 +7,6 @@ use std::any::TypeId;
 use std::collections::HashMap;
 
 pub(crate) mod layout;
-pub(crate) mod shared_layout;
 pub(crate) mod column;
 
 mod header;

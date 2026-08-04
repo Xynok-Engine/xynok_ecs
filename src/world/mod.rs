@@ -14,7 +14,6 @@ use crate::entity::Entity;
 use crate::query::Query;
 use crate::std::queue::Queue;
 use crate::utils::normalize_set;
-use crate::world::arch_identify_spec::ArchetypeIdentifySpec;
 use crate::world::arch_spec::{ArchetypeSpec, PairArchetypeSpecParams};
 use crate::world::entity_spec::EntitySpec;
 use crate::world::query_spec::{QuerySpec, QuerySpecAccessor};
@@ -23,7 +22,6 @@ mod temp_allocation;
 pub(crate) mod entity_spec;
 pub(crate) mod arch_spec;
 pub(crate) mod query_spec;
-pub(crate) mod arch_identify_spec;
 
 /// Read-only introspection into `World`'s private storage state, for the integration tests
 /// under `tests/` (which only ever see the crate's normal public API otherwise)
@@ -35,7 +33,7 @@ pub struct World
     archetypes:               HashMap<usize, ArchetypeSpec>,
     component_counter:        HashMap<TypeId, ComponentSpec>,
     component_set_counter:    HashMap<Vec<usize>, usize>,
-    archetype_counter:        HashMap<TypeId, ArchetypeIdentifySpec>,
+    archetype_counter:        HashMap<TypeId, usize>,
     query_counter:            HashMap<TypeId, QuerySpec>,
     entities:                 Vec<EntitySpec>,
     free_entities:            Queue<usize>,
@@ -474,7 +472,7 @@ impl World
     {
         if let Some(spec) = self.archetype_counter.get(&std::any::TypeId::of::<T>())
         {
-            return Some(spec.id);
+            return Some(*spec);
         }
         None
     }
@@ -527,16 +525,14 @@ impl World
             Some(r) =>
             {
                 let arch_id = *r;
-                self.archetype_counter
-                    .insert(std::any::TypeId::of::<T>(), ArchetypeIdentifySpec { id: arch_id });
+                self.archetype_counter.insert(std::any::TypeId::of::<T>(), arch_id);
                 arch_id
             }
             None =>
             {
                 let arch_id = self.component_set_counter.len();
                 self.component_set_counter.insert(component_set.clone(), arch_id);
-                self.archetype_counter
-                    .insert(std::any::TypeId::of::<T>(), ArchetypeIdentifySpec { id: arch_id });
+                self.archetype_counter.insert(std::any::TypeId::of::<T>(), arch_id);
                 self.create_archetype::<T>(arch_id);
                 self.structure_changed();
                 arch_id

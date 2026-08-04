@@ -990,7 +990,7 @@ dependencies = [
 
 [[package]]
 name = "xynok_ecs"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "log",
  "thiserror",

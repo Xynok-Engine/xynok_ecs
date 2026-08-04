@@ -12,8 +12,7 @@ pub struct ArchetypeSpec
 {
     pub arch:       Archetype,
     pub layout:     ChunkLayout,
-    pub shared_ids: HashSet<usize>,
-    //pub archetypes: HashMap<usize, Archetype>,
+    pub archetypes: HashMap<usize, Archetype>,
 }
 pub struct PairArchetypeSpecParams<'a>
 {
@@ -32,7 +31,7 @@ impl ArchetypeSpec
         Self {
             arch:       Archetype::default(),
             layout:     layout,
-            shared_ids: HashSet::new(),
+            archetypes: HashMap::new(),
         }
     }
     pub fn new_from_pair(params: PairArchetypeSpecParams) -> Result<Self, XynokEcsError>
@@ -46,10 +45,9 @@ impl ArchetypeSpec
         })?;
 
         Ok(Self {
-            arch:   Archetype::default(),
-            layout: target_layout,
-
-            shared_ids: HashSet::new(),
+            arch:       Archetype::default(),
+            layout:     target_layout,
+            archetypes: HashMap::new(),
         })
     }
 
@@ -67,7 +65,7 @@ impl ArchetypeSpec
         Ok(Self {
             arch:       Archetype::default(),
             layout:     target_layout,
-            shared_ids: HashSet::new(),
+            archetypes: HashMap::new(),
         })
     }
 }

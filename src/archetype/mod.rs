@@ -19,6 +19,7 @@ pub struct Archetype
     chunks:             Vec<Chunk>,
     free_chunks:        Queue<usize>,
     free_chunks_stored: HashSet<usize>,
+    shared_chunk:       Option<Chunk>,
 }
 impl Default for Archetype
 {
@@ -28,6 +29,7 @@ impl Default for Archetype
             chunks:             Vec::with_capacity(16),
             free_chunks:        Queue::with_capacity(8),
             free_chunks_stored: HashSet::with_capacity(16),
+            shared_chunk:       None,
         }
     }
 }
