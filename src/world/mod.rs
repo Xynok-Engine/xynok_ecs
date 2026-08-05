@@ -18,10 +18,12 @@ use crate::world::arch_spec::{ArchetypeSpec, PairArchetypeSpecParams};
 use crate::world::entity_spec::EntitySpec;
 use crate::world::query_spec::{QuerySpec, QuerySpecAccessor};
 use crate::world::temp_allocation::WorldTempAllocation;
+use crate::world::unsafe_world_cell::UnsafeWorldCell;
 mod temp_allocation;
 pub(crate) mod entity_spec;
 pub(crate) mod arch_spec;
 pub(crate) mod query_spec;
+pub(crate) mod unsafe_world_cell;
 
 /// Read-only introspection into `World`'s private storage state, for the integration tests
 /// under `tests/` (which only ever see the crate's normal public API otherwise)
@@ -363,6 +365,20 @@ impl World
 
 impl World
 {
+    /// Bumped by `structure_changed()` whenever a new archetype appears. A cached query result is
+    /// only valid for the version it was built at.
+    pub(crate) fn archetype_version(&self) -> usize
+    {
+        self.global_archetype_version.current_val()
+    }
+
+    /// Hands this world to system params, which need overlapping views that borrowck cannot check.
+    /// See [`UnsafeWorldCell`] for what replaces the compiler's guarantee.
+    pub(crate) fn as_unsafe_cell(&mut self) -> UnsafeWorldCell<'_>
+    {
+        UnsafeWorldCell::new(self)
+    }
+
     pub(crate) fn get_or_create_query_src_access<T: TQueryParam + 'static>(&mut self) -> Result<QuerySpecAccessor, XynokEcsError>
     {
         let current_global_arch_version = self.global_archetype_version.current_val();

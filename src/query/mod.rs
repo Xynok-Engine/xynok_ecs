@@ -40,6 +40,16 @@ impl<T: TQueryParam + 'static> Query<T>
             phantom:  PhantomData,
         })
     }
+
+    /// Rebuilds a query from an accessor that was already resolved elsewhere. A system param keeps
+    /// its accessor across runs, so this skips the world lookup `new` would redo every frame.
+    pub(crate) fn from_accessor(accessor: QuerySpecAccessor) -> Self
+    {
+        Self {
+            accessor: accessor,
+            phantom:  PhantomData,
+        }
+    }
 }
 
 impl<T: TQueryParam + 'static> IntoIterator for Query<T>
