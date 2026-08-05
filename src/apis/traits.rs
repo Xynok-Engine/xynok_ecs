@@ -47,20 +47,4 @@ pub trait TArchetype: Sized
     fn write_at(layout: &ChunkLayout, chunk: &mut Chunk, write_idx: usize, val: Self) -> Result<(), XynokEcsError>;
     fn take_from(layout: &ChunkLayout, chunk: &mut Chunk, idx: usize) -> Result<Self, XynokEcsError>;
     fn replace_at(layout: &ChunkLayout, chunk: &mut Chunk, row: usize, val: Self) -> Result<(), XynokEcsError>;
-
-    //fn remove_at(
-    //    layout: &ChunkLayout,
-    //    component_specs: &HashMap<TypeId, ComponentSpec>,
-    //    chunk: &mut Chunk,
-    //    idx: usize,
-    //) -> Result<Option<SwappedRow>, XynokEcsError>
-    //{
-    //    unsafe {
-    //        match chunk.swap_remove_at(layout, component_specs, idx)
-    //        {
-    //            Ok(r) => Ok(r),
-    //            Err(e) => Err(e),
-    //        }
-    //    }
-    //}
 }

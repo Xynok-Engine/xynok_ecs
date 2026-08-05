@@ -11,10 +11,10 @@
 | ✅ | add/remove/merge component | add, remove, and merge components for an entity. Merging will override existing components. |
 | ✅ | tuple archetype | clients can create an archetype with varying numbers of components. Currently, the maximum is 16 components per archetype. |
 | ✅ | query | an iterator for querying components from an archetype |
-| in progress | Shared - Archetype Component | A component shared by an archetype. It uses a single allocation and persists for the lifetime of that archetype. |
-| in progress | changed/added detection | the foundation for the observer pattern and architectures related to asset and resource pipelines (mesh, texture, sound, etc.) |
+| canceled | Shared - Archetype Component | [This is the reason](https://youtu.be/k_RyU6QKQ-A) |
+| in progress | system & scheduler | #3|
+| todo | changed/added detection | the foundation for the observer pattern and architectures related to asset and resource pipelines (mesh, texture, sound, etc.) |
 | todo | persistent query | queries can have a static lifetime, initialized once and reused indefinitely |
-| todo | system & scheduler | a distributed modifier component system where users can register or remove systems for scheduling |
 | todo | singleton |  |
 | todo | Benchmark with flec | https://www.flecs.dev/flecs/md_docs_2Docs.html |
 | todo | entity graph |  |
@@ -25,7 +25,7 @@
 ## Install
 ```toml
 [dependencies]
-xynok_ecs = { git = "https://github.com/Xynok-Engine/xynok_ecs.git", tag = "v0.1.1" }
+xynok_ecs = { git = "https://github.com/Xynok-Engine/xynok_ecs.git", tag = "v0.1.4" }
 ```
 ## Concepts
 To understand how the entire codebase works, you can check out these [videos](https://www.youtube.com/@xynok_youtube/playlists). I created them when I first started this repo. They explain the core concepts and the most important ideas that the codebase implements. I might update them in the future, but for now, they are a close match to the current state of the code.
@@ -45,8 +45,8 @@ cargo run --example archetype
 
 **step 1:** join the [discord](https://discord.gg/a2qzfrFzWT) server to get in touch with the maintainers.
 
-**step 2:**: After that, You can track our progress on the [issues list](https://github.com/Xynok-Engine/xynok_ecs/issues).
-> [IMPORTANT!] Only pick tasks that haven't been assigned yet.
+**step 2:**: After that, You can track our progress on the [project board](https://github.com/orgs/Xynok-Engine/projects/1).
+> [!IMPORTANT] Only pick tasks that haven't been assigned yet.
 
 
 ### Tests

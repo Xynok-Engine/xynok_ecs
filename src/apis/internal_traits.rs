@@ -7,7 +7,9 @@ use crate::apis::traits::TComponent;
 use crate::query::access_scope::AccessScope;
 use crate::world::arch_spec::ArchetypeSpec;
 use crate::world::query_spec::QuerySpecAccessor;
+use crate::world::World;
 
+pub type SystemTypeStorage = Box<dyn TSystem>;
 pub trait TQuerySrcAccess
 {
     fn new(arch: *mut Vec<*mut ArchetypeSpec>, specs: *const HashMap<TypeId, ComponentSpec>) -> Self;
@@ -30,5 +32,16 @@ pub trait TQueryColumn: TQueryParam
 {
     type Component: TComponent + 'static;
     unsafe fn read_from<'a>(col_ptr: *mut u8, row: usize) -> Self::QueryItem<'a>;
+}
+pub trait TSystem
+{
+    fn run(&self, world: &mut World);
+
+    fn access_scope(&self) -> Result<AccessScope, XynokEcsError>;
+}
+pub trait TIntoSystems<P>
+{
+    #[track_caller]
+    fn into_systems(self) -> Result<Vec<SystemTypeStorage>, XynokEcsError>;
 }
 pub trait TSystemParam {}

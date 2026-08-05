@@ -1,7 +1,7 @@
 use std::any::TypeId;
 
 pub(crate) mod params;
-pub(crate) mod fn_ptr;
+pub(crate) mod custom_type;
 pub(crate) mod internal_traits;
 pub(crate) mod safe_counter;
 
@@ -17,5 +17,5 @@ pub struct ComponentDescriptor
     pub byte_size:        usize,
     pub align:            usize,
     pub storage_location: identifies::StorageLocation,
-    pub fn_drop:          fn_ptr::FnComponentDropItSelf,
+    pub fn_drop:          custom_type::FnComponentDropItSelf,
 }
