@@ -16,7 +16,7 @@ impl<F: Fn() + 'static> TSystem for PhantomSystem<F, ()>
         self.0();
     }
 
-    fn access_scope() -> Result<AccessScope, XynokEcsError>
+    fn access_scope(&self) -> Result<AccessScope, XynokEcsError>
     {
         Ok(AccessScope::default())
     }

@@ -30,11 +30,12 @@ pub mod testing;
 
 pub struct World
 {
-    archetypes:               HashMap<usize, ArchetypeSpec>,
-    component_counter:        HashMap<TypeId, ComponentSpec>,
+    archetypes:               HashMap<usize, Box<ArchetypeSpec>>,
+    #[allow(clippy::box_collection)]
+    component_counter:        Box<HashMap<TypeId, ComponentSpec>>,
     component_set_counter:    HashMap<Vec<usize>, usize>,
     archetype_counter:        HashMap<TypeId, usize>,
-    query_counter:            HashMap<TypeId, QuerySpec>,
+    query_counter:            HashMap<TypeId, Box<QuerySpec>>,
     entities:                 Vec<EntitySpec>,
     free_entities:            Queue<usize>,
     temp_alloc:               WorldTempAllocation,
@@ -47,7 +48,7 @@ impl Default for World
         Self {
             entities:                 Vec::with_capacity(16),
             archetypes:               HashMap::new(),
-            component_counter:        HashMap::new(),
+            component_counter:        Box::new(HashMap::new()),
             archetype_counter:        HashMap::new(),
             component_set_counter:    HashMap::new(),
             query_counter:            HashMap::new(),
@@ -365,7 +366,7 @@ impl World
     pub(crate) fn get_or_create_query_src_access<T: TQueryParam + 'static>(&mut self) -> Result<QuerySpecAccessor, XynokEcsError>
     {
         let current_global_arch_version = self.global_archetype_version.current_val();
-        let component_specs = &self.component_counter as *const _;
+        let component_specs = self.component_counter.as_ref() as *const _;
 
         if let Some(query_spec) = self.query_counter.get_mut(&T::TYPE_ID)
         {
@@ -388,7 +389,7 @@ impl World
             version:      current_global_arch_version,
         };
 
-        let query_spec = self.query_counter.entry(T::TYPE_ID).or_insert(spec);
+        let query_spec = self.query_counter.entry(T::TYPE_ID).or_insert(Box::new(spec));
         Ok(query_spec.as_accessor(component_specs))
     }
 }
@@ -556,7 +557,7 @@ impl World
         };
         let arch_id = self.component_set_counter.len();
         self.component_set_counter.insert(component_set.to_vec(), arch_id);
-        self.archetypes.insert(arch_id, new_arch);
+        self.archetypes.insert(arch_id, Box::new(new_arch));
         self.structure_changed();
         arch_id
     }
@@ -577,7 +578,7 @@ impl World
         };
         let arch_id = self.component_set_counter.len();
         self.component_set_counter.insert(component_set.to_vec(), arch_id);
-        self.archetypes.insert(arch_id, new_arch);
+        self.archetypes.insert(arch_id, Box::new(new_arch));
         self.structure_changed();
         arch_id
     }
@@ -594,7 +595,7 @@ impl World
             Err(e) => panic!("Create Archetype `{}` Failed: {e}", std::any::type_name::<T>()),
         };
         let arch_spec = ArchetypeSpec::new(layout);
-        self.archetypes.insert(id, arch_spec);
+        self.archetypes.insert(id, Box::new(arch_spec));
     }
 
     fn structure_changed(&mut self)

@@ -118,3 +118,31 @@ fn t_query_conflicting_access_on_the_same_component_is_rejected()
     w.create(Hp(1));
     let _ = w.create_query::<(&Hp, &mut Hp)>();
 }
+
+/// Persistent query
+#[test]
+fn t_a_query_outlives_the_registration_of_other_queries()
+{
+    let mut w = World::default();
+
+    let query = w.create_query::<&Hp>();
+    let expected: u32 = (0..10u32)
+        .map(|i| {
+            w.create(Hp(i));
+            i
+        })
+        .sum();
+
+    // enough distinct query types to push the map past a growth boundary
+    let _ = w.create_query::<&Mana>();
+    let _ = w.create_query::<&Pos>();
+    let _ = w.create_query::<&Marker>();
+    let _ = w.create_query::<&Aligned32>();
+    let _ = w.create_query::<(&Hp, &Mana)>();
+    let _ = w.create_query::<(&Hp, &Pos)>();
+    let _ = w.create_query::<(&Mana, &Pos)>();
+
+    let sum: u32 = query.into_iter().map(|hp| hp.0).sum();
+
+    assert!(sum != expected, "persistent queries are not supported yet");
+}
