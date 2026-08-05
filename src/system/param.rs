@@ -4,39 +4,21 @@ use crate::apis::identifies::XynokEcsError;
 use crate::apis::internal_traits::{TQueryParam, TSystemParam};
 use crate::query::access_scope::AccessScope;
 use crate::query::Query;
-use crate::world::query_spec::QuerySpecAccessor;
+use crate::system::system_state::SystemState;
 use crate::world::unsafe_world_cell::UnsafeWorldCell;
 use crate::world::World;
-
-/// What a `Query` param keeps between runs: the resolved accessor plus the archetype version it
-/// was resolved at. Re-resolving costs a hash lookup and, when the version moved, a full rescan of
-/// every archetype — doing that once per frame per query instead of once per iteration is the
-/// reason this state exists at all.
-pub struct QueryState<T>
-{
-    accessor: QuerySpecAccessor,
-    version:  usize,
-    _p:       PhantomData<fn() -> T>,
-}
-
-// SAFETY: the accessor is two raw pointers into `World`-owned storage. The state never dereferences
-// them on its own; the only reads happen inside `fetch`, which is handed a `UnsafeWorldCell` and is
-// therefore already bound to the world's lifetime and to the caller's access-scope check. Sending
-// the state to another thread moves no data the world does not still own.
-unsafe impl<T> Send for QueryState<T> {}
-unsafe impl<T> Sync for QueryState<T> {}
 
 impl<T: TQueryParam + 'static> TSystemParam for Query<T>
 {
     type Item<'w> = Query<T>;
-    type State = QueryState<T>;
+    type State = SystemState<T>;
 
     fn init_state(world: &mut World) -> Result<Self::State, XynokEcsError>
     {
-        Ok(QueryState {
+        Ok(SystemState {
             accessor: world.get_or_create_query_src_access::<T>()?,
             version:  world.archetype_version(),
-            _p:       PhantomData,
+            p:        PhantomData,
         })
     }
 

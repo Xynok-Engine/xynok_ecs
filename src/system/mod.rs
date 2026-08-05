@@ -8,6 +8,7 @@ use crate::world::World;
 pub(crate) mod function;
 pub(crate) mod param;
 mod into_systems;
+mod system_state;
 
 /// Everything about a system that a scheduler needs before running it.
 pub struct SystemMeta
@@ -23,7 +24,7 @@ pub struct SystemMeta
 /// marker type (which is a bare `fn` pointer type, never constructed) cannot drag `!Send`/`!Sync`
 /// into the auto-trait derivation — `fn() -> T` is unconditionally `Send + Sync`, so the `Send` and
 /// `Sync` this struct gets are the honest ones coming from `F` and its state.
-pub struct FunctionSystem<Marker, F>
+pub struct SystemContainer<Marker, F>
 where F: TSystemParamFunction<Marker>
 {
     func:    F,
@@ -32,7 +33,7 @@ where F: TSystemParamFunction<Marker>
     _marker: PhantomData<fn() -> Marker>,
 }
 
-impl<Marker, F> FunctionSystem<Marker, F>
+impl<Marker, F> SystemContainer<Marker, F>
 where F: TSystemParamFunction<Marker>
 {
     fn new(func: F) -> Result<Self, XynokEcsError>
@@ -51,7 +52,7 @@ where F: TSystemParamFunction<Marker>
     }
 }
 
-impl<Marker, F> TSystem for FunctionSystem<Marker, F>
+impl<Marker, F> TSystem for SystemContainer<Marker, F>
 where
     Marker: 'static,
     F: TSystemParamFunction<Marker>,
@@ -101,12 +102,12 @@ where
     F: TSystemParamFunction<Marker>,
     <F::Param as TSystemParam>::State: Send + Sync,
 {
-    type System = FunctionSystem<Marker, F>;
+    type System = SystemContainer<Marker, F>;
 
     #[track_caller]
     fn into_system(self) -> Result<Self::System, XynokEcsError>
     {
-        FunctionSystem::new(self)
+        SystemContainer::new(self)
     }
 }
 

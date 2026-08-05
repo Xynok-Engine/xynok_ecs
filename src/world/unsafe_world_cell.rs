@@ -1,4 +1,3 @@
-use std::cell::UnsafeCell;
 use std::marker::PhantomData;
 
 use crate::world::World;
@@ -12,14 +11,22 @@ use crate::world::World;
 /// which carries the invariant in its name and its `unsafe fn`s instead of passing a bare
 /// `*mut World` around.
 ///
-/// The lifetime `'w` is not decoration: it keeps the cell from outliving the `&mut World` it was
-/// made from, so the only thing left unchecked is the aliasing *between params*, which is exactly
-/// what `AccessScope` already validated.
+/// The lifetime `'w` is not decoration: it keeps the cell, and every `Item<'w>` a param derives
+/// from it, from outliving the `&mut World` it was made from. That is the one check borrowck can
+/// still perform here, so the only thing left unchecked is the aliasing *between params*, which is
+/// exactly what `AccessScope` already validated.
+///
+/// `PhantomData` is what makes `'w` legal to declare at all — a raw pointer mentions no lifetime,
+/// and an unused lifetime parameter is an error.
 #[derive(Clone, Copy)]
-pub struct UnsafeWorldCell<'w>(*mut World, PhantomData<(&'w World, &'w UnsafeCell<World>)>);
+pub struct UnsafeWorldCell<'w>(*mut World, PhantomData<&'w World>);
 
 // SAFETY: the pointer is only ever dereferenced under the `unsafe fn`s below, whose contract puts
 // the burden of non-aliasing on the caller. `World` itself owns no thread-affine state.
+//
+// Nothing needs these yet — the cell never leaves the `run` that created it. They are here for the
+// parallel executor, which will hand one cell to several threads at once; without them the raw
+// pointer makes the cell `!Send + !Sync` and that is the point at which it would matter.
 unsafe impl Send for UnsafeWorldCell<'_> {}
 unsafe impl Sync for UnsafeWorldCell<'_> {}
 
