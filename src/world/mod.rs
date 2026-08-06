@@ -2,6 +2,8 @@ use std::any::TypeId;
 use std::collections::HashMap;
 use std::marker::PhantomData;
 
+use xynok_std::collection::Queue;
+
 use crate::apis::identifies::XynokEcsError;
 use crate::apis::internal_traits::TQueryParam;
 use crate::apis::params::{
@@ -12,18 +14,17 @@ use crate::apis::traits::TArchetype;
 use crate::chunk::layout::{ChunkLayout, ChunkLayoutParams};
 use crate::entity::Entity;
 use crate::query::Query;
-use crate::std::queue::Queue;
 use crate::utils::normalize_set;
 use crate::world::arch_spec::{ArchetypeSpec, PairArchetypeSpecParams};
 use crate::world::entity_spec::EntitySpec;
 use crate::world::query_spec::{QuerySpec, QuerySpecAccessor};
 use crate::world::temp_allocation::WorldTempAllocation;
-use crate::world::unsafe_world_cell::UnsafeWorldCell;
+use crate::world::unsafe_world::UnsafeWorld;
 mod temp_allocation;
 pub(crate) mod entity_spec;
 pub(crate) mod arch_spec;
 pub(crate) mod query_spec;
-pub(crate) mod unsafe_world_cell;
+pub(crate) mod unsafe_world;
 
 /// Read-only introspection into `World`'s private storage state, for the integration tests
 /// under `tests/` (which only ever see the crate's normal public API otherwise)
@@ -374,9 +375,9 @@ impl World
 
     /// Hands this world to system params, which need overlapping views that borrowck cannot check.
     /// See [`UnsafeWorldCell`] for what replaces the compiler's guarantee.
-    pub(crate) fn as_unsafe_cell(&mut self) -> UnsafeWorldCell<'_>
+    pub(crate) fn as_unsafe(&mut self) -> UnsafeWorld<'_>
     {
-        UnsafeWorldCell::new(self)
+        UnsafeWorld::new(self)
     }
 
     pub(crate) fn get_or_create_query_src_access<T: TQueryParam + 'static>(&mut self) -> Result<QuerySpecAccessor, XynokEcsError>

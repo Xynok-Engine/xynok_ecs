@@ -19,7 +19,7 @@ use crate::world::World;
 /// `PhantomData` is what makes `'w` legal to declare at all — a raw pointer mentions no lifetime,
 /// and an unused lifetime parameter is an error.
 #[derive(Clone, Copy)]
-pub struct UnsafeWorldCell<'w>(*mut World, PhantomData<&'w World>);
+pub struct UnsafeWorld<'w>(*mut World, PhantomData<&'w World>);
 
 // SAFETY: the pointer is only ever dereferenced under the `unsafe fn`s below, whose contract puts
 // the burden of non-aliasing on the caller. `World` itself owns no thread-affine state.
@@ -27,10 +27,10 @@ pub struct UnsafeWorldCell<'w>(*mut World, PhantomData<&'w World>);
 // Nothing needs these yet — the cell never leaves the `run` that created it. They are here for the
 // parallel executor, which will hand one cell to several threads at once; without them the raw
 // pointer makes the cell `!Send + !Sync` and that is the point at which it would matter.
-unsafe impl Send for UnsafeWorldCell<'_> {}
-unsafe impl Sync for UnsafeWorldCell<'_> {}
+unsafe impl Send for UnsafeWorld<'_> {}
+unsafe impl Sync for UnsafeWorld<'_> {}
 
-impl<'w> UnsafeWorldCell<'w>
+impl<'w> UnsafeWorld<'w>
 {
     pub(crate) fn new(world: &'w mut World) -> Self
     {
@@ -39,7 +39,6 @@ impl<'w> UnsafeWorldCell<'w>
 
     /// # Safety
     /// No other live view of this world may be writing while the returned reference is alive.
-    #[allow(dead_code)]
     pub(crate) unsafe fn world(self) -> &'w World
     {
         unsafe { &*self.0 }

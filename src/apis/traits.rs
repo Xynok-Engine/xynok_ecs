@@ -48,3 +48,5 @@ pub trait TArchetype: Sized
     fn take_from(layout: &ChunkLayout, chunk: &mut Chunk, idx: usize) -> Result<Self, XynokEcsError>;
     fn replace_at(layout: &ChunkLayout, chunk: &mut Chunk, row: usize, val: Self) -> Result<(), XynokEcsError>;
 }
+
+pub trait TScheduler {}

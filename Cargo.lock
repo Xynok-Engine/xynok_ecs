@@ -990,7 +990,7 @@ dependencies = [
 
 [[package]]
 name = "xynok_ecs"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "log",
  "thiserror",
@@ -1020,8 +1020,8 @@ dependencies = [
 
 [[package]]
 name = "xynok_std"
-version = "0.1.15"
-source = "git+https://github.com/Xynok-Engine/xynok_std.git?tag=v0.1.15#4fcf24e6bce488e2085f5c75e0e52ae371fcde61"
+version = "0.1.17"
+source = "git+https://github.com/Xynok-Engine/xynok_std.git?tag=v0.1.17#7d4f09a229c1fe4661692896b7112af8c8c9d27d"
 dependencies = [
  "log",
  "paste",
@@ -1034,7 +1034,7 @@ dependencies = [
 [[package]]
 name = "xynok_std_proc_macro"
 version = "0.0.1"
-source = "git+https://github.com/Xynok-Engine/xynok_std.git?tag=v0.1.15#4fcf24e6bce488e2085f5c75e0e52ae371fcde61"
+source = "git+https://github.com/Xynok-Engine/xynok_std.git?tag=v0.1.17#7d4f09a229c1fe4661692896b7112af8c8c9d27d"
 dependencies = [
  "proc-macro2",
  "quote",

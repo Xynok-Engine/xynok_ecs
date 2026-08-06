@@ -10,7 +10,7 @@ use crate::apis::traits::TArchetype;
 use crate::chunk::layout::ChunkLayout;
 use crate::chunk::Chunk;
 use crate::entity::Entity;
-use crate::std::queue::Queue;
+use xynok_std::collection::Queue;
 
 mod variant;
 
@@ -26,7 +26,7 @@ impl Default for Archetype
     {
         Self {
             chunks:             Vec::with_capacity(16),
-            free_chunks:        Queue::with_capacity(8),
+            free_chunks:        Queue::new(),
             free_chunks_stored: HashSet::with_capacity(16),
         }
     }
