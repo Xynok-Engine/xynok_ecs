@@ -13,24 +13,24 @@ mod src_access;
 mod tuple;
 mod variant;
 
-pub struct Query<T: TQueryParam + 'static>
+pub struct Query<'a, T: TQueryParam + 'static>
 {
     accessor: QuerySpecAccessor,
-    phantom:  PhantomData<T>,
+    phantom:  PhantomData<(&'a (), T)>,
 }
 
 // Not derived: `#[derive(Clone, Copy)]` would add a spurious `T: Clone + Copy` bound, which
 // breaks queries like `Query<&mut Hp>` even though neither field actually depends on it
-impl<T: TQueryParam + 'static> Clone for Query<T>
+impl<'a, T: TQueryParam + 'static> Clone for Query<'a, T>
 {
     fn clone(&self) -> Self
     {
         *self
     }
 }
-impl<T: TQueryParam + 'static> Copy for Query<T> {}
+impl<'a, T: TQueryParam + 'static> Copy for Query<'a, T> {}
 
-impl<T: TQueryParam + 'static> Query<T>
+impl<'a, T: TQueryParam + 'static> Query<'a, T>
 {
     pub(crate) fn new(world: &mut World) -> Result<Self, XynokEcsError>
     {
@@ -40,23 +40,13 @@ impl<T: TQueryParam + 'static> Query<T>
             phantom:  PhantomData,
         })
     }
-
-    /// Rebuilds a query from an accessor that was already resolved elsewhere. A system param keeps
-    /// its accessor across runs, so this skips the world lookup `new` would redo every frame.
-    pub(crate) fn from_accessor(accessor: QuerySpecAccessor) -> Self
-    {
-        Self {
-            accessor: accessor,
-            phantom:  PhantomData,
-        }
-    }
 }
 
-impl<T: TQueryParam + 'static> IntoIterator for Query<T>
+impl<'a, T: TQueryParam + 'static> IntoIterator for Query<'a, T>
 {
-    type Item = T::QueryItem<'static>;
+    type Item = T::QueryItem<'a>;
 
-    type IntoIter = QueryIter<'static, T>;
+    type IntoIter = QueryIter<'a, T>;
 
     fn into_iter(self) -> Self::IntoIter
     {
@@ -64,7 +54,7 @@ impl<T: TQueryParam + 'static> IntoIterator for Query<T>
     }
 }
 
-impl<T: TQueryParam + 'static> Query<T>
+impl<'a, T: TQueryParam + 'static> Query<'a, T>
 {
     pub fn with_shared_component_filter<TFilter: TArchetype>() {}
 }

@@ -50,7 +50,7 @@ pub struct XynokBenchmark1;
 impl EcsBenchmark for XynokBenchmark1
 {
     type Storage = World;
-    type PreparedQuery = Query<&'static mut Position>;
+    type PreparedQuery = Query<'static, &'static mut Position>;
 
     const NAME: &'static str = "xynok_ecs";
     const COMPONENT_COUNT: u8 = 1;
@@ -80,7 +80,7 @@ pub struct XynokBenchmark2;
 impl EcsBenchmark for XynokBenchmark2
 {
     type Storage = World;
-    type PreparedQuery = Query<(&'static mut Position, &'static Velocity)>;
+    type PreparedQuery = Query<'static, (&'static mut Position, &'static Velocity)>;
 
     const NAME: &'static str = "xynok_ecs";
     const COMPONENT_COUNT: u8 = 2;
@@ -110,7 +110,7 @@ pub struct XynokBenchmark3;
 impl EcsBenchmark for XynokBenchmark3
 {
     type Storage = World;
-    type PreparedQuery = Query<(&'static mut Position, &'static Velocity, &'static mut Health)>;
+    type PreparedQuery = Query<'static, (&'static mut Position, &'static Velocity, &'static mut Health)>;
 
     const NAME: &'static str = "xynok_ecs";
     const COMPONENT_COUNT: u8 = 3;

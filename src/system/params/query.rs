@@ -7,7 +7,7 @@ use crate::query::Query;
 use crate::system::traits::TSystemParam;
 use crate::world::World;
 
-impl<T: TQueryParam + 'static> TSystemParam for Query<T>
+impl<'a, T: TQueryParam + 'static> TSystemParam for Query<'a, T>
 {
     fn init(mut world: HeapMut<World>) -> Result<Self, XynokEcsError>
     {

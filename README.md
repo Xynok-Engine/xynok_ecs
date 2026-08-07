@@ -14,7 +14,7 @@
 | canceled | Shared - Archetype Component | [This is the reason](https://youtu.be/k_RyU6QKQ-A) |
 | in progress | system & scheduler | [issue_link](https://github.com/Xynok-Engine/xynok_ecs/issues/3)|
 | todo | changed/added detection | the foundation for the observer pattern and architectures related to asset and resource pipelines (mesh, texture, sound, etc.) |
-| canceled | persistent query | Queries can have a static lifetime, initialized once and reused indefinitely. canceled: avoids the overhead of recreating every query whenever the structure changes. Currently, the query refresh process is spread across an entire frame. |
+| canceled | persistent query | canceled: avoids the overhead of recreating every query whenever the structure changes. Currently, the query refresh process is spread across an entire frame. |
 | todo | singleton |  |
 | todo | Benchmark with flec | https://www.flecs.dev/flecs/md_docs_2Docs.html |
 | todo | entity graph |  |

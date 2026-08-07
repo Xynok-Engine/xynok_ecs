@@ -354,7 +354,7 @@ impl World
     }
 
     #[track_caller]
-    pub fn create_query<T: TQueryParam + 'static>(&mut self) -> Query<T>
+    pub fn create_query<'a, T: TQueryParam + 'static>(&mut self) -> Query<'a, T>
     {
         match Query::new(self)
         {
