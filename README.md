@@ -45,7 +45,7 @@ cargo run --example archetype
 
 **step 1:** join the [discord](https://discord.gg/a2qzfrFzWT) server to get in touch with the maintainers.
 
-**step 2:**: After that, You can track our progress on the [project board](https://github.com/orgs/Xynok-Engine/projects/1).
+**step 2:**: After that, you can track our progress on the [project board](https://github.com/orgs/Xynok-Engine/projects/1).
 > [!IMPORTANT] 
 > Only pick tasks that haven't been assigned yet.
 
@@ -90,8 +90,4 @@ and `benches/output/report.html` (a self-contained page with charts comparing al
 ```bash
 cargo run --release -p xynok_ecs_benches
 ```
-
-
-
-
 
