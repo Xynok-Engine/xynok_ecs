@@ -2,7 +2,7 @@ use xynok_std::unsafe_ptr::HeapMut;
 
 use crate::apis::identifies::XynokEcsError;
 use crate::apis::params::ComponentSpecs;
-use crate::query::access_scope::AccessScope;
+use crate::query::access_scope::AccessScopes;
 use crate::system::traits::{ParamAlias, SystemAlias, SystemTypeStorage, TIntoSystem, TSystem};
 use crate::world::World;
 
@@ -13,15 +13,20 @@ impl<F: Fn() + Send + Sync + 'static> TSystem for SystemAlias<F, ()>
         std::any::type_name::<F>()
     }
 
+    fn system_type_id(&self) -> std::any::TypeId
+    {
+        std::any::TypeId::of::<F>()
+    }
+
     fn run(&mut self, _world: HeapMut<World>) -> Result<(), XynokEcsError>
     {
         (self.0)();
         Ok(())
     }
 
-    fn access_scope(&self, _component_specs: &mut ComponentSpecs) -> Result<AccessScope, XynokEcsError>
+    fn access_scope(&self, _component_specs: &mut ComponentSpecs) -> Result<AccessScopes, XynokEcsError>
     {
-        Ok(AccessScope::default())
+        Ok(AccessScopes::default())
     }
 }
 

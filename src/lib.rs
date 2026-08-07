@@ -1,5 +1,3 @@
-//#![allow(unused)]
-
 // The `#[component]` macro generates an absolute path like `xynok_ecs::...`.
 // Without this alias, when the macro is used within the crate itself,
 // `xynok_ecs` points to the dev-dependency `xynok_ecs = { path = "." }`.

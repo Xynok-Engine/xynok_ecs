@@ -34,14 +34,14 @@ impl ChunkLayout
 {
     pub fn new(mut params: ChunkLayoutParams) -> Result<Self, XynokEcsError>
     {
-        #[cfg(debug_assertions)]
-        {
-            use crate::apis::identifies::StorageLocation;
-            if params.components.iter().any(|e| e.storage_location != StorageLocation::Chunk)
-            {
-                return Err(XynokEcsError::ThisArchetypeContainsShareAbleComponent);
-            }
-        }
+        //#[cfg(debug_assertions)]
+        //{
+        //    use crate::apis::identifies::StorageLocation;
+        //    if params.components.iter().any(|e| e.storage_location != StorageLocation::Chunk)
+        //    {
+        //        return Err(XynokEcsError::ThisArchetypeContainsShareAbleComponent);
+        //    }
+        //}
 
         let result = compute_layout(&mut params)?;
         Ok(result)

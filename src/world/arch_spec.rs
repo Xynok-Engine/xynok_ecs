@@ -122,6 +122,14 @@ impl ArchetypeSpec
     {
         self.layout.component_bit_set.contains_all(other)
     }
+
+    /// Whether any component of `other` is carried here. Used to drop an archetype an access
+    /// scope excludes, so an empty `other` must answer `false` - excluding nothing rules out
+    /// nothing.
+    pub fn intersects_type_id_components_of(&self, other: &ComponentBitSet) -> bool
+    {
+        self.layout.component_bit_set.intersects(other)
+    }
 }
 
 fn build_component_descriptors_from_src_a_exclude_src_b(

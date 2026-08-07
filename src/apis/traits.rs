@@ -11,10 +11,7 @@ pub trait TComponent: Sized
     type StorageType: TComponent + 'static;
     const STORAGE_LOCATION: StorageLocation;
 }
-pub trait TSharedComponent
-{
-    fn get_hash_value_id(&self) -> usize;
-}
+
 pub trait TComponentDescriptor
 {
     const COMPONENT_DESCRIPTOR: ComponentDescriptor;
@@ -49,4 +46,6 @@ pub trait TArchetype: Sized
     fn replace_at(layout: &ChunkLayout, chunk: &mut Chunk, row: usize, val: Self) -> Result<(), XynokEcsError>;
 }
 
-pub trait TScheduler {}
+pub trait TEnablableComponent {}
+pub trait TAddedAbleComponent {}
+pub trait TChangedAbleComponent {}

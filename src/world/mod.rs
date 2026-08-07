@@ -34,18 +34,15 @@ pub struct World
     // Each registry is boxed as a whole, so that a `QuerySpecAccessor` handed to a system
     // stays valid even if the `World` value itself is moved. The entries inside are *not*
     // boxed: nothing caches their addresses, only their indices.
-    #[allow(clippy::box_collection)]
-    archetypes:               Box<ArchetypeSpecs>,
-    #[allow(clippy::box_collection)]
-    component_counter:        Box<ComponentSpecs>,
-    #[allow(clippy::box_collection)]
-    query_counter:            Box<QuerySpecs>,
-    component_set_counter:    HashMap<Vec<usize>, usize>,
-    archetype_counter:        HashMap<TypeId, usize>,
-    entities:                 Vec<EntitySpec>,
-    free_entities:            Queue<usize>,
-    temp_alloc:               WorldTempAllocation,
-    global_archetype_version: SafeCounter,
+    archetypes:                   Box<ArchetypeSpecs>,
+    pub(crate) component_counter: Box<ComponentSpecs>,
+    query_counter:                Box<QuerySpecs>,
+    component_set_counter:        HashMap<Vec<usize>, usize>,
+    archetype_counter:            HashMap<TypeId, usize>,
+    entities:                     Vec<EntitySpec>,
+    free_entities:                Queue<usize>,
+    temp_alloc:                   WorldTempAllocation,
+    global_archetype_version:     SafeCounter,
 }
 impl Default for World
 {

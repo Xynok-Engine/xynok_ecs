@@ -1,24 +1,32 @@
 use std::collections::HashMap;
 use std::hash::Hash;
 
-use xynok_std::unsafe_ptr::HeapMut;
+use xynok_std::unsafe_ptr::HeapPtr;
 
+use crate::schedule::system_spec::SystemSpecs;
 use crate::system::traits::{SystemTypeStorage, TIntoSystem};
 use crate::world::World;
 
 pub trait TScheduler: Sized
 {
-    type SessionType: Hash + PartialEq + Eq + std::fmt::Debug + Clone + Copy + 'static;
+    type SessionType: Eq + Hash + Clone;
+
+    #[track_caller]
+    fn new(world: HeapPtr<World>) -> Self;
     #[track_caller]
     fn add_system<P, T: TIntoSystem<P>>(&mut self, session: Self::SessionType, system: T) -> &mut Self;
 
     #[track_caller]
-    fn run(&mut self, session: Self::SessionType, world: HeapMut<World>);
+    fn run(&mut self, session: Self::SessionType);
 }
-#[derive(Default)]
 pub struct DefaultScheduler
 {
+    world:   HeapPtr<World>,
     systems: HashMap<DefaultScheduleSession, Vec<SystemTypeStorage>>,
+    /// Keyed by system type, so the same `fn` added to two sessions is described once. Only
+    /// safe because everything in a spec is derived from the system's type - anything
+    /// per-instance would have to live beside the boxed system in `systems` instead.
+    specs:   SystemSpecs,
 }
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
@@ -36,6 +44,7 @@ pub enum DefaultScheduleSession
 impl TScheduler for DefaultScheduler
 {
     type SessionType = DefaultScheduleSession;
+
     fn add_system<P, T: TIntoSystem<P>>(&mut self, session: Self::SessionType, s: T) -> &mut Self
     {
         let s = match s.into_system()
@@ -43,6 +52,13 @@ impl TScheduler for DefaultScheduler
             Ok(r) => r,
             Err(e) => panic!("{}", e),
         };
+
+        // Before the system is ever run, so a system whose parameters alias each other is
+        // reported at the `add_system` call site rather than at the first `run`
+        if let Err(e) = self.specs.register(s.as_ref(), &mut self.world.component_counter)
+        {
+            panic!("{}: {}", s.name(), e);
+        }
         if let Some(systems) = self.systems.get_mut(&session)
         {
             systems.push(s);
@@ -55,19 +71,28 @@ impl TScheduler for DefaultScheduler
         self
     }
 
-    fn run(&mut self, session: Self::SessionType, world: HeapMut<World>)
+    fn run(&mut self, session: Self::SessionType)
     {
         if let Some(systems) = self.systems.get_mut(&session)
         {
             for s in systems
             {
-                match s.run(world)
+                match s.run(self.world.as_ref_mut())
                 {
                     Ok(_) =>
                     {}
                     Err(e) => panic!("{}", e),
                 }
             }
+        }
+    }
+
+    fn new(world: HeapPtr<World>) -> Self
+    {
+        Self {
+            world,
+            systems: HashMap::new(),
+            specs: SystemSpecs::default(),
         }
     }
 }
@@ -100,12 +125,22 @@ mod test
             println!("hp({})", hp.0);
         }
     }
+
+    /// Both parameters match the `(Hp, Mana)` archetype, so the body would hold `&Hp` and
+    /// `&mut Hp` for the same row
+    fn system_aliasing_hp(query: Query<&Hp>, query2: Query<&mut Hp>)
+    {
+        for hp in query
+        {
+            println!("hp({})", hp.0);
+        }
+    }
     fn system_c(query: Query<(&Hp, &Mana)>)
     {
         println!("system c running !");
         for (hp, mana) in query
         {
-            println!("hp({}) - mana(){}", hp.0, mana.0);
+            println!("hp({}) - mana({})", hp.0, mana.0);
         }
     }
 
@@ -124,31 +159,80 @@ mod test
     #[test]
     fn test_two_queries_in_one_system()
     {
-        let mut scheduler = DefaultScheduler::default();
         let mut world = HeapPtr::new(World::default());
         world.create(Hp(12));
         world.create((Hp(12), Mana(12)));
+        let mut scheduler = DefaultScheduler::new(world);
 
         scheduler.add_system(DefaultScheduleSession::Start, system_two_queries);
         // Runs twice on purpose: the first pass registers both queries (the relocating case),
         // the second takes the already-cached path
-        scheduler.run(DefaultScheduleSession::Start, world.as_ref_mut());
-        scheduler.run(DefaultScheduleSession::Start, world.as_ref_mut());
+        scheduler.run(DefaultScheduleSession::Start);
+        scheduler.run(DefaultScheduleSession::Start);
     }
 
     #[test]
     fn test_scheduler()
     {
-        let mut scheduler = DefaultScheduler::default();
         let mut world = HeapPtr::new(World::default());
         world.create(Hp(12));
         world.create((Hp(12), Mana(12)));
+        let mut scheduler = DefaultScheduler::new(world);
 
         scheduler
             .add_system(DefaultScheduleSession::Start, system_a)
             .add_system(DefaultScheduleSession::Start, system_b)
             .add_system(DefaultScheduleSession::Start, system_c);
 
-        scheduler.run(DefaultScheduleSession::Start, world.as_ref_mut());
+        scheduler.run(DefaultScheduleSession::Start);
+    }
+
+    /// The conflict is rejected when the system is added, not when it first runs, and it is
+    /// rejected regardless of how many threads the schedule would use
+    #[test]
+    #[should_panic(expected = "conflicting")]
+    fn aliasing_parameters_are_rejected_at_add_system()
+    {
+        let mut world = HeapPtr::new(World::default());
+        world.create((Hp(12), Mana(12)));
+        let mut scheduler = DefaultScheduler::new(world);
+
+        scheduler.add_system(DefaultScheduleSession::Start, system_aliasing_hp);
+    }
+
+    /// Two queries naming the same component are fine as long as neither writes it
+    #[test]
+    fn two_readers_of_one_component_are_accepted()
+    {
+        fn reads_hp_twice(a: Query<&Hp>, b: Query<(&Hp, &Mana)>)
+        {
+            assert_eq!(a.into_iter().map(|hp| hp.0).sum::<u64>(), 24);
+            assert_eq!(b.into_iter().map(|(hp, _)| hp.0).sum::<u64>(), 12);
+        }
+
+        let mut world = HeapPtr::new(World::default());
+        world.create(Hp(12));
+        world.create((Hp(12), Mana(12)));
+        let mut scheduler = DefaultScheduler::new(world);
+
+        scheduler.add_system(DefaultScheduleSession::Start, reads_hp_twice);
+        scheduler.run(DefaultScheduleSession::Start);
+    }
+
+    /// The registry is keyed by system type, so this must not report a conflict with the copy
+    /// registered for `Start`
+    #[test]
+    fn the_same_system_can_join_two_sessions()
+    {
+        let mut world = HeapPtr::new(World::default());
+        world.create(Hp(12));
+        let mut scheduler = DefaultScheduler::new(world);
+
+        scheduler
+            .add_system(DefaultScheduleSession::Start, system_b)
+            .add_system(DefaultScheduleSession::Update, system_b);
+
+        scheduler.run(DefaultScheduleSession::Start);
+        scheduler.run(DefaultScheduleSession::Update);
     }
 }

@@ -1,11 +1,12 @@
 #![allow(unused)]
+use std::any::TypeId;
 use std::marker::PhantomData;
 
 use xynok_std::unsafe_ptr::HeapMut;
 
 use crate::apis::identifies::XynokEcsError;
 use crate::apis::params::ComponentSpecs;
-use crate::query::access_scope::AccessScope;
+use crate::query::access_scope::{AccessScope, AccessScopes};
 use crate::world::World;
 
 pub type SystemTypeStorage = Box<dyn TSystem>;
@@ -35,14 +36,25 @@ pub trait TSystem: Send + Sync + 'static
 {
     fn name(&self) -> &'static str;
 
+    /// Identity of the underlying `fn`, for keying a schedule's system registry. Deliberately
+    /// not called `type_id`: `Any` gives every `'static` type a method of that name, and the
+    /// two would be ambiguous at the call site.
+    fn system_type_id(&self) -> TypeId;
+
     fn run(&mut self, world: HeapMut<World>) -> Result<(), XynokEcsError>;
 
-    fn access_scope(&self, component_specs: &mut ComponentSpecs) -> Result<AccessScope, XynokEcsError>;
+    /// One entry per parameter, never merged into a single scope - [`AccessScopes`] explains
+    /// what merging would throw away
+    fn access_scope(&self, component_specs: &mut ComponentSpecs) -> Result<AccessScopes, XynokEcsError>;
 }
 pub trait TSystemParam: Sized
 {
     fn init(world: HeapMut<World>) -> Result<Self, XynokEcsError>;
-    fn access_scope(component_specs: &mut ComponentSpecs) -> Result<AccessScope, XynokEcsError>;
+
+    /// Adds what this parameter accesses to `dst`, which rejects it if it conflicts with a
+    /// parameter already registered. A parameter that touches no component storage adds
+    /// nothing rather than an empty [`AccessScope`].
+    fn collect_access_scope(dst: &mut AccessScopes, component_specs: &mut ComponentSpecs) -> Result<(), XynokEcsError>;
 }
 
 /// `fn` -> one system. `Marker` is param
