@@ -1,9 +1,8 @@
-use std::any::TypeId;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use crate::apis::identifies::XynokEcsError;
 use crate::apis::params::{
-    ArchetypeTakeAndRemoveComponentParams, ArchetypeTakeAndWriteComponentParams, ChunkTakeComponentParams, ComponentSpec, EntityInChunkIndices,
+    ArchetypeTakeAndRemoveComponentParams, ArchetypeTakeAndWriteComponentParams, ChunkTakeComponentParams, ComponentSpecs, EntityInChunkIndices,
     ResultTakeAndRemove, ResultTakeAndWrite, SwappedRow,
 };
 use crate::apis::traits::TArchetype;
@@ -66,7 +65,7 @@ impl Archetype
     pub fn remove_at(
         &mut self,
         layout: &ChunkLayout,
-        component_specs: &HashMap<TypeId, ComponentSpec>,
+        component_specs: &ComponentSpecs,
         chunk_idx: usize,
         idx: usize,
     ) -> Result<Option<SwappedRow>, XynokEcsError>
@@ -214,7 +213,7 @@ impl Archetype
     {
         &self.chunks[chunk_idx]
     }
-    pub(crate) fn dispose(&mut self, layout: &ChunkLayout, component_specs: &HashMap<TypeId, ComponentSpec>)
+    pub(crate) fn dispose(&mut self, layout: &ChunkLayout, component_specs: &ComponentSpecs)
     {
         for c in self.chunks.iter_mut()
         {

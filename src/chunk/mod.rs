@@ -1,10 +1,8 @@
 use crate::apis::identifies::XynokEcsError;
-use crate::apis::params::{ChunkTakeComponentParams, ComponentSpec, SwappedRow};
+use crate::apis::params::{ChunkTakeComponentParams, ComponentSpecs, SwappedRow};
 use crate::apis::traits::TComponent;
 use crate::chunk::layout::ChunkLayout;
 use crate::entity::Entity;
-use std::any::TypeId;
-use std::collections::HashMap;
 
 pub(crate) mod layout;
 pub(crate) mod column;
@@ -201,7 +199,7 @@ impl Chunk
     pub(crate) unsafe fn swap_remove_at(
         &mut self,
         layout: &ChunkLayout,
-        component_specs: &HashMap<TypeId, ComponentSpec>,
+        component_specs: &ComponentSpecs,
         idx: usize,
     ) -> Result<Option<SwappedRow>, XynokEcsError>
     {
@@ -308,7 +306,7 @@ impl Chunk
         }
     }
 
-    pub(crate) fn dispose(&mut self, layout: &ChunkLayout, component_specs: &HashMap<TypeId, ComponentSpec>)
+    pub(crate) fn dispose(&mut self, layout: &ChunkLayout, component_specs: &ComponentSpecs)
     {
         for (k, des) in layout.component_col_descriptors.iter()
         {

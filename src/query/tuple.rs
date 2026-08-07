@@ -1,20 +1,20 @@
 use std::any::TypeId;
-use std::collections::HashMap;
 use std::marker::PhantomData;
 
 use crate::apis::identifies::XynokEcsError;
 use crate::apis::internal_traits::{TQueryColumn, TQueryParam, TQuerySrcAccess};
-use crate::apis::params::ComponentSpec;
+use crate::apis::params::ComponentSpecs;
 use crate::apis::traits::TComponent;
 use crate::query::access_scope::AccessScope;
-use crate::world::arch_spec::ArchetypeSpec;
+use crate::world::arch_spec::ArchetypeSpecs;
+use crate::world::query_spec::QuerySpecAccessor;
 
 macro_rules! impl_tuple_query_param {
     ($src:ident; $($q:ident : $ptr:ident),+) => {
         pub struct $src<'a, $($q: TQueryColumn),+>
         {
-            archetypes:        &'a mut Vec<*mut ArchetypeSpec>,
-            //component_specs:   &'a HashMap<TypeId, ComponentSpec>,
+            archetypes:        &'a ArchetypeSpecs,
+            arch_indices:      &'a [usize],
             total_arch:        usize,
             current_arch_idx:  usize,
             current_chunk_idx: usize,
@@ -25,14 +25,13 @@ macro_rules! impl_tuple_query_param {
         }
         impl<'a, $($q: TQueryColumn),+> TQuerySrcAccess for $src<'a, $($q,)+>
         {
-            fn new(arch: *mut Vec<*mut ArchetypeSpec>, _specs: *const HashMap<TypeId, ComponentSpec>) -> Self
+            fn new(accessor: &QuerySpecAccessor) -> Self
             {
-                let archetypes = unsafe { &mut *arch };
-                let total_arch = archetypes.len();
+                let arch_indices = unsafe { accessor.arch_indices() };
                 Self {
-                    archetypes:        archetypes,
-                    //component_specs:   unsafe { &*specs },
-                    total_arch:        total_arch,
+                    archetypes:        unsafe { &*accessor.archetypes },
+                    arch_indices:      arch_indices,
+                    total_arch:        arch_indices.len(),
                     current_arch_idx:  0,
                     current_chunk_idx: 0,
                     current_row_idx:   0,
@@ -73,7 +72,12 @@ macro_rules! impl_tuple_query_param {
             {
                 while self.current_arch_idx < self.total_arch
                 {
-                    let arch_spec = unsafe { &*self.archetypes[self.current_arch_idx] };
+                    let arch_idx = self.arch_indices[self.current_arch_idx];
+                    let arch_spec = match self.archetypes.value_at(arch_idx)
+                    {
+                        Some(arch_spec) => arch_spec,
+                        None => panic!("archetype index {arch_idx} cached by the query is not in the world's archetype registry"),
+                    };
 
                     if self.current_chunk_idx >= arch_spec.arch.chunk_count()
                     {
@@ -117,10 +121,10 @@ macro_rules! impl_tuple_query_param {
             type SrcAccess<'a> = $src<'a, $($q,)+>;
             const TYPE_ID: TypeId = TypeId::of::<($(<<$q as TQueryColumn>::Component as TComponent>::StorageType,)+)>();
 
-            fn access_scope() -> Result<AccessScope, XynokEcsError>
+            fn access_scope(component_specs: &mut ComponentSpecs) -> Result<AccessScope, XynokEcsError>
             {
                 let mut scope = AccessScope::default();
-                $(scope.extend($q::access_scope()?)?;)+
+                $(scope.extend($q::access_scope(component_specs)?)?;)+
                 Ok(scope)
             }
 

@@ -1,6 +1,7 @@
 use xynok_std::unsafe_ptr::HeapMut;
 
 use crate::apis::identifies::XynokEcsError;
+use crate::apis::params::ComponentSpecs;
 use crate::apis::internal_traits::TQueryParam;
 use crate::query::access_scope::AccessScope;
 use crate::query::Query;
@@ -14,8 +15,8 @@ impl<'a, T: TQueryParam + 'static> TSystemParam for Query<'a, T>
         Query::new(&mut world)
     }
 
-    fn access_scope() -> Result<AccessScope, XynokEcsError>
+    fn access_scope(component_specs: &mut ComponentSpecs) -> Result<AccessScope, XynokEcsError>
     {
-        T::access_scope()
+        T::access_scope(component_specs)
     }
 }

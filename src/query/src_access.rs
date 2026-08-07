@@ -1,17 +1,16 @@
 //#![allow(unused)]
 use std::any::TypeId;
-use std::collections::HashMap;
 use std::marker::PhantomData;
 
 use crate::apis::internal_traits::TQuerySrcAccess;
-use crate::apis::params::ComponentSpec;
 use crate::apis::traits::TComponent;
-use crate::world::arch_spec::ArchetypeSpec;
+use crate::world::arch_spec::ArchetypeSpecs;
+use crate::world::query_spec::QuerySpecAccessor;
 
 pub struct SrcAccess<'a>
 {
-    archetypes:        &'a mut Vec<*mut ArchetypeSpec>,
-    component_specs:   &'a HashMap<TypeId, ComponentSpec>,
+    archetypes:        &'a ArchetypeSpecs,
+    arch_indices:      &'a [usize],
     total_arch:        usize,
     current_arch_idx:  usize,
     current_chunk_idx: usize,
@@ -22,14 +21,13 @@ pub struct SrcAccess<'a>
 }
 impl<'a> TQuerySrcAccess for SrcAccess<'a>
 {
-    fn new(arch: *mut Vec<*mut ArchetypeSpec>, specs: *const HashMap<TypeId, ComponentSpec>) -> Self
+    fn new(accessor: &QuerySpecAccessor) -> Self
     {
-        let archetypes = unsafe { &mut *arch };
-        let total_arch = archetypes.len();
+        let arch_indices = unsafe { accessor.arch_indices() };
         Self {
-            archetypes:        archetypes,
-            component_specs:   unsafe { &*specs },
-            total_arch:        total_arch,
+            archetypes:        unsafe { &*accessor.archetypes },
+            arch_indices:      arch_indices,
+            total_arch:        arch_indices.len(),
             current_arch_idx:  0,
             current_chunk_idx: 0,
             current_row_idx:   0,
@@ -86,7 +84,12 @@ impl<'a> SrcAccess<'a>
     {
         while self.current_arch_idx < self.total_arch
         {
-            let arch_spec = unsafe { &*self.archetypes[self.current_arch_idx] };
+            let arch_idx = self.arch_indices[self.current_arch_idx];
+            let arch_spec = match self.archetypes.value_at(arch_idx)
+            {
+                Some(arch_spec) => arch_spec,
+                None => panic!("archetype index {arch_idx} cached by the query is not in the world's archetype registry"),
+            };
 
             if self.current_chunk_idx >= arch_spec.arch.chunk_count()
             {

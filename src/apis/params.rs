@@ -1,11 +1,17 @@
-use std::{any::TypeId, collections::HashMap, marker::PhantomData};
+use std::{any::TypeId, marker::PhantomData};
 
 use crate::{
     apis::{traits::TArchetype, ComponentDescriptor},
     archetype::Archetype,
     chunk::{layout::ChunkLayout, Chunk},
+    collection::sequence_value_hash_map::SequenceValueHashMap,
     entity::Entity,
 };
+
+/// The world's component registry. A component's id is its index in here, so
+/// `index_of(type_id)` is what turns a `TypeId` into a `ComponentBitSet` bit.
+pub type ComponentSpecs = SequenceValueHashMap<TypeId, ComponentSpec>;
+
 #[derive(PartialEq, Eq, Clone, Copy)]
 pub struct SwappedRow
 {
@@ -15,7 +21,6 @@ pub struct SwappedRow
 }
 pub struct ComponentSpec
 {
-    pub id:         usize,
     pub descriptor: ComponentDescriptor,
 }
 #[derive(Debug, Clone, Copy)]
@@ -36,7 +41,7 @@ pub struct ArchetypeTakeAndWriteComponentParams<'a, T: TArchetype + 'static>
     pub src_arch:        &'a mut Archetype,
     pub src_layout:      &'a ChunkLayout,
     pub dst_layout:      &'a ChunkLayout,
-    pub component_specs: &'a HashMap<TypeId, ComponentSpec>,
+    pub component_specs: &'a ComponentSpecs,
     pub write_val:       T,
 }
 pub struct ArchetypeTakeAndRemoveComponentParams<'a, T: TArchetype + 'static>
@@ -45,7 +50,7 @@ pub struct ArchetypeTakeAndRemoveComponentParams<'a, T: TArchetype + 'static>
     pub src_arch:        &'a mut Archetype,
     pub src_layout:      &'a ChunkLayout,
     pub dst_layout:      &'a ChunkLayout,
-    pub component_specs: &'a HashMap<TypeId, ComponentSpec>,
+    pub component_specs: &'a ComponentSpecs,
     pub phantom:         PhantomData<T>,
 }
 pub struct ResultTakeAndWrite
@@ -66,7 +71,7 @@ pub struct ChunkTakeComponentParams<'a>
     pub src_chunk:            &'a mut Chunk,
     pub src_layout:           &'a ChunkLayout,
     pub dst_layout:           &'a ChunkLayout,
-    pub component_specs:      &'a HashMap<TypeId, ComponentSpec>,
+    pub component_specs:      &'a ComponentSpecs,
     /// Component types that the caller will overwrite right after this call (e.g. merge_component's `T`).
     /// Their old values in `src_chunk` are dropped in place instead of being migrated into `dst_layout`.
     pub overwritten_type_ids: &'a [TypeId],

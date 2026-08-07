@@ -7,7 +7,7 @@ use xynok_std::collection::Queue;
 use crate::apis::identifies::XynokEcsError;
 use crate::apis::internal_traits::TQueryParam;
 use crate::apis::params::{
-    ArchetypeTakeAndRemoveComponentParams, ArchetypeTakeAndWriteComponentParams, ComponentSpec, EntityInChunkIndices, EntityIndices, SwappedRow,
+    ArchetypeTakeAndRemoveComponentParams, ArchetypeTakeAndWriteComponentParams, ComponentSpec, ComponentSpecs, EntityInChunkIndices, EntityIndices, SwappedRow,
 };
 use crate::apis::safe_counter::SafeCounter;
 use crate::apis::traits::TArchetype;
@@ -15,16 +15,14 @@ use crate::chunk::layout::{ChunkLayout, ChunkLayoutParams};
 use crate::entity::Entity;
 use crate::query::Query;
 use crate::utils::normalize_set;
-use crate::world::arch_spec::{ArchetypeSpec, PairArchetypeSpecParams};
+use crate::world::arch_spec::{ArchetypeSpec, ArchetypeSpecs, PairArchetypeSpecParams};
 use crate::world::entity_spec::EntitySpec;
-use crate::world::query_spec::{QuerySpec, QuerySpecAccessor};
+use crate::world::query_spec::{QuerySpec, QuerySpecAccessor, QuerySpecs};
 use crate::world::temp_allocation::WorldTempAllocation;
-use crate::world::unsafe_world::UnsafeWorld;
 mod temp_allocation;
 pub(crate) mod entity_spec;
 pub(crate) mod arch_spec;
 pub(crate) mod query_spec;
-pub(crate) mod unsafe_world;
 
 /// Read-only introspection into `World`'s private storage state, for the integration tests
 /// under `tests/` (which only ever see the crate's normal public API otherwise)
@@ -33,12 +31,17 @@ pub mod testing;
 
 pub struct World
 {
-    archetypes:               HashMap<usize, Box<ArchetypeSpec>>,
+    // Each registry is boxed as a whole, so that a `QuerySpecAccessor` handed to a system
+    // stays valid even if the `World` value itself is moved. The entries inside are *not*
+    // boxed: nothing caches their addresses, only their indices.
     #[allow(clippy::box_collection)]
-    component_counter:        Box<HashMap<TypeId, ComponentSpec>>,
+    archetypes:               Box<ArchetypeSpecs>,
+    #[allow(clippy::box_collection)]
+    component_counter:        Box<ComponentSpecs>,
+    #[allow(clippy::box_collection)]
+    query_counter:            Box<QuerySpecs>,
     component_set_counter:    HashMap<Vec<usize>, usize>,
     archetype_counter:        HashMap<TypeId, usize>,
-    query_counter:            HashMap<TypeId, Box<QuerySpec>>,
     entities:                 Vec<EntitySpec>,
     free_entities:            Queue<usize>,
     temp_alloc:               WorldTempAllocation,
@@ -50,11 +53,11 @@ impl Default for World
     {
         Self {
             entities:                 Vec::with_capacity(16),
-            archetypes:               HashMap::new(),
-            component_counter:        Box::new(HashMap::new()),
+            archetypes:               Box::new(ArchetypeSpecs::new()),
+            component_counter:        Box::new(ComponentSpecs::new()),
             archetype_counter:        HashMap::new(),
             component_set_counter:    HashMap::new(),
-            query_counter:            HashMap::new(),
+            query_counter:            Box::new(QuerySpecs::new()),
             free_entities:            Queue::new(),
             temp_alloc:               WorldTempAllocation::new(),
             global_archetype_version: SafeCounter::new(1, usize::MAX - 1),
@@ -186,8 +189,9 @@ impl World
         // put back
         self.temp_alloc.vec_usize = component_set;
 
-        let [src_arch_spec, target_arch_spec] = self.archetypes.get_disjoint_mut([&a_arch_id, &target_arch_id]);
-        let (src_arch_spec, target_arch_spec) = (src_arch_spec.unwrap(), target_arch_spec.unwrap());
+        let src_idx = self.archetypes.index_of(&a_arch_id).unwrap();
+        let target_idx = self.archetypes.index_of(&target_arch_id).unwrap();
+        let [src_arch_spec, target_arch_spec] = self.archetypes.values_mut_slice().get_disjoint_mut([src_idx, target_idx]).unwrap();
 
         let src_e_indices = EntityIndices {
             chunk_idx:    a_chunk_idx,
@@ -257,8 +261,9 @@ impl World
             return;
         }
 
-        let [src_arch_spec, target_arch_spec] = self.archetypes.get_disjoint_mut([&a_arch_id, &target_arch_id]);
-        let (src_arch_spec, target_arch_spec) = (src_arch_spec.unwrap(), target_arch_spec.unwrap());
+        let src_idx = self.archetypes.index_of(&a_arch_id).unwrap();
+        let target_idx = self.archetypes.index_of(&target_arch_id).unwrap();
+        let [src_arch_spec, target_arch_spec] = self.archetypes.values_mut_slice().get_disjoint_mut([src_idx, target_idx]).unwrap();
 
         let src_e_indices = EntityIndices {
             chunk_idx:    a_chunk_idx,
@@ -324,8 +329,9 @@ impl World
         // put back
         self.temp_alloc.vec_usize = component_set;
 
-        let [src_arch_spec, target_arch_spec] = self.archetypes.get_disjoint_mut([&a_arch_id, &target_arch_id]);
-        let (src_arch_spec, target_arch_spec) = (src_arch_spec.unwrap(), target_arch_spec.unwrap());
+        let src_idx = self.archetypes.index_of(&a_arch_id).unwrap();
+        let target_idx = self.archetypes.index_of(&target_arch_id).unwrap();
+        let [src_arch_spec, target_arch_spec] = self.archetypes.values_mut_slice().get_disjoint_mut([src_idx, target_idx]).unwrap();
 
         let src_e_indices = EntityIndices {
             chunk_idx:    a_chunk_idx,
@@ -366,48 +372,50 @@ impl World
 
 impl World
 {
-    /// Bumped by `structure_changed()` whenever a new archetype appears. A cached query result is
-    /// only valid for the version it was built at.
-    pub(crate) fn archetype_version(&self) -> usize
-    {
-        self.global_archetype_version.current_val()
-    }
-
-    /// Hands this world to system params, which need overlapping views that borrowck cannot check.
-    /// See [`UnsafeWorldCell`] for what replaces the compiler's guarantee.
-    pub(crate) fn as_unsafe(&mut self) -> UnsafeWorld<'_>
-    {
-        UnsafeWorld::new(self)
-    }
-
     pub(crate) fn get_or_create_query_src_access<T: TQueryParam + 'static>(&mut self) -> Result<QuerySpecAccessor, XynokEcsError>
     {
         let current_global_arch_version = self.global_archetype_version.current_val();
-        let component_specs = self.component_counter.as_ref() as *const _;
 
-        if let Some(query_spec) = self.query_counter.get_mut(&T::TYPE_ID)
+        let query_idx = match self.query_counter.index_of(&T::TYPE_ID)
         {
-            if current_global_arch_version == query_spec.version
+            Some(idx) => idx,
+            None =>
             {
-                return Ok(query_spec.as_accessor(component_specs));
-            }
+                // Registers any component the world has not seen yet, so it has to run
+                // before anything borrows the component registry again
+                let access_scope = T::access_scope(&mut self.component_counter)?;
 
-            query_spec.archetypes.clear();
-            crate::utils::build_archetype_which_contains(&mut self.archetypes, &mut query_spec.archetypes, &query_spec.access_scope);
-            query_spec.version = current_global_arch_version;
-            return Ok(query_spec.as_accessor(component_specs));
-        }
-        let mut target_archetypes: Vec<*mut ArchetypeSpec> = Vec::new();
-        let access_scope = T::access_scope()?;
-        crate::utils::build_archetype_which_contains(&mut self.archetypes, &mut target_archetypes, &access_scope);
-        let spec = QuerySpec {
-            access_scope: access_scope,
-            archetypes:   target_archetypes,
-            version:      current_global_arch_version,
+                let mut target_archetypes = Vec::new();
+                crate::utils::build_archetype_which_contains(&self.archetypes, &mut target_archetypes, &access_scope);
+                self.query_counter.insert(
+                    T::TYPE_ID,
+                    QuerySpec {
+                        access_scope: access_scope,
+                        archetypes:   target_archetypes,
+                        version:      current_global_arch_version,
+                    },
+                )
+            }
         };
 
-        let query_spec = self.query_counter.entry(T::TYPE_ID).or_insert(Box::new(spec));
-        Ok(query_spec.as_accessor(component_specs))
+        let query_spec = match self.query_counter.value_mut_at(query_idx)
+        {
+            Some(r) => r,
+            None => panic!("query index {query_idx} vanished from the registry it was just taken from"),
+        };
+        if query_spec.version != current_global_arch_version
+        {
+            query_spec.archetypes.clear();
+            crate::utils::build_archetype_which_contains(&self.archetypes, &mut query_spec.archetypes, &query_spec.access_scope);
+            query_spec.version = current_global_arch_version;
+        }
+
+        Ok(QuerySpecAccessor {
+            queries:         self.query_counter.as_ref() as *const _,
+            query_idx:       query_idx,
+            archetypes:      self.archetypes.as_ref() as *const _,
+            component_specs: self.component_counter.as_ref() as *const _,
+        })
     }
 }
 impl World
@@ -436,9 +444,9 @@ impl World
 
         for type_id in arch_spec.layout.component_col_descriptors.keys()
         {
-            match self.component_counter.get(type_id)
+            match self.component_counter.index_of(type_id)
             {
-                Some(component_spec) => component_set.retain(|e| *e != component_spec.id),
+                Some(component_id) => component_set.retain(|e| *e != component_id),
                 None => panic!("Archetype `{arch_id}` has an unregistered component to check id !"),
             }
         }
@@ -455,9 +463,9 @@ impl World
 
         for type_id in arch_spec.layout.component_col_descriptors.keys()
         {
-            match self.component_counter.get(type_id)
+            match self.component_counter.index_of(type_id)
             {
-                Some(component_spec) => component_set.push(component_spec.id),
+                Some(component_id) => component_set.push(component_id),
                 None => panic!("Archetype `{arch_id}` has an unregistered component to check id !"),
             }
         }
@@ -517,23 +525,12 @@ impl World
         let component_set = &mut self.temp_alloc.vec_usize;
         component_set.clear();
 
-        // collect component id
+        // collect component id: a component's id is its index in the registry
         for des in T::COMPONENT_DESCRIPTORS
         {
-            if let Some(spec) = self.component_counter.get(&des.storage_type_id)
-            {
-                component_set.push(spec.id);
-                continue;
-            }
-            let id = self.component_counter.len();
-
-            self.component_counter.insert(
-                des.storage_type_id,
-                ComponentSpec {
-                    id:         id,
-                    descriptor: des.clone(),
-                },
-            );
+            let id = self
+                .component_counter
+                .get_or_insert_with(des.storage_type_id, || ComponentSpec { descriptor: des.clone() });
             component_set.push(id);
         }
         normalize_set(component_set);
@@ -566,6 +563,7 @@ impl World
             temp_tys:                       &mut self.temp_alloc.hashset_type_ids,
             temp_comp_des:                  &mut self.temp_alloc.comp_descriptors,
             component_col_descriptors_temp: &mut self.temp_alloc.col_descriptors,
+            component_bit_set:              &mut self.temp_alloc.component_bit_set_a,
         };
         let new_arch = match ArchetypeSpec::new_from_a_exclude_b_components(merge_arch_params)
         {
@@ -574,7 +572,7 @@ impl World
         };
         let arch_id = self.component_set_counter.len();
         self.component_set_counter.insert(component_set.to_vec(), arch_id);
-        self.archetypes.insert(arch_id, Box::new(new_arch));
+        self.archetypes.insert(arch_id, new_arch);
         self.structure_changed();
         arch_id
     }
@@ -587,6 +585,7 @@ impl World
             temp_tys:                       &mut self.temp_alloc.hashset_type_ids,
             temp_comp_des:                  &mut self.temp_alloc.comp_descriptors,
             component_col_descriptors_temp: &mut self.temp_alloc.col_descriptors,
+            component_bit_set:              &mut self.temp_alloc.component_bit_set_a,
         };
         let new_arch = match ArchetypeSpec::new_from_pair(merge_arch_params)
         {
@@ -595,7 +594,7 @@ impl World
         };
         let arch_id = self.component_set_counter.len();
         self.component_set_counter.insert(component_set.to_vec(), arch_id);
-        self.archetypes.insert(arch_id, Box::new(new_arch));
+        self.archetypes.insert(arch_id, new_arch);
         self.structure_changed();
         arch_id
     }
@@ -604,7 +603,9 @@ impl World
     {
         let params = ChunkLayoutParams {
             components:                 T::COMPONENT_DESCRIPTORS,
+            component_specs:            &self.component_counter,
             component_descriptors_temp: &mut self.temp_alloc.col_descriptors,
+            component_bit_set_temp:     &mut self.temp_alloc.component_bit_set_a,
         };
         let layout = match ChunkLayout::new(params)
         {
@@ -612,7 +613,7 @@ impl World
             Err(e) => panic!("Create Archetype `{}` Failed: {e}", std::any::type_name::<T>()),
         };
         let arch_spec = ArchetypeSpec::new(layout);
-        self.archetypes.insert(id, Box::new(arch_spec));
+        self.archetypes.insert(id, arch_spec);
     }
 
     fn structure_changed(&mut self)

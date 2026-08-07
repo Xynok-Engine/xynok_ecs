@@ -2,9 +2,11 @@ use std::any::TypeId;
 
 use crate::apis::identifies::XynokEcsError;
 use crate::apis::internal_traits::{TQueryColumn, TQueryParam};
+use crate::apis::params::ComponentSpecs;
 use crate::apis::traits::TComponent;
 use crate::query::access_scope::AccessScope;
 use crate::query::src_access::SrcAccess;
+use crate::utils::component_id_for;
 
 impl<T: TComponent + 'static> TQueryParam for &T
 {
@@ -14,13 +16,11 @@ impl<T: TComponent + 'static> TQueryParam for &T
 
     const TYPE_ID: TypeId = TypeId::of::<T::StorageType>();
 
-    fn access_scope() -> Result<AccessScope, XynokEcsError>
+    fn access_scope(component_specs: &mut ComponentSpecs) -> Result<AccessScope, XynokEcsError>
     {
-        Ok(AccessScope {
-            read:    vec![TypeId::of::<T::StorageType>()],
-            write:   vec![],
-            exclude: vec![],
-        })
+        let mut scope = AccessScope::default();
+        scope.read.insert(component_id_for::<T>(component_specs));
+        Ok(scope)
     }
 
     #[track_caller]
@@ -37,13 +37,11 @@ impl<T: TComponent + 'static> TQueryParam for &mut T
 
     const TYPE_ID: TypeId = TypeId::of::<T::StorageType>();
 
-    fn access_scope() -> Result<AccessScope, XynokEcsError>
+    fn access_scope(component_specs: &mut ComponentSpecs) -> Result<AccessScope, XynokEcsError>
     {
-        Ok(AccessScope {
-            read:    vec![],
-            write:   vec![TypeId::of::<T::StorageType>()],
-            exclude: vec![],
-        })
+        let mut scope = AccessScope::default();
+        scope.write.insert(component_id_for::<T>(component_specs));
+        Ok(scope)
     }
 
     #[track_caller]

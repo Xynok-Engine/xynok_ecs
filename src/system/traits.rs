@@ -4,6 +4,7 @@ use std::marker::PhantomData;
 use xynok_std::unsafe_ptr::HeapMut;
 
 use crate::apis::identifies::XynokEcsError;
+use crate::apis::params::ComponentSpecs;
 use crate::query::access_scope::AccessScope;
 use crate::world::World;
 
@@ -36,12 +37,12 @@ pub trait TSystem: Send + Sync + 'static
 
     fn run(&mut self, world: HeapMut<World>) -> Result<(), XynokEcsError>;
 
-    fn access_scope(&self) -> Result<AccessScope, XynokEcsError>;
+    fn access_scope(&self, component_specs: &mut ComponentSpecs) -> Result<AccessScope, XynokEcsError>;
 }
 pub trait TSystemParam: Sized
 {
     fn init(world: HeapMut<World>) -> Result<Self, XynokEcsError>;
-    fn access_scope() -> Result<AccessScope, XynokEcsError>;
+    fn access_scope(component_specs: &mut ComponentSpecs) -> Result<AccessScope, XynokEcsError>;
 }
 
 /// `fn` -> one system. `Marker` is param

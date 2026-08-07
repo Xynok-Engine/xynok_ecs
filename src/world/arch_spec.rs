@@ -2,11 +2,19 @@ use std::any::TypeId;
 use std::collections::{HashMap, HashSet};
 
 use crate::apis::identifies::XynokEcsError;
-use crate::apis::params::ComponentSpec;
+use crate::apis::params::ComponentSpecs;
 use crate::apis::ComponentDescriptor;
 use crate::archetype::Archetype;
 use crate::chunk::column::ColumnDescriptor;
 use crate::chunk::layout::{ChunkLayout, ChunkLayoutParams};
+use crate::collection::component_bit_set::ComponentBitSet;
+use crate::collection::sequence_value_hash_map::SequenceValueHashMap;
+
+/// The world's archetype registry, keyed by archetype id.
+///
+/// Values live inline in the registry's dense storage, so growing it relocates them. Nothing
+/// caches their addresses: `QuerySpec` stores indices instead.
+pub type ArchetypeSpecs = SequenceValueHashMap<usize, ArchetypeSpec>;
 
 pub struct ArchetypeSpec
 {
@@ -18,10 +26,11 @@ pub struct PairArchetypeSpecParams<'a>
 {
     pub a:                              &'a ArchetypeSpec,
     pub b:                              &'a ArchetypeSpec,
-    pub component_specs:                &'a HashMap<TypeId, ComponentSpec>,
+    pub component_specs:                &'a ComponentSpecs,
     pub temp_comp_des:                  &'a mut Vec<ComponentDescriptor>,
     pub temp_tys:                       &'a mut HashSet<TypeId>,
     pub component_col_descriptors_temp: &'a mut HashMap<TypeId, ColumnDescriptor>,
+    pub component_bit_set:              &'a mut ComponentBitSet,
 }
 
 impl ArchetypeSpec
@@ -41,7 +50,9 @@ impl ArchetypeSpec
 
         let target_layout = ChunkLayout::new(ChunkLayoutParams {
             components:                 components_des,
+            component_specs:            params.component_specs,
             component_descriptors_temp: params.component_col_descriptors_temp,
+            component_bit_set_temp:     params.component_bit_set,
         })?;
 
         Ok(Self {
@@ -59,7 +70,9 @@ impl ArchetypeSpec
 
         let target_layout = ChunkLayout::new(ChunkLayoutParams {
             components:                 components_des,
+            component_specs:            params.component_specs,
             component_descriptors_temp: params.component_col_descriptors_temp,
+            component_bit_set_temp:     params.component_bit_set,
         })?;
 
         Ok(Self {
@@ -105,22 +118,15 @@ impl ArchetypeSpec
         }
         false
     }
-    pub fn contains_all_type_id_components_of(&self, other: &[TypeId]) -> bool
+    pub fn contains_all_type_id_components_of(&self, other: &ComponentBitSet) -> bool
     {
-        for e in other
-        {
-            if !self.layout.component_col_descriptors.contains_key(e)
-            {
-                return false;
-            }
-        }
-        true
+        self.layout.component_bit_set.contains_all(other)
     }
 }
 
 fn build_component_descriptors_from_src_a_exclude_src_b(
     dst: &mut Vec<ComponentDescriptor>,
-    component_specs: &HashMap<TypeId, ComponentSpec>,
+    component_specs: &ComponentSpecs,
     temp_tys: &mut HashSet<TypeId>,
     src_a: &ArchetypeSpec,
     src_b: &ArchetypeSpec,
@@ -148,7 +154,7 @@ fn build_component_descriptors_from_src_a_exclude_src_b(
 }
 fn build_component_descriptors_from(
     dst: &mut Vec<ComponentDescriptor>,
-    component_specs: &HashMap<TypeId, ComponentSpec>,
+    component_specs: &ComponentSpecs,
     temp_tys: &mut HashSet<TypeId>,
     src_a: &ArchetypeSpec,
     src_b: &ArchetypeSpec,
@@ -163,7 +169,7 @@ fn build_component_descriptors_from(
 fn append_component_descriptor_to(
     dst: &mut Vec<ComponentDescriptor>,
     temp_tys: &mut HashSet<TypeId>,
-    component_specs: &HashMap<TypeId, ComponentSpec>,
+    component_specs: &ComponentSpecs,
     src: &ArchetypeSpec,
 ) -> Result<(), XynokEcsError>
 {

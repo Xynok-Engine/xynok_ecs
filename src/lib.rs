@@ -1,9 +1,10 @@
 //#![allow(unused)]
 
-// `#[component]` sinh ra đường dẫn tuyệt đối `xynok_ecs::...`. Nếu không có alias này,
-// khi macro được dùng ngay trong chính crate thì `xynok_ecs` sẽ trỏ tới bản
-// dev-dependency `xynok_ecs = { path = "." }` — một bản compile riêng — khiến trait
-// sinh ra không khớp với trait của crate hiện tại.
+// The `#[component]` macro generates an absolute path like `xynok_ecs::...`.
+// Without this alias, when the macro is used within the crate itself,
+// `xynok_ecs` points to the dev-dependency `xynok_ecs = { path = "." }`.
+// This creates a separate compilation, causing the generated trait
+// to mismatch the trait in the current crate.
 extern crate self as xynok_ecs;
 
 pub mod apis;
@@ -17,5 +18,6 @@ mod utils;
 mod chunk;
 mod archetype;
 mod system;
+mod collection;
 
 pub use xynok_ecs_proc_macro::*;

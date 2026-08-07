@@ -2,8 +2,7 @@
 mod common;
 
 use common::*;
-use xynok_ecs::world::testing;
-use xynok_ecs::world::World;
+use xynok_ecs::world::{testing, World};
 
 /// Registers enough distinct archetypes to push `World::archetypes` past several of its growth
 /// boundaries (hashbrown reallocates at 3, 7, 14, 28 entries for a map built empty).
@@ -34,9 +33,8 @@ fn t_vec_addr_survives_query_counter_rehash()
 {
     let mut w = World::default();
     let expected: u32 = (0..10u32)
-        .map(|i| {
+        .inspect(|&i| {
             w.create(Hp(i));
-            i
         })
         .sum();
 
@@ -72,9 +70,8 @@ fn t_accessor_survives_world_move()
 {
     let mut w = World::default();
     let expected: u32 = (0..10u32)
-        .map(|i| {
+        .inspect(|&i| {
             w.create(Hp(i));
-            i
         })
         .sum();
     let query = w.create_query::<&Hp>();
@@ -87,41 +84,48 @@ fn t_accessor_survives_world_move()
 }
 
 // ------------------------------------------------------------------------------------------------
-// tier 3a - the `*mut ArchetypeSpec` elements cached inside `QuerySpec.archetypes`
+// tier 3a - the archetype indices cached inside `QuerySpec.archetypes`
 // ------------------------------------------------------------------------------------------------
 
-/// The direct statement of the invariant, with no query involved: `ArchetypeSpec` values live
-/// inline in a `HashMap`, so growing that map relocates them and silently invalidates every
-/// pointer a `QuerySpec` has already cached. Asserting on the address is deterministic, unlike
-/// asserting on what a stale pointer happens to read back.
+/// The direct statement of the invariant, with no query involved.
+///
+/// `QuerySpec` used to cache `*mut ArchetypeSpec`, which made "the specs never relocate" a hard
+/// requirement and forced every entry to be boxed. It now caches indices instead, so the specs
+/// are free to move within the registry's dense storage - what must not change is the index a
+/// given archetype id maps to.
 #[test]
-fn t_archetype_spec_addr_survives_new_archetypes()
+fn t_archetype_index_survives_new_archetypes()
 {
     let mut w = World::default();
     let anchor = w.create(Hp(1));
 
-    let before = testing::archetype_spec_addr(&w, anchor);
+    let before = testing::archetype_index(&w, anchor);
     let count_before = testing::archetype_count(&w);
 
     register_many_archetypes(&mut w);
 
-    // guards the test itself: if the map never actually grew, the address check proves nothing
-    assert!(testing::archetype_count(&w) > count_before + 8, "the archetype map did not grow enough to be a real test");
+    // guards the test itself: if the registry never actually grew, the check proves nothing
+    assert!(
+        testing::archetype_count(&w) > count_before + 8,
+        "the archetype registry did not grow enough to be a real test"
+    );
 
-    let after = testing::archetype_spec_addr(&w, anchor);
-    assert_eq!(before, after, "ArchetypeSpec moved: every `*mut ArchetypeSpec` cached in a QuerySpec is now dangling");
+    let after = testing::archetype_index(&w, anchor);
+    assert_eq!(
+        before, after,
+        "archetype index moved: every index cached in a QuerySpec now points at the wrong archetype"
+    );
 }
 
-/// The same defect seen through the public API. This one can pass by luck - reading freed memory
-/// often still yields the old bytes - so it is only meaningful as a miri target.
+/// The same invariant seen through the public API: whatever the registry did to its storage,
+/// the query must still read the right rows back.
 #[test]
 fn t_query_reads_correctly_after_new_archetypes()
 {
     let mut w = World::default();
     let expected: u32 = (0..10u32)
-        .map(|i| {
+        .inspect(|&i| {
             w.create(Hp(i));
-            i
         })
         .sum();
 
@@ -130,5 +134,9 @@ fn t_query_reads_correctly_after_new_archetypes()
 
     register_many_archetypes(&mut w);
 
-    assert_eq!(query.into_iter().map(|hp| hp.0).sum::<u32>(), expected, "query read through a relocated ArchetypeSpec");
+    assert_eq!(
+        query.into_iter().map(|hp| hp.0).sum::<u32>(),
+        expected,
+        "query read through a relocated ArchetypeSpec"
+    );
 }

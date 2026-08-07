@@ -1,4 +1,5 @@
 use crate::apis::identifies::XynokEcsError;
+use crate::apis::params::ComponentSpecs;
 use crate::query::access_scope::AccessScope;
 
 use crate::system::traits::{ParamAlias, SystemAlias, SystemTypeStorage, TIntoSystem, TSystem, TSystemParam};
@@ -17,10 +18,10 @@ macro_rules! mutiple_param_system {
             {
                 std::any::type_name::<F>()
             }
-            fn access_scope(&self) -> Result<AccessScope, XynokEcsError>
+            fn access_scope(&self, component_specs: &mut ComponentSpecs) -> Result<AccessScope, XynokEcsError>
             {
                 let mut result = AccessScope::default();
-                $(result.extend($name::access_scope()?)?;)*
+                $(result.extend($name::access_scope(component_specs)?)?;)*
                 Ok(result)
             }
             fn run(&mut self, world: HeapMut<World>)-> Result<(), XynokEcsError>

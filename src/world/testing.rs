@@ -7,7 +7,6 @@
 
 use crate::apis::traits::TComponent;
 use crate::entity::Entity;
-use crate::world::arch_spec::ArchetypeSpec;
 use crate::world::World;
 
 /// Where an entity's row currently lives.
@@ -39,17 +38,16 @@ pub fn archetype_count(w: &World) -> usize
     w.archetypes.len()
 }
 
-/// Address of the [`ArchetypeSpec`] `arch_owner` currently lives in. Every `QuerySpec` caches
-/// raw pointers to these, so registering a new archetype must not relocate the existing ones.
+/// Index of `arch_owner`'s archetype inside the world's registry.
 ///
-/// The binding is annotated so this keeps reporting the address of the *spec* rather than of a
-/// wrapper, should `archetypes` ever start boxing its values.
+/// This is what `QuerySpec` caches. Archetype specs live inline in the registry's dense
+/// storage and *do* relocate when it grows, so their addresses are deliberately not part of
+/// any invariant - the index is.
 #[track_caller]
-pub fn archetype_spec_addr(w: &World, arch_owner: Entity) -> usize
+pub fn archetype_index(w: &World, arch_owner: Entity) -> usize
 {
     let arch_id = w.entities[arch_owner.idx()].arch_id();
-    let spec: &ArchetypeSpec = w.archetypes.get(&arch_id).expect("archetype must exist");
-    std::ptr::from_ref(spec) as usize
+    w.archetypes.index_of(&arch_id).expect("archetype must exist")
 }
 
 #[track_caller]

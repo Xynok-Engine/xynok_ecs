@@ -50,12 +50,6 @@ pub enum XynokEcsError
 
     #[error("This Archetype contains shareable component")]
     ThisArchetypeContainsShareAbleComponent,
-
-    #[error("This Archetype does not contain shareable component")]
-    ThisArchetypeDoesNotContainShareAbleComponent,
-
-    #[error("System `{0}` was run before its param state was initialized")]
-    SystemStateIsNotInitialized(&'static str),
 }
 
 // src: https://crates.io/crates/thiserror

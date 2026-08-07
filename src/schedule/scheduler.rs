@@ -109,6 +109,33 @@ mod test
         }
     }
 
+    /// Both parameters are initialised before the body runs, so two accessors are alive at
+    /// once. Building the second one registers a new `QuerySpec`, which grows the query
+    /// registry and relocates the first one's spec - the first accessor has to survive that.
+    fn system_two_queries(hp_query: Query<&Hp>, mana_query: Query<&Mana>)
+    {
+        let hp_total: u64 = hp_query.into_iter().map(|hp| hp.0).sum();
+        let mana_total: u64 = mana_query.into_iter().map(|mana| mana.0).sum();
+
+        assert_eq!(hp_total, 24, "the first query read through a relocated QuerySpec");
+        assert_eq!(mana_total, 12, "the second query read the wrong rows");
+    }
+
+    #[test]
+    fn test_two_queries_in_one_system()
+    {
+        let mut scheduler = DefaultScheduler::default();
+        let mut world = HeapPtr::new(World::default());
+        world.create(Hp(12));
+        world.create((Hp(12), Mana(12)));
+
+        scheduler.add_system(DefaultScheduleSession::Start, system_two_queries);
+        // Runs twice on purpose: the first pass registers both queries (the relocating case),
+        // the second takes the already-cached path
+        scheduler.run(DefaultScheduleSession::Start, world.as_ref_mut());
+        scheduler.run(DefaultScheduleSession::Start, world.as_ref_mut());
+    }
+
     #[test]
     fn test_scheduler()
     {

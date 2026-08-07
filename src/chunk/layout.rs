@@ -4,10 +4,12 @@ use std::collections::HashMap;
 
 use crate::apis::constants::{BITS_PER_BYTE, CHUNK_SIZE_IN_BYTE, CPU_WORD};
 use crate::apis::identifies::XynokEcsError;
+use crate::apis::params::ComponentSpecs;
 use crate::apis::traits::TComponentDescriptor;
 use crate::apis::ComponentDescriptor;
 use crate::chunk::column::ColumnDescriptor;
 use crate::chunk::header::Header;
+use crate::collection::component_bit_set::ComponentBitSet;
 use crate::entity::Entity;
 use crate::utils::align_up;
 
@@ -16,13 +18,16 @@ pub struct ChunkLayout
     pub max_len:                   usize,
     pub header:                    Header,
     pub alloc_layout:              Layout,
+    pub component_bit_set:         ComponentBitSet,
     pub component_col_descriptors: HashMap<TypeId, ColumnDescriptor>,
 }
 
 pub struct ChunkLayoutParams<'a>
 {
     pub components:                 &'a [ComponentDescriptor],
+    pub component_specs:            &'a ComponentSpecs,
     pub component_descriptors_temp: &'a mut HashMap<TypeId, ColumnDescriptor>,
+    pub component_bit_set_temp:     &'a mut ComponentBitSet,
 }
 
 impl ChunkLayout
@@ -44,6 +49,8 @@ impl ChunkLayout
 }
 fn compute_layout(params: &mut ChunkLayoutParams) -> Result<ChunkLayout, XynokEcsError>
 {
+    build_component_but_set(params.component_bit_set_temp, params.components, params.component_specs)?;
+
     // Each entity costs its handle in the header plus one slot in every component column
     let bytes_per_entity = params
         .components
@@ -69,6 +76,19 @@ fn compute_layout(params: &mut ChunkLayoutParams) -> Result<ChunkLayout, XynokEc
         }
         max_entities -= 1;
     }
+}
+fn build_component_but_set(dst: &mut ComponentBitSet, src: &[ComponentDescriptor], component_specs: &ComponentSpecs) -> Result<(), XynokEcsError>
+{
+    dst.clear();
+    for des in src
+    {
+        match component_specs.index_of(&des.storage_type_id)
+        {
+            Some(component_id) => dst.insert(component_id),
+            None => return Err(XynokEcsError::ComponentSpecIsNotRegistered),
+        }
+    }
+    Ok(())
 }
 /// Attempts to build a layout for `max_entities` rows, returns `None` if the total size exceeds [`CHUNK_SIZE_IN_BYTE`]
 fn try_layout(max_entities: usize, params: &mut ChunkLayoutParams) -> Result<ChunkLayout, XynokEcsError>
@@ -114,6 +134,7 @@ fn try_layout(max_entities: usize, params: &mut ChunkLayoutParams) -> Result<Chu
     Ok(ChunkLayout {
         max_len:                   max_entities,
         component_col_descriptors: params.component_descriptors_temp.clone(),
+        component_bit_set:         params.component_bit_set_temp.clone(),
         header:                    header,
         alloc_layout:              alloc_layout,
     })
@@ -126,6 +147,7 @@ mod test
 
     use super::*;
     use crate::apis::identifies::StorageLocation;
+    use crate::apis::params::ComponentSpec;
 
     macro_rules! declare_component {
         ($ty:ty) => {
@@ -163,13 +185,65 @@ mod test
     struct Aligned32(#[allow(unused)] u64);
     declare_component!(Aligned32);
 
-    fn layout_of(descriptors: &[ComponentDescriptor]) -> Result<ChunkLayout, XynokEcsError>
+    fn specs_of(descriptors: &[ComponentDescriptor]) -> ComponentSpecs
+    {
+        let mut specs = ComponentSpecs::new();
+        for des in descriptors
+        {
+            specs.insert(des.storage_type_id, ComponentSpec { descriptor: des.clone() });
+        }
+        specs
+    }
+
+    fn layout_with(descriptors: &[ComponentDescriptor], specs: &ComponentSpecs) -> Result<ChunkLayout, XynokEcsError>
     {
         let mut temp = HashMap::new();
+        let mut bit_set = ComponentBitSet::default();
         ChunkLayout::new(ChunkLayoutParams {
             components:                 descriptors,
+            component_specs:            specs,
             component_descriptors_temp: &mut temp,
+            component_bit_set_temp:     &mut bit_set,
         })
+    }
+
+    fn layout_of(descriptors: &[ComponentDescriptor]) -> Result<ChunkLayout, XynokEcsError>
+    {
+        layout_with(descriptors, &specs_of(descriptors))
+    }
+
+    #[test]
+    fn bit_set_holds_exactly_the_registry_ids_of_its_components()
+    {
+        // A registry carrying more than this archetype uses, so the ids are not 0..n
+        let registry = specs_of(&[
+            Mana::COMPONENT_DESCRIPTOR,
+            Hp::COMPONENT_DESCRIPTOR,
+            Pos::COMPONENT_DESCRIPTOR,
+            Marker::COMPONENT_DESCRIPTOR,
+        ]);
+        let descriptors = [Hp::COMPONENT_DESCRIPTOR, Pos::COMPONENT_DESCRIPTOR];
+        let layout = layout_with(&descriptors, &registry).expect("layout must be constructible");
+
+        let mut expected: Vec<_> = descriptors
+            .iter()
+            .map(|des| registry.index_of(&des.storage_type_id).expect("registered above"))
+            .collect();
+        expected.sort();
+
+        let got: Vec<_> = layout.component_bit_set.iter().collect();
+        assert_eq!(got, expected, "bit set must carry exactly the archetype's component ids");
+    }
+
+    #[test]
+    fn unregistered_component_is_rejected()
+    {
+        let empty = ComponentSpecs::new();
+        let result = layout_with(&[Hp::COMPONENT_DESCRIPTOR], &empty);
+        assert!(
+            matches!(result, Err(XynokEcsError::ComponentSpecIsNotRegistered)),
+            "a component with no registry id cannot be given a bit"
+        );
     }
 
     #[test]

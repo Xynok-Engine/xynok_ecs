@@ -127,9 +127,8 @@ fn t_a_query_outlives_the_registration_of_other_queries()
 
     let query = w.create_query::<&Hp>();
     let expected: u32 = (0..10u32)
-        .map(|i| {
+        .inspect(|&i| {
             w.create(Hp(i));
-            i
         })
         .sum();
 
