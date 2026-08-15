@@ -13,6 +13,7 @@ pub trait TScheduler: Sized
 
     #[track_caller]
     fn new(world: HeapPtr<World>) -> Self;
+
     #[track_caller]
     fn add_system<P, T: TIntoSystem<P>>(&mut self, session: Self::SessionType, system: T) -> &mut Self;
 
@@ -41,6 +42,7 @@ pub enum DefaultScheduleSession
     LateFixedUpdate,
     AppQuit,
 }
+
 impl TScheduler for DefaultScheduler
 {
     type SessionType = DefaultScheduleSession;
