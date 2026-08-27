@@ -103,14 +103,7 @@ fn main()
 
     for i in 0..2_000
     {
-        world.create((
-            Position { x: 0.0, y: 0.0 },
-            Velocity {
-                x: 1.0,
-                y: (i % 7) as f32,
-            },
-            Hp(100 - (i % 100) as i32),
-        ));
+        world.create((Position { x: 0.0, y: 0.0 }, Velocity { x: 1.0, y: (i % 7) as f32 }, Hp(100 - i % 100)));
     }
 
     // Three workers plus the calling thread. `LaneConfig::default()` sizes it as `cores - 1`, which

@@ -78,19 +78,59 @@ cargo test
 ```
 
 ### Benchmarks
-`benches/` is a separate crate (`xynok_ecs_benches`) comparing single-threaded query iteration
-against `bevy_ecs` and a plain `std::Vec` baseline — named `query_single_thread` since
-`xynok_ecs` has no system scheduler or parallelism yet. For every entity count it measures:
-- **allocation**: bytes/allocations made while creating the entities (setup only)
-- **speed**: time per query pass, timed only after a warmup and with the sample buffer
-  pre-allocated, so no allocation from the harness itself can leak into the measurement
-- **leak**: live bytes still allocated after the storage is dropped (should be 0)
+`benches/` is a separate crate (`xynok_ecs_benches`) built on [criterion]. One shared workload
+library defines the components, builds the storages and performs the passes; the targets on top of
+it only measure. That way `xynok_ecs`, `bevy_ecs` and a plain `std::Vec` baseline are provably
+running the same work, and the only thing that differs is the machinery underneath.
 
-Results print as a table in the terminal and are also written to `benches/output/results.json`
-and `benches/output/report.html` (a self-contained page with charts comparing all three).
+[criterion]: https://github.com/criterion-rs/criterion.rs
 
-**Cmd:** (always use `--release`; a debug build makes the speed numbers meaningless)
+**Cmd:** (`cargo bench` always builds optimised, so there is no debug-build footgun here)
 ```bash
-cargo run --release -p xynok_ecs_benches
+cargo bench -p xynok_ecs_benches
+open target/criterion/report/index.html
 ```
 
+#### `--bench query`, single-threaded iteration
+One full pass over every matching entity, across 1/2/3 queried components, 1k/10k/100k entities,
+and two archetype layouts: everything in one archetype, or the same entities split across five that
+a query has to fan out over. All three competitors run back to back within each scenario, so a
+machine that drifts in clock speed over a long run drags them all the same way instead of
+penalising whichever one happened to be registered last.
+
+#### `--bench parallel`, spreading one pass across threads
+`xynok_ecs` (`Query::par_for_each_chunk` on a `xynok_concurrency` pool) against `bevy_ecs`
+(`QueryState::par_iter_mut` on bevy's `ComputeTaskPool`), at 100k and 1M entities. Each library's
+own single-threaded pass is measured alongside, because speedup against your own baseline is what a
+parallel benchmark is actually asking, and only that ratio separates "spreads work well" from "was
+faster to begin with".
+
+`XYNOK_BENCH_THREADS` is the worker count, meaning the same thing to both: the calling thread runs
+jobs alongside those workers either way, so `N` means `N + 1` threads doing work. It defaults to
+`cores - 1`. One process measures one count, because bevy's `ComputeTaskPool` is a global that can
+be sized exactly once, so the whole curve takes one run per count:
+
+```bash
+XYNOK_BENCH_THREADS=4 cargo bench -p xynok_ecs_benches --bench parallel
+./benches/scripts/parallel_scaling.sh          # 1, 2, 4, 8 and cores-1
+```
+
+The thread count is part of every benchmark id, so those runs land next to each other in the report
+instead of overwriting one another.
+
+#### `--bin memory_report`, what the storages cost
+Bytes are a different question from speed and a stopwatch is the wrong instrument, so they are
+measured separately, through a counting global allocator over the same workload:
+
+```bash
+cargo run --release -p xynok_ecs_benches --bin memory_report
+```
+
+It reports the resident footprint per entity, how much was allocated to get there, and how many
+allocator calls that took. It also re-runs the pass that `--bench query` times inside its own
+measured region and fails if a single byte is allocated there, which is what makes those timings
+iteration-only rather than iteration-plus-whatever-the-allocator-was-doing. A JSON copy lands in
+`benches/output/memory.json`.
+
+Leaks are not checked there. `tests/memory.rs` already does it against `World` directly, with an
+allocator that counts chunk-sized allocations specifically.

@@ -4,12 +4,38 @@ version = "0.1.0"
 edition = "2024"
 publish = false
 
-[[bin]]
-name = "query_single_thread"
-path = "src/main.rs"
+[lints.clippy]
+redundant_field_names = "allow"
+
+[lib]
+name = "xynok_ecs_benches"
+path = "src/lib.rs"
 
 [dependencies]
 xynok_ecs = { path = ".." }
-bevy_ecs = "0.19.0"
+# The pool `Query::par_for_each_chunk` runs on. The benchmark builds one directly instead of going
+# through a scheduler, so both libraries get a pool with exactly the thread count under test and
+# nothing else in between.
+xynok_concurrency = { path = "../../xynok_concurrency" }
+# `multi_threaded` is what makes `par_iter_mut` actually spread work. Without it bevy compiles the
+# parallel path out and quietly falls back to a plain sequential iterator, which would make the
+# parallel comparison meaningless rather than merely wrong.
+bevy_ecs = { version = "0.19.0", features = ["multi_threaded"] }
+bevy_tasks = { version = "0.19.0", features = ["multi_threaded"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
+
+[dev-dependencies]
+criterion = { version = "0.8.2", features = ["html_reports"] }
+
+[[bin]]
+name = "memory_report"
+path = "src/bin/memory_report.rs"
+
+[[bench]]
+name = "query"
+harness = false
+
+[[bench]]
+name = "parallel"
+harness = false
