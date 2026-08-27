@@ -5,8 +5,9 @@ use crate::apis::identifies::XynokEcsError;
 use crate::apis::internal_traits::{TQueryColumn, TQueryParam, TQuerySrcAccess};
 use crate::apis::params::ComponentSpecs;
 use crate::apis::traits::TComponent;
+use crate::chunk::Chunk;
 use crate::query::access_scope::AccessScope;
-use crate::world::arch_spec::ArchetypeSpecs;
+use crate::world::arch_spec::{ArchetypeSpec, ArchetypeSpecs};
 use crate::world::query_spec::QuerySpecAccessor;
 
 macro_rules! impl_tuple_query_param {
@@ -119,6 +120,7 @@ macro_rules! impl_tuple_query_param {
         {
             type QueryItem<'a> = ($($q::QueryItem<'a>,)+);
             type SrcAccess<'a> = $src<'a, $($q,)+>;
+            type ChunkColumns<'a> = ($($q::ChunkColumns<'a>,)+);
             const TYPE_ID: TypeId = TypeId::of::<($(<<$q as TQueryColumn>::Component as TComponent>::StorageType,)+)>();
 
             fn access_scope(component_specs: &mut ComponentSpecs) -> Result<AccessScope, XynokEcsError>
@@ -132,6 +134,15 @@ macro_rules! impl_tuple_query_param {
             fn next<'a>(src_access: &mut Self::SrcAccess<'a>) -> Option<Self::QueryItem<'a>>
             {
                 src_access.next()
+            }
+
+            #[track_caller]
+            unsafe fn chunk_columns<'a>(arch_spec: &ArchetypeSpec, chunk: &Chunk) -> Self::ChunkColumns<'a>
+            {
+                // Each element resolves its own column offset, once per chunk. Columns sit apart
+                // inside a chunk so these slices never overlap, `&mut` ones included, and
+                // `AccessScope::extend` already rejected any query naming one component twice.
+                ($(unsafe { $q::chunk_columns(arch_spec, chunk) },)+)
             }
         }
     };

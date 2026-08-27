@@ -8,6 +8,9 @@ use std::marker::PhantomData;
 
 pub mod query_iter;
 
+mod chunk_view;
+pub use chunk_view::ChunkView;
+
 pub(crate) mod access_scope;
 mod src_access;
 mod tuple;
@@ -15,7 +18,7 @@ mod variant;
 
 pub struct Query<'a, T: TQueryParam + 'static>
 {
-    accessor: QuerySpecAccessor,
+    pub(crate) accessor: QuerySpecAccessor,
     phantom:  PhantomData<(&'a (), T)>,
 }
 
@@ -36,6 +39,18 @@ impl<'a, T: TQueryParam + 'static> Query<'a, T>
     {
         let accessor = world.get_or_create_query_src_access::<T>()?;
         Ok(Self {
+            accessor: accessor,
+            phantom:  PhantomData,
+        })
+    }
+
+    /// Builds a query from a spec that already exists, reading `world` only.
+    ///
+    /// Returns `None` when nobody has built that spec yet, or when it has gone stale. See
+    /// `World::query_src_access`.
+    pub(crate) fn from_prepared(world: &World) -> Option<Self>
+    {
+        world.query_src_access::<T>().map(|accessor| Self {
             accessor: accessor,
             phantom:  PhantomData,
         })

@@ -43,6 +43,17 @@ pub trait TSystem: Send + Sync + 'static
 
     fn run(&mut self, world: HeapMut<World>) -> Result<(), XynokEcsError>;
 
+    /// Performs everything `run` would **write** into the `World`, on exactly one thread.
+    ///
+    /// Initialising a [`crate::query::Query`] is not read-only: the first time it meets a query
+    /// type, the world registers components it has never seen, inserts a new `QuerySpec`, and
+    /// rebuilds the query's archetype list whenever new archetypes appear. Letting that happen
+    /// inside a job means two systems of the same group writing into one registry.
+    ///
+    /// The scheduler calls this for the whole group before spawning. After that, `init` inside a
+    /// job is a table lookup, which is a read, and concurrent reads are fine.
+    fn prepare(&self, world: HeapMut<World>) -> Result<(), XynokEcsError>;
+
     /// One entry per parameter, never merged into a single scope - [`AccessScopes`] explains
     /// what merging would throw away
     fn access_scope(&self, component_specs: &mut ComponentSpecs) -> Result<AccessScopes, XynokEcsError>;
@@ -50,6 +61,16 @@ pub trait TSystem: Send + Sync + 'static
 pub trait TSystemParam: Sized
 {
     fn init(world: HeapMut<World>) -> Result<Self, XynokEcsError>;
+
+    /// Runs [`Self::init`]'s writing half up front, where only one thread is around. See
+    /// [`TSystem::prepare`].
+    ///
+    /// The default builds one and throws it away: every parameter is cheap to build, and that
+    /// build is precisely what performs the writes that need to be kept on one thread.
+    fn prepare(world: HeapMut<World>) -> Result<(), XynokEcsError>
+    {
+        Self::init(world).map(|_| ())
+    }
 
     /// Adds what this parameter accesses to `dst`, which rejects it if it conflicts with a
     /// parameter already registered. A parameter that touches no component storage adds

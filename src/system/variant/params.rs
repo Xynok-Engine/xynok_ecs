@@ -33,6 +33,11 @@ macro_rules! mutiple_param_system {
                 (self.0)($($name::init(world)?,)*);
                 Ok(())
             }
+            fn prepare(&self, world: HeapMut<World>) -> Result<(), XynokEcsError>
+            {
+                $($name::prepare(world)?;)*
+                Ok(())
+            }
         }
 
         impl<F $(, $name)*> TIntoSystem<($($name,)*)> for F

@@ -1,10 +1,28 @@
+//! A schedule is a list of **steps**, run one after another.
+//!
+//! Each step is either a single system or a group of systems that run at the same time. A list of
+//! steps is all an ECS needs here: a full job graph would be more precise in theory, but most games
+//! have no cross-dependency to exploit, while "split into steps and join at the end of each" reads
+//! plainly and diffs cleanly.
+//!
+//! # Parallelism is declared, not inferred
+//!
+//! Xynok does not guess which systems may run together. The game author says so via
+//! [`TScheduler::add_system_parallel`], and `AccessScopes::can_parallel_with` acts as the referee:
+//! a wrong declaration panics at the call site, not during some later `run`.
+//!
+//! What that buys: an inferred DAG can reorder itself between two builds just because someone added
+//! a component to a query, and a bug caused by systems changing order takes a week to find. Declared
+//! by hand, the order lives in user code where it can be read and diffed.
+
 use std::collections::HashMap;
 use std::hash::Hash;
 
-use xynok_std::unsafe_ptr::HeapPtr;
+use xynok_concurrency::pool::{Config as LaneConfig, ThreadPool};
+use xynok_std::unsafe_ptr::{HeapMut, HeapPtr};
 
 use crate::schedule::system_spec::SystemSpecs;
-use crate::system::traits::{SystemTypeStorage, TIntoSystem};
+use crate::system::traits::{SystemTypeStorage, TIntoSystem, TIntoSystems};
 use crate::world::World;
 
 pub trait TScheduler: Sized
@@ -17,17 +35,57 @@ pub trait TScheduler: Sized
     #[track_caller]
     fn add_system<P, T: TIntoSystem<P>>(&mut self, session: Self::SessionType, system: T) -> &mut Self;
 
+    /// Declares a group of systems that run at the same time, as **one** step.
+    ///
+    /// # Panics
+    ///
+    /// If any two systems in the group have conflicting access scopes. Checked here rather than at
+    /// `run`, in the same spirit as [`Self::add_system`] catching a system whose own parameters
+    /// alias each other.
+    #[track_caller]
+    fn add_system_parallel<P, T: TIntoSystems<P>>(&mut self, session: Self::SessionType, systems: T) -> &mut Self;
+
     #[track_caller]
     fn run(&mut self, session: Self::SessionType);
 }
+
+/// One link in a session's list of steps.
+pub enum ScheduleStep
+{
+    /// A single system, run on the calling thread.
+    Single(SystemTypeStorage),
+    /// A group declared safe to run together: spawn, then join.
+    Parallel(Vec<SystemTypeStorage>),
+}
+
+impl ScheduleStep
+{
+    /// How many systems this step holds.
+    pub fn len(&self) -> usize
+    {
+        match self
+        {
+            Self::Single(_) => 1,
+            Self::Parallel(group) => group.len(),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool
+    {
+        self.len() == 0
+    }
+}
+
 pub struct DefaultScheduler
 {
-    world:   HeapPtr<World>,
-    systems: HashMap<DefaultScheduleSession, Vec<SystemTypeStorage>>,
+    world: HeapPtr<World>,
+    steps: HashMap<DefaultScheduleSession, Vec<ScheduleStep>>,
     /// Keyed by system type, so the same `fn` added to two sessions is described once. Only
     /// safe because everything in a spec is derived from the system's type - anything
-    /// per-instance would have to live beside the boxed system in `systems` instead.
-    specs:   SystemSpecs,
+    /// per-instance would have to live beside the boxed system in `steps` instead.
+    specs: SystemSpecs,
+    /// Lane A's pool. `world` holds a clone of it, see [`World::bind_lane`].
+    pool:  ThreadPool,
 }
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
@@ -55,49 +113,185 @@ impl TScheduler for DefaultScheduler
             Err(e) => panic!("{}", e),
         };
 
-        // Before the system is ever run, so a system whose parameters alias each other is
-        // reported at the `add_system` call site rather than at the first `run`
-        if let Err(e) = self.specs.register(s.as_ref(), &mut self.world.component_counter)
+        self.register(&s);
+        self.steps.entry(session).or_default().push(ScheduleStep::Single(s));
+        self
+    }
+
+    fn add_system_parallel<P, T: TIntoSystems<P>>(&mut self, session: Self::SessionType, systems: T) -> &mut Self
+    {
+        let group = match systems.into_systems()
         {
-            panic!("{}: {}", s.name(), e);
-        }
-        if let Some(systems) = self.systems.get_mut(&session)
+            Ok(r) => r,
+            Err(e) => panic!("{}", e),
+        };
+
+        for s in group.iter()
         {
-            systems.push(s);
+            self.register(s);
         }
-        else
+        // The user's declaration is judged here, at the call site, not at `run`
+        if let Err(e) = self.specs.check_group_can_parallel(&group)
         {
-            let systems = vec![s];
-            self.systems.insert(session, systems);
+            panic!("{}", e);
         }
+
+        self.steps.entry(session).or_default().push(ScheduleStep::Parallel(group));
         self
     }
 
     fn run(&mut self, session: Self::SessionType)
     {
-        if let Some(systems) = self.systems.get_mut(&session)
+        // Destructured so that `steps` can be borrowed mutably while `world` and `pool` stay
+        // usable inside the same loop
+        let Self { world, steps, pool, .. } = self;
+
+        let Some(steps) = steps.get_mut(&session)
+        else
         {
-            for s in systems
+            return;
+        };
+
+        let world_ptr = world.as_ref_mut();
+        for step in steps.iter_mut()
+        {
+            match step
             {
-                match s.run(self.world.as_ref_mut())
-                {
-                    Ok(_) =>
-                    {}
-                    Err(e) => panic!("{}", e),
-                }
+                ScheduleStep::Single(s) => run_system(s, world_ptr),
+                ScheduleStep::Parallel(group) => run_group(pool, group, world_ptr),
             }
+            // The synchronisation point that ends the step: every job of this step is done, so
+            // this is the only place in the frame where a structural change pulls no row out from
+            // under anybody
+            world.apply_commands();
         }
     }
 
     fn new(world: HeapPtr<World>) -> Self
     {
+        Self::with_lane_config(world, LaneConfig::from_env())
+    }
+}
+
+impl DefaultScheduler
+{
+    /// [`TScheduler::new`] with a pool config of your own.
+    ///
+    /// `LaneConfig::inline()` gives a scheduler that spawns no thread at all: parallel groups still
+    /// run, just one system after another on the calling thread. It is the fastest way to answer
+    /// "is this bug about threading?".
+    pub fn with_lane_config(world: HeapPtr<World>, config: LaneConfig) -> Self
+    {
+        Self::with_lane(world, ThreadPool::new(config))
+    }
+
+    /// [`TScheduler::new`] sharing a pool that already exists.
+    ///
+    /// What you want once the engine builds lane A in `main`: the ECS should be a guest of that
+    /// pool rather than stand up a second one beside it.
+    pub fn with_lane(mut world: HeapPtr<World>, pool: ThreadPool) -> Self
+    {
+        world.bind_lane(&pool);
         Self {
-            world,
-            systems: HashMap::new(),
+            world: world,
+            steps: HashMap::new(),
             specs: SystemSpecs::default(),
+            pool:  pool,
+        }
+    }
+
+    /// The pool that parallel steps run on.
+    #[inline]
+    pub fn lane(&self) -> &ThreadPool
+    {
+        &self.pool
+    }
+
+    /// A session's steps, in the order they run.
+    pub fn steps(&self, session: DefaultScheduleSession) -> &[ScheduleStep]
+    {
+        match self.steps.get(&session)
+        {
+            Some(steps) => steps.as_slice(),
+            None => &[],
+        }
+    }
+
+    /// Records a system's spec before it ever gets a chance to run.
+    ///
+    /// That is what reports a system whose parameters alias each other at the `add_system` call
+    /// site rather than at the first `run`.
+    #[track_caller]
+    fn register(&mut self, s: &SystemTypeStorage)
+    {
+        if let Err(e) = self.specs.register(s.as_ref(), &mut self.world.component_counter)
+        {
+            panic!("{}: {}", s.name(), e);
         }
     }
 }
+
+/// Performs every parameter's writing half up front, on the calling thread. See
+/// [`crate::system::traits::TSystem::prepare`].
+#[track_caller]
+fn prepare_system(system: &SystemTypeStorage, world: HeapMut<World>)
+{
+    if let Err(e) = system.prepare(world)
+    {
+        panic!("{}: {}", system.name(), e);
+    }
+}
+
+#[track_caller]
+fn run_prepared(system: &mut SystemTypeStorage, world: HeapMut<World>)
+{
+    match system.run(world)
+    {
+        Ok(_) =>
+        {}
+        Err(e) => panic!("{}", e),
+    }
+}
+
+#[track_caller]
+fn run_system(system: &mut SystemTypeStorage, world: HeapMut<World>)
+{
+    prepare_system(system, world);
+    run_prepared(system, world);
+}
+
+/// Spawns the whole group, then waits.
+///
+/// The calling thread does **not** park while waiting: `scope` waits by working, so it picks up one
+/// of the jobs it just spawned. That is why the pool runs `N = cores - 1` threads.
+///
+/// A one-element group runs straight through: pushing a single job into the pool and then waiting
+/// for exactly that job means paying the spawn cost to buy back the seat you already had.
+#[track_caller]
+fn run_group(pool: &ThreadPool, group: &mut [SystemTypeStorage], world: HeapMut<World>)
+{
+    if let [only] = group
+    {
+        run_system(only, world);
+        return;
+    }
+
+    // The preparation pass, on this very thread: initialising a query writes into the world's
+    // registries, and two jobs writing there at once is a race. After this pass, `init` inside a
+    // job is a table lookup, which is a read, and concurrent reads are fine.
+    for system in group.iter()
+    {
+        prepare_system(system, world);
+    }
+
+    pool.scope(|s| {
+        for system in group.iter_mut()
+        {
+            s.spawn(move || run_prepared(system, world));
+        }
+    });
+}
+
 #[allow(unused)]
 #[cfg(test)]
 mod test

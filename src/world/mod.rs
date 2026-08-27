@@ -1,7 +1,9 @@
 use std::any::TypeId;
 use std::collections::HashMap;
 use std::marker::PhantomData;
+use std::sync::OnceLock;
 
+use xynok_concurrency::pool::{Config as LaneConfig, ThreadPool};
 use xynok_std::collection::Queue;
 
 use crate::apis::identifies::XynokEcsError;
@@ -11,6 +13,7 @@ use crate::apis::params::{
 };
 use crate::apis::safe_counter::SafeCounter;
 use crate::apis::traits::TArchetype;
+use crate::cmd_buffer::CommandBuffers;
 use crate::chunk::layout::{ChunkLayout, ChunkLayoutParams};
 use crate::entity::Entity;
 use crate::query::Query;
@@ -43,6 +46,20 @@ pub struct World
     free_entities:                Queue<usize>,
     temp_alloc:                   WorldTempAllocation,
     global_archetype_version:     SafeCounter,
+    /// Lane A's pool, attached by the scheduler. `None` means this world is not under any
+    /// scheduler yet, so everything runs on the calling thread.
+    lane:                         Option<ThreadPool>,
+    /// Boxed so a reference to the buffer set survives a move of the `World` itself, for the same
+    /// reason the registries above are boxed.
+    cmd_buffers:                  Box<CommandBuffers>,
+}
+
+/// The empty pool used by a world not attached to any lane: no thread is spawned, so everything
+/// asking for it runs sequentially on the calling thread.
+fn inline_lane() -> &'static ThreadPool
+{
+    static INLINE: OnceLock<ThreadPool> = OnceLock::new();
+    INLINE.get_or_init(|| ThreadPool::new(LaneConfig::inline()))
 }
 impl Default for World
 {
@@ -58,6 +75,8 @@ impl Default for World
             free_entities:            Queue::new(),
             temp_alloc:               WorldTempAllocation::new(),
             global_archetype_version: SafeCounter::new(1, usize::MAX - 1),
+            lane:                     None,
+            cmd_buffers:              Box::new(CommandBuffers::default()),
         }
     }
 }
@@ -369,6 +388,93 @@ impl World
 
 impl World
 {
+    /// Attaches this world to lane A's pool.
+    ///
+    /// The scheduler calls it once, at construction. Two things follow: [`Self::lane`] hands back
+    /// that pool, and the command buffer set is resized to match the pool's number of seats.
+    ///
+    /// # Panics
+    ///
+    /// If any command is still pending, see `CommandBuffers::resize`.
+    pub fn bind_lane(&mut self, pool: &ThreadPool)
+    {
+        self.cmd_buffers.resize(pool.worker_count());
+        self.lane = Some(pool.clone());
+    }
+
+    /// The pool everything parallel in this world runs on.
+    ///
+    /// With no lane attached this is a pool with no threads, so a `parallel_for` built on it runs
+    /// sequentially. That way calling code never has to branch on whether a scheduler exists.
+    #[inline]
+    pub fn lane(&self) -> &ThreadPool
+    {
+        match &self.lane
+        {
+            Some(pool) => pool,
+            None => inline_lane(),
+        }
+    }
+
+    /// The current thread's seat in the lane, used to index any "one slot per worker" array.
+    ///
+    /// Always 0 for a world with no lane attached: there is only one thread to count.
+    ///
+    /// # Panics
+    ///
+    /// If the world has a lane attached and the calling thread is neither one of its workers nor
+    /// the thread that built it.
+    #[inline]
+    pub fn worker_index(&self) -> usize
+    {
+        match &self.lane
+        {
+            Some(pool) => pool.worker_index(),
+            None => 0,
+        }
+    }
+
+    #[inline]
+    pub fn command_buffers(&self) -> &CommandBuffers
+    {
+        &self.cmd_buffers
+    }
+
+    #[inline]
+    pub fn command_buffers_mut(&mut self) -> &mut CommandBuffers
+    {
+        &mut self.cmd_buffers
+    }
+}
+
+impl World
+{
+    /// Looks up the accessor of a query that was built earlier, **writing nothing**.
+    ///
+    /// This is the path a system takes when it runs inside a job: concurrent reads are fine, while
+    /// building a `&mut World` would make two jobs into two write paths onto the same place.
+    ///
+    /// Returns `None` when the query has never been built, or when its archetype list went stale
+    /// because new archetypes appeared. Both are [`Self::get_or_create_query_src_access`]'s job,
+    /// and both have to happen up front, where only one thread is around.
+    pub(crate) fn query_src_access<T: TQueryParam + 'static>(&self) -> Option<QuerySpecAccessor>
+    {
+        let query_idx = self.query_counter.index_of(&T::TYPE_ID)?;
+        let query_spec = self.query_counter.value_at(query_idx)?;
+
+        if query_spec.version != self.global_archetype_version.current_val()
+        {
+            return None;
+        }
+
+        Some(QuerySpecAccessor {
+            queries:         self.query_counter.as_ref() as *const _,
+            query_idx:       query_idx,
+            archetypes:      self.archetypes.as_ref() as *const _,
+            component_specs: self.component_counter.as_ref() as *const _,
+        })
+    }
+
     pub(crate) fn get_or_create_query_src_access<T: TQueryParam + 'static>(&mut self) -> Result<QuerySpecAccessor, XynokEcsError>
     {
         let current_global_arch_version = self.global_archetype_version.current_val();

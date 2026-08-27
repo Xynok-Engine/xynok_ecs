@@ -24,6 +24,11 @@ impl<F: Fn() + Send + Sync + 'static> TSystem for SystemAlias<F, ()>
         Ok(())
     }
 
+    fn prepare(&self, _world: HeapMut<World>) -> Result<(), XynokEcsError>
+    {
+        Ok(())
+    }
+
     fn access_scope(&self, _component_specs: &mut ComponentSpecs) -> Result<AccessScopes, XynokEcsError>
     {
         Ok(AccessScopes::default())

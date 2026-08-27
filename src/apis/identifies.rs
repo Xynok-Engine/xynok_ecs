@@ -50,6 +50,15 @@ pub enum XynokEcsError
 
     #[error("Two parameters of the same system access a component in conflicting ways !")]
     SystemAccessScopeConflict,
+
+    #[error("`{0}` and `{1}` were declared to run in parallel but their access scopes conflict !")]
+    ParallelGroupConflict(&'static str, &'static str),
+
+    #[error("System `{0}` has no registered spec !")]
+    SystemSpecIsNotRegistered(&'static str),
+
+    #[error("Query<{0}> was not prepared before the system ran !")]
+    QueryIsNotPrepared(&'static str),
 }
 
 // src: https://crates.io/crates/thiserror

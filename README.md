@@ -12,7 +12,10 @@
 | ✅ | tuple archetype | clients can create an archetype with varying numbers of components. Currently, the maximum is 16 components per archetype. |
 | ✅ | query | an iterator for querying components from an archetype |
 | canceled | Shared - Archetype Component | [This is the reason](https://youtu.be/k_RyU6QKQ-A) |
-| in progress | system & scheduler | [issue_link](https://github.com/Xynok-Engine/xynok_ecs/issues/3)|
+| ✅ | system & scheduler | a session is a list of steps, run in the order they were added. [issue_link](https://github.com/Xynok-Engine/xynok_ecs/issues/3)|
+| ✅ | parallel system group | `add_system_parallel((a, b, c))` runs a group at the same time on the lane A pool. You declare the group; the scheduler checks every pair's access scope at the call site rather than inferring a DAG. See [`examples/multi_thread_system.rs`](./examples/multi_thread_system.rs). |
+| ✅ | parallel query | `Query::par_for_each_chunk` splits one system's work by chunk across the same pool. A chunk is already contiguous in memory, so each job gets a real slice. |
+| ✅ | command buffer | create/destroy/add/remove from inside a parallel job. One buffer per worker, applied on a single thread in slot order at the end of each step. |
 | todo | changed/added detection | the foundation for the observer pattern and architectures related to asset and resource pipelines (mesh, texture, sound, etc.) |
 | canceled | persistent query | canceled: avoids the overhead of recreating every query whenever the structure changes. Currently, the query refresh process is spread across an entire frame. |
 | todo | singleton |  |

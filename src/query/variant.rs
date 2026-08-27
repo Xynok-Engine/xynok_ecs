@@ -4,15 +4,19 @@ use crate::apis::identifies::XynokEcsError;
 use crate::apis::internal_traits::{TQueryColumn, TQueryParam};
 use crate::apis::params::ComponentSpecs;
 use crate::apis::traits::TComponent;
+use crate::chunk::Chunk;
 use crate::query::access_scope::AccessScope;
-use crate::query::src_access::SrcAccess;
+use crate::query::src_access::{column_ptr, SrcAccess};
 use crate::utils::component_id_for;
+use crate::world::arch_spec::ArchetypeSpec;
 
 impl<T: TComponent + 'static> TQueryParam for &T
 {
     type QueryItem<'a> = &'a T;
 
     type SrcAccess<'a> = SrcAccess<'a>;
+
+    type ChunkColumns<'a> = &'a [T];
 
     const TYPE_ID: TypeId = TypeId::of::<T::StorageType>();
 
@@ -28,12 +32,21 @@ impl<T: TComponent + 'static> TQueryParam for &T
     {
         src_access.next::<T>()
     }
+
+    #[track_caller]
+    unsafe fn chunk_columns<'a>(arch_spec: &ArchetypeSpec, chunk: &Chunk) -> &'a [T]
+    {
+        let base = column_ptr::<T>(arch_spec, chunk);
+        unsafe { std::slice::from_raw_parts(base as *const T, chunk.len()) }
+    }
 }
 impl<T: TComponent + 'static> TQueryParam for &mut T
 {
     type QueryItem<'a> = &'a mut T;
 
     type SrcAccess<'a> = SrcAccess<'a>;
+
+    type ChunkColumns<'a> = &'a mut [T];
 
     const TYPE_ID: TypeId = TypeId::of::<T::StorageType>();
 
@@ -48,6 +61,13 @@ impl<T: TComponent + 'static> TQueryParam for &mut T
     fn next<'a>(src_access: &mut Self::SrcAccess<'a>) -> Option<Self::QueryItem<'a>>
     {
         src_access.next_mut::<T>()
+    }
+
+    #[track_caller]
+    unsafe fn chunk_columns<'a>(arch_spec: &ArchetypeSpec, chunk: &Chunk) -> &'a mut [T]
+    {
+        let base = column_ptr::<T>(arch_spec, chunk);
+        unsafe { std::slice::from_raw_parts_mut(base as *mut T, chunk.len()) }
     }
 }
 

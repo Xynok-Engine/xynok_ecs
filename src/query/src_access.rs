@@ -4,8 +4,31 @@ use std::marker::PhantomData;
 
 use crate::apis::internal_traits::TQuerySrcAccess;
 use crate::apis::traits::TComponent;
-use crate::world::arch_spec::ArchetypeSpecs;
+use crate::chunk::Chunk;
+use crate::world::arch_spec::{ArchetypeSpec, ArchetypeSpecs};
 use crate::world::query_spec::QuerySpecAccessor;
+
+/// Base address of `C`'s column inside a chunk.
+///
+/// # Panics
+///
+/// If the archetype does not carry that column. Not a redundant check: every caller comes through
+/// the pre-filtered archetype list, so a miss here means the filter and the read have drifted
+/// apart, and silently reading a wrong offset is far worse.
+#[inline]
+#[track_caller]
+pub(crate) fn column_ptr<C: TComponent + 'static>(arch_spec: &ArchetypeSpec, chunk: &Chunk) -> *mut u8
+{
+    let col_des = match arch_spec.layout.component_col_descriptors.get(&TypeId::of::<C::StorageType>())
+    {
+        Some(col_des) => col_des,
+        None => panic!(
+            "archetype does not carry a column for component `{}` even though it was pre-filtered to contain it",
+            std::any::type_name::<C::StorageType>()
+        ),
+    };
+    unsafe { chunk.ptr().add(col_des.offset) }
+}
 
 pub struct SrcAccess<'a>
 {

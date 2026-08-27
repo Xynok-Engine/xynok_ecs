@@ -7,7 +7,7 @@ codegen-units = 1
 
 [package]
 name = "xynok_ecs"
-version = "0.1.16"
+version = "0.1.17"
 edition = "2024"
 
 [lints.clippy]
@@ -19,6 +19,9 @@ xynok_std = { git = "https://github.com/Xynok-Engine/xynok_std.git", tag = "v0.1
 log = "0.4.33"
 thiserror = "2.0.18"
 xynok_ecs_proc_macro = { path = "proc_macro" }
+# Path chứ không phải git tag như `xynok_std`: hai crate này đang được sửa cùng nhau, và một
+# tag mới cho mỗi lần đổi API của pool thì không ai theo kịp. Đổi sang tag khi lane A đứng yên.
+xynok_concurrency = { path = "../xynok_concurrency" }
 [dev-dependencies]
 xynok_ecs = { path = ".", features = ["test-util"] }
 
