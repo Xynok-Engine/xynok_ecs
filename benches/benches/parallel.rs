@@ -43,10 +43,14 @@
 //! # The job size knob
 //!
 //! `xynok_ecs` takes the number of chunks per job as an argument; bevy works it out from its
-//! `BatchingStrategy`. `XYNOK_BENCH_BATCHES_PER_THREAD` sets how many jobs each participant gets to
+//! `BatchingStrategy`. `XYNOK_BENCH_BATCHES_PER_THREAD` sets how many lots each participant gets to
 //! pick from, and it defaults to 1 because that is what bevy's default strategy does, and comparing
 //! two libraries under two different splitting policies would say more about the policies than about
 //! the libraries.
+//!
+//! Note that bevy divides the size of the largest matched table, not the total, so the fragmented
+//! layout gets five times the batches the single archetype one does. `xynok::Parallel::setup`
+//! mirrors that.
 //!
 //! It is a diagnostic knob, not part of the benchmark id, so two runs that differ only in this value
 //! write to the same criterion slot and the "change" line will read as a regression against the

@@ -163,14 +163,23 @@ impl ParallelWorkload for Parallel
             ..PoolConfig::default()
         });
 
-        // The number of jobs to cut the pass into is derived from how many chunks the query
-        // actually touches, so it tracks the entity count and the layout instead of being a
-        // constant that happens to suit one of them.
+        // The lot size is derived from what the query actually touches, so it tracks the entity
+        // count and the layout instead of being a constant that happens to suit one of them.
         let mut chunk_count = 0usize;
         query.for_each_chunk(|_| chunk_count += 1);
 
+        // Divided by the chunks in the **largest** archetype, not by the total, because that is
+        // what bevy does: `QueryParIter::get_batch_size` takes `.max()` over the matched tables and
+        // divides that by the thread count. So a 5 archetype layout gives bevy 5 times as many
+        // batches as a single archetype one, and dividing the total here instead would hand bevy
+        // five lots for every one of ours and then call the difference a result about the two
+        // libraries.
+        //
+        // Every archetype in this workload holds the same number of entities by construction, so
+        // the largest one is the total split evenly. See `workload::split_counts`.
+        let largest_archetype = chunk_count.div_ceil(layout.group_count());
         let jobs = pool.worker_count() * batches_per_participant();
-        let batch = chunk_count.div_ceil(jobs.max(1)).max(1);
+        let batch = largest_archetype.div_ceil(jobs.max(1)).max(1);
 
         ParallelStorage {
             _world: world,

@@ -40,12 +40,21 @@ pub fn worker_threads() -> usize
 pub const WORKER_THREADS_ENV: &str = "XYNOK_BENCH_THREADS";
 pub const BATCHES_ENV: &str = "XYNOK_BENCH_BATCHES_PER_THREAD";
 
-/// How many jobs each participant should have to pick from in the `xynok_ecs` parallel query.
+/// How many lots each participant should have to pick from in the `xynok_ecs` parallel query.
 ///
-/// `1` is the default because that is what bevy's [`BatchingStrategy`] does out of the box, and
-/// comparing two libraries under two different splitting policies would say more about the policies
-/// than about the libraries. Raise it to trade scheduling overhead for better load balancing, which
-/// is worth probing on a fragmented layout where the archetypes are not the same size.
+/// `1` is the default because it is what bevy's [`BatchingStrategy`] uses for `batches_per_thread`,
+/// and comparing two libraries under two different splitting policies would say more about the
+/// policies than about the libraries.
+///
+/// The other half of matching that policy is what the number divides, and it is not the total: bevy
+/// divides the size of the **largest** matched table, so a layout split across five archetypes
+/// yields five times as many batches as a single archetype one. `xynok::Parallel::setup` does the
+/// same. Getting this wrong is not a small mis-tuning, it is measuring the two libraries under
+/// different granularity and reporting the difference as a property of the schedulers.
+///
+/// Raise it to trade scheduling overhead for better load balancing. That is worth probing on a
+/// machine with performance and efficiency cores, where one lot per participant means the pass ends
+/// when the slowest core finishes and there is nothing left to hand to anyone else.
 ///
 /// [`BatchingStrategy`]: bevy_ecs::batching::BatchingStrategy
 pub fn batches_per_participant() -> usize
