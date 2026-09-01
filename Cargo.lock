@@ -1519,7 +1519,7 @@ dependencies = [
 
 [[package]]
 name = "xynok_concurrency"
-version = "0.1.50"
+version = "0.1.54"
 dependencies = [
  "loom",
  "paste",
@@ -1528,7 +1528,7 @@ dependencies = [
 
 [[package]]
 name = "xynok_ecs"
-version = "0.1.20"
+version = "0.1.21"
 dependencies = [
  "log",
  "thiserror",
