@@ -21,6 +21,8 @@ pub trait TScheduler: Sized
 
     #[track_caller]
     fn run(&mut self, session: Self::SessionType);
+
+    //fn record_cmd_buffer()
 }
 pub struct DefaultScheduler
 {

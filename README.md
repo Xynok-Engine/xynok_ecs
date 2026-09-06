@@ -76,18 +76,35 @@ cargo test
 
 ### Benchmarks
 `benches/` is a separate crate (`xynok_ecs_benches`) comparing single-threaded query iteration
-against `bevy_ecs` and a plain `std::Vec` baseline — named `query_single_thread` since
-`xynok_ecs` has no system scheduler or parallelism yet. For every entity count it measures:
-- **allocation**: bytes/allocations made while creating the entities (setup only)
-- **speed**: time per query pass, timed only after a warmup and with the sample buffer
-  pre-allocated, so no allocation from the harness itself can leak into the measurement
-- **leak**: live bytes still allocated after the storage is dropped (should be 0)
+against `bevy_ecs` and a plain `std::Vec` baseline, across every combination of query arity
+(1, 2 or 3 components), archetype layout (1 archetype or 5) and entity count (1k, 10k, 100k).
 
-Results print as a table in the terminal and are also written to `benches/output/results.json`
-and `benches/output/report.html` (a self-contained page with charts comparing all three).
+Timing is done by [criterion](https://github.com/criterion-rs/criterion.rs), which picks the
+iteration counts, runs the warm-up, collects the samples, bootstraps the confidence intervals,
+classifies outliers and compares each run against the previous one on disk. Memory is a different
+question and a stopwatch is the wrong instrument for it, so a second binary measures that through
+a counting global allocator over the same workload:
 
-**Cmd:** (always use `--release`; a debug build makes the speed numbers meaningless)
+- **footprint**: bytes still held once the storage is built, and what that works out to per entity
+- **setup allocation**: every byte requested while building, and how many allocator calls it took
+- **query-loop allocation**: bytes allocated inside the pass criterion times (must be 0, otherwise
+  the timing is not iteration-only)
+- **leak**: live bytes still held after the storage is dropped (must be 0)
+
+The report binary joins the two and writes `benches/output/results.json` plus
+`benches/output/report.html`, a self-contained page with the comparison table and charts. It exits
+non-zero if any scenario allocates in the timed loop or leaks, so it works as a CI check too.
+Criterion's own report lands at `target/criterion/report/index.html`.
+
+**Cmd:**
 ```bash
-cargo run --release -p xynok_ecs_benches
+./benches/scripts/bench.sh          # bench, then report
+./benches/scripts/bench.sh 1k       # only the benchmarks whose id contains "1k"
+```
+
+Or the two steps by hand (the report needs `--release`; a debug build makes the numbers meaningless):
+```bash
+cargo bench -p xynok_ecs_benches --bench query
+cargo run --release -p xynok_ecs_benches --bin report
 ```
 
