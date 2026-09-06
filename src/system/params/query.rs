@@ -10,9 +10,11 @@ use crate::world::World;
 
 impl<'a, T: TQueryParam + 'static> TSystemParam for Query<'a, T>
 {
-    fn init(mut world: HeapMut<World>) -> Result<Self, XynokEcsError>
+    fn init(world: HeapMut<World>) -> Result<Self, XynokEcsError>
     {
-        Query::new(&mut world)
+        // `as_ref_mut` hands back a `&mut World` detached from this local `HeapMut`, which is what
+        // lets the resulting `Query<'a, _>` outlive `init` and reach the system body
+        Query::new(world.as_ref_mut())
     }
 
     fn collect_access_scope(dst: &mut AccessScopes, component_specs: &mut ComponentSpecs) -> Result<(), XynokEcsError>

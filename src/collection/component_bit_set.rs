@@ -1,6 +1,5 @@
-#![allow(unused)]
 /// How many component ids fit in one word of the set
-pub const BITS_PER_WORD: usize = 64;
+const BITS_PER_WORD: usize = 64;
 
 #[derive(Default, Clone, Debug)]
 pub struct ComponentBitSet

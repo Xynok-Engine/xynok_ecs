@@ -16,6 +16,7 @@ too_many_arguments = "allow"
 
 [dependencies]
 xynok_std = { git = "https://github.com/Xynok-Engine/xynok_std.git", tag = "v0.1.17" }
+xynok_concurrency = { path = "../xynok_concurrency" }
 log = "0.4.33"
 thiserror = "2.0.18"
 xynok_ecs_proc_macro = { path = "proc_macro" }

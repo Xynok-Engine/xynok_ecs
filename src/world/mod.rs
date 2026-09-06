@@ -20,6 +20,7 @@ use crate::world::entity_spec::EntitySpec;
 use crate::world::query_spec::{QuerySpec, QuerySpecAccessor, QuerySpecs};
 use crate::world::temp_allocation::WorldTempAllocation;
 mod temp_allocation;
+
 pub(crate) mod entity_spec;
 pub(crate) mod arch_spec;
 pub(crate) mod query_spec;
@@ -31,18 +32,17 @@ pub mod testing;
 
 pub struct World
 {
-    // Each registry is boxed as a whole, so that a `QuerySpecAccessor` handed to a system
-    // stays valid even if the `World` value itself is moved. The entries inside are *not*
-    // boxed: nothing caches their addresses, only their indices.
-    archetypes:                   Box<ArchetypeSpecs>,
-    pub(crate) component_counter: Box<ComponentSpecs>,
-    query_counter:                Box<QuerySpecs>,
-    component_set_counter:        HashMap<Vec<usize>, usize>,
-    archetype_counter:            HashMap<TypeId, usize>,
-    entities:                     Vec<EntitySpec>,
-    free_entities:                Queue<usize>,
-    temp_alloc:                   WorldTempAllocation,
-    global_archetype_version:     SafeCounter,
+    // A `QuerySpecAccessor` borrows these registries directly, and the entries inside are
+    // never boxed: nothing caches their addresses, only their indices.
+    archetypes:               ArchetypeSpecs,
+    component_counter:        ComponentSpecs,
+    query_counter:            QuerySpecs,
+    component_set_counter:    HashMap<Vec<usize>, usize>,
+    archetype_counter:        HashMap<TypeId, usize>,
+    entities:                 Vec<EntitySpec>,
+    free_entities:            Queue<usize>,
+    temp_alloc:               WorldTempAllocation,
+    global_archetype_version: SafeCounter,
 }
 impl Default for World
 {
@@ -50,11 +50,11 @@ impl Default for World
     {
         Self {
             entities:                 Vec::with_capacity(16),
-            archetypes:               Box::new(ArchetypeSpecs::new()),
-            component_counter:        Box::new(ComponentSpecs::new()),
+            archetypes:               ArchetypeSpecs::new(),
+            component_counter:        ComponentSpecs::new(),
             archetype_counter:        HashMap::new(),
             component_set_counter:    HashMap::new(),
-            query_counter:            Box::new(QuerySpecs::new()),
+            query_counter:            QuerySpecs::new(),
             free_entities:            Queue::new(),
             temp_alloc:               WorldTempAllocation::new(),
             global_archetype_version: SafeCounter::new(1, usize::MAX - 1),
@@ -369,7 +369,11 @@ impl World
 
 impl World
 {
-    pub(crate) fn get_or_create_query_src_access<T: TQueryParam + 'static>(&mut self) -> Result<QuerySpecAccessor, XynokEcsError>
+    pub(crate) fn component_specs_mut(&mut self) -> &mut ComponentSpecs
+    {
+        &mut self.component_counter
+    }
+    pub(crate) fn get_or_create_query_src_access<'a, T: TQueryParam + 'static>(&mut self) -> Result<QuerySpecAccessor<'a>, XynokEcsError>
     {
         let current_global_arch_version = self.global_archetype_version.current_val();
 
@@ -408,10 +412,10 @@ impl World
         }
 
         Ok(QuerySpecAccessor {
-            queries:         self.query_counter.as_ref() as *const _,
             query_idx:       query_idx,
-            archetypes:      self.archetypes.as_ref() as *const _,
-            component_specs: self.component_counter.as_ref() as *const _,
+            queries:         unsafe { &*(&self.query_counter as *const QuerySpecs) },
+            archetypes:      unsafe { &*(&self.archetypes as *const ArchetypeSpecs) },
+            component_specs: unsafe { &*(&self.component_counter as *const ComponentSpecs) },
         })
     }
 }

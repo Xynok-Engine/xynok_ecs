@@ -17,17 +17,16 @@ pub trait TScheduler: Sized
     #[track_caller]
     fn add_system<P, T: TIntoSystem<P>>(&mut self, session: Self::SessionType, system: T) -> &mut Self;
 
+    //fn add_systems
+
     #[track_caller]
     fn run(&mut self, session: Self::SessionType);
 }
 pub struct DefaultScheduler
 {
-    world:   HeapPtr<World>,
-    systems: HashMap<DefaultScheduleSession, Vec<SystemTypeStorage>>,
-    /// Keyed by system type, so the same `fn` added to two sessions is described once. Only
-    /// safe because everything in a spec is derived from the system's type - anything
-    /// per-instance would have to live beside the boxed system in `systems` instead.
-    specs:   SystemSpecs,
+    world:        HeapPtr<World>,
+    systems:      HashMap<DefaultScheduleSession, Vec<SystemTypeStorage>>,
+    system_specs: SystemSpecs,
 }
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
@@ -57,7 +56,7 @@ impl TScheduler for DefaultScheduler
 
         // Before the system is ever run, so a system whose parameters alias each other is
         // reported at the `add_system` call site rather than at the first `run`
-        if let Err(e) = self.specs.register(s.as_ref(), &mut self.world.component_counter)
+        if let Err(e) = self.system_specs.register(s.as_ref(), self.world.component_specs_mut())
         {
             panic!("{}: {}", s.name(), e);
         }
@@ -94,7 +93,7 @@ impl TScheduler for DefaultScheduler
         Self {
             world,
             systems: HashMap::new(),
-            specs: SystemSpecs::default(),
+            system_specs: SystemSpecs::default(),
         }
     }
 }
