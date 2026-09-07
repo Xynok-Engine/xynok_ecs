@@ -1,7 +1,9 @@
 use std::collections::HashMap;
 use std::hash::Hash;
 
-use xynok_std::unsafe_ptr::HeapPtr;
+use xynok_concurrency::thread_pool::cfg::CfgThreadPool;
+use xynok_concurrency::thread_pool::ThreadPool;
+use xynok_std::unsafe_ptr::{HeapMut, HeapPtr};
 
 use crate::schedule::step::ScheduleStep;
 use crate::schedule::system_spec::SystemSpecs;
@@ -23,15 +25,13 @@ pub trait TScheduler: Sized
 
     #[track_caller]
     fn run(&mut self, session: Self::SessionType);
-
-    //fn record_cmd_buffer()
 }
 pub struct DefaultScheduler
 {
     world:        HeapPtr<World>,
-    systems:      HashMap<DefaultScheduleSession, Vec<SystemTypeStorage>>,
     system_specs: SystemSpecs,
     steps:        HashMap<DefaultScheduleSession, Vec<ScheduleStep>>,
+    thread_pool:  ThreadPool,
 }
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
@@ -85,18 +85,23 @@ impl TScheduler for DefaultScheduler
         self
     }
 
+    #[inline]
     fn run(&mut self, session: Self::SessionType)
     {
-        if let Some(systems) = self.systems.get_mut(&session)
+        let Some(steps) = self.steps.get_mut(&session)
+        else
         {
-            for s in systems
+            return;
+        };
+        let world = self.world.as_ref_mut();
+
+        for step in steps.iter_mut()
+        {
+            match step
             {
-                match s.run(self.world.as_ref_mut())
-                {
-                    Ok(_) =>
-                    {}
-                    Err(e) => panic!("{}", e),
-                }
+                ScheduleStep::Single(tsystem) => run_system(tsystem, world),
+
+                ScheduleStep::Parallel(tsystems) => run_system_group(&self.thread_pool, tsystems, world),
             }
         }
     }
@@ -104,14 +109,53 @@ impl TScheduler for DefaultScheduler
     fn new(world: HeapPtr<World>) -> Self
     {
         Self {
-            world,
-            systems: HashMap::new(),
+            world:        world,
+            steps:        HashMap::new(),
             system_specs: SystemSpecs::default(),
-            steps: HashMap::new(),
+            thread_pool:  ThreadPool::new(CfgThreadPool::new("Default Xynok ECS Scheduler ThreadPool", 4)),
         }
     }
 }
+#[track_caller]
+fn run_system(system: &mut SystemTypeStorage, world: HeapMut<World>)
+{
+    match system.run(world)
+    {
+        Ok(_) =>
+        {}
+        Err(e) => panic!("{}", e),
+    }
+}
 
+#[track_caller]
+fn run_system_group(pool: &ThreadPool, group: &mut [SystemTypeStorage], world: HeapMut<World>)
+{
+    if let [only] = group
+    {
+        run_system(only, world);
+        return;
+    }
+
+    // The preparation pass, on this very thread: initialising a query writes into the world's
+    // registries, and two jobs writing there at once is a race. After this pass, `init` inside a
+    // job is a table lookup, which is a read, and concurrent reads are fine.
+    for system in group.iter()
+    {
+        match system.prepare(world)
+        {
+            Ok(_) =>
+            {}
+            Err(e) => panic!("{}", e),
+        }
+    }
+
+    pool.scope(|s| {
+        for system in group.iter_mut()
+        {
+            s.spawn(move || run_system(system, world));
+        }
+    });
+}
 impl DefaultScheduler
 {
     /// Records a system's spec before it ever gets a chance to run.
