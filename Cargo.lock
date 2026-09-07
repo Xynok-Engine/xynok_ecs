@@ -1519,8 +1519,7 @@ dependencies = [
 
 [[package]]
 name = "xynok_concurrency"
-version = "0.1.81"
-source = "git+https://github.com/Xynok-Engine/xynok_concurrency.git?tag=v0.1.81#6dd5259211a2e0b105d39bfc57b8fe3a66e0b892"
+version = "0.1.82"
 dependencies = [
  "loom",
  "paste",

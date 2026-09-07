@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 use std::hash::Hash;
 
-use xynok_concurrency::thread_pool::cfg::CfgThreadPool;
 use xynok_concurrency::thread_pool::ThreadPool;
+use xynok_concurrency::thread_pool::cfg::CfgThreadPool;
 use xynok_std::unsafe_ptr::{HeapMut, HeapPtr};
 
 use crate::schedule::step::ScheduleStep;
@@ -149,12 +149,7 @@ fn run_system_group(pool: &ThreadPool, group: &mut [SystemTypeStorage], world: H
         }
     }
 
-    pool.scope(|s| {
-        for system in group.iter_mut()
-        {
-            s.spawn(move || run_system(system, world));
-        }
-    });
+    pool.run_batch(group.iter_mut().map(|system| move || run_system(system, world)));
 }
 impl DefaultScheduler
 {
@@ -309,5 +304,49 @@ mod test
 
         scheduler.run(DefaultScheduleSession::Start);
         scheduler.run(DefaultScheduleSession::Update);
+    }
+    #[test]
+    fn parallel_batch_finishes_before_the_next_step()
+    {
+        fn add_hp(query: Query<&mut Hp>)
+        {
+            for hp in query
+            {
+                hp.0 += 1;
+            }
+        }
+        fn add_mana(query: Query<&mut Mana>)
+        {
+            for mana in query
+            {
+                mana.0 += 2;
+            }
+        }
+        fn check(query: Query<(&Hp, &Mana)>)
+        {
+            let mut count = 0;
+            for (hp, mana) in query
+            {
+                assert!(hp.0 >= 2);
+                assert_eq!(mana.0, hp.0 * 2 + 8);
+                count += 1;
+            }
+            assert_eq!(count, 257);
+        }
+        let mut world = HeapPtr::new(World::default());
+        for _ in 0..257
+        {
+            world.create((Hp(1), Mana(10)));
+        }
+        let mut scheduler = DefaultScheduler::new(world);
+        scheduler
+            .add_system_parallel(DefaultScheduleSession::Update, (add_hp, add_mana))
+            .add_system(DefaultScheduleSession::Update, check);
+        scheduler.run(DefaultScheduleSession::Update);
+        scheduler.run(DefaultScheduleSession::Update);
+        for (hp, mana) in scheduler.world.create_query::<(&Hp, &Mana)>()
+        {
+            assert_eq!((hp.0, mana.0), (3, 14));
+        }
     }
 }
