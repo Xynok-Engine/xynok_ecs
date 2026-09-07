@@ -21,7 +21,11 @@ I have included a benchmark comparison against [Bevy](https://github.com/bevyeng
 
 Because this library implements a significantly smaller feature set compared to Bevy, it naturally incurs less overhead. It is not "faster" in the sense of being a more efficient implementation of equivalent features.
 
-![almost_faster_2x_bevy_ecs](assets/benchmark_v0.1.0.png)
+
+| Single Thread | Multi-threaded |
+| -------------- | --------------- |
+| ![a](assets/single_thread_v0.1.75.png) | ![a](assets/multi_thread_v0.1.75.png) |
+
 
 ## Current Limitations
 
@@ -35,7 +39,7 @@ This project is still in its early stages. Please keep the following in mind:
 ## Install
 ```toml
 [dependencies]
-xynok_ecs = { git = "https://github.com/Xynok-Engine/xynok_ecs.git", tag = "v0.1.21" }
+xynok_ecs = { git = "https://github.com/Xynok-Engine/xynok_ecs.git", tag = "v0.1.22" }
 ```
 ## Concepts
 To understand how the entire codebase works, you can check out these [videos](https://www.youtube.com/@xynok_youtube/playlists). I created them when I first started this repo. They explain the core concepts and the most important ideas that the codebase implements. I might update them in the future, but for now, they are a close match to the current state of the code.
@@ -55,11 +59,11 @@ cargo run --example archetype
 
 **Cmd:**
 ```bash
-./benches/scripts/bench.sh                              # everything, then the report
-./benches/scripts/bench.sh 1k                           # only ids containing "1k"
+./benches/scripts/bench.sh                              # both benches, then the report
+./benches/scripts/bench.sh 1k                           # the same, only ids containing "1k"
 cargo bench -p xynok_ecs_benches --bench query          # single-threaded timings
 cargo bench -p xynok_ecs_benches --bench parallel       # multi-threaded timings
-cargo run --release -p xynok_ecs_benches --bin report   # memory, then the report
+cargo run --release -p xynok_ecs_benches --bin report   # memory + report, from the timings above
 ```
 
 `benches/` is a separate crate (`xynok_ecs_benches`) comparing single-threaded query iteration
