@@ -2,17 +2,21 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<title>xynok_ecs query_single_thread benchmark</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>xynok_ecs benchmark</title>
 <style>
   :root {
     --bg: #ffffff;
     --fg: #1a1a1a;
     --muted: #6b7280;
     --card-bg: #f7f7f8;
+    --card-alt: #eef0f3;
     --border: #e5e7eb;
-    --c0: #4f7cff; /* xynok_ecs */
-    --c1: #ff8a3d; /* bevy_ecs */
-    --c2: #35b06b; /* std::Vec */
+    --best: #35b06b;
+    --warn: #d9534f;
+    --c-xynok_ecs: #4f7cff;
+    --c-bevy_ecs: #ff8a3d;
+    --c-std_vec: #35b06b;
   }
   @media (prefers-color-scheme: dark) {
     :root {
@@ -20,7 +24,10 @@
       --fg: #eaeaea;
       --muted: #9aa0aa;
       --card-bg: #1c1f26;
+      --card-alt: #22262f;
       --border: #2a2e37;
+      --best: #4fd18b;
+      --warn: #ff6b66;
     }
   }
   * { box-sizing: border-box; }
@@ -30,15 +37,24 @@
     background: var(--bg);
     color: var(--fg);
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    line-height: 1.5;
   }
-  h1 { font-size: 1.4rem; margin-bottom: 0.25rem; }
-  .subtitle { color: var(--muted); margin-bottom: 1.5rem; font-size: 0.9rem; max-width: 70rem; }
-  .legend { display: flex; gap: 1.25rem; margin-bottom: 1.25rem; flex-wrap: wrap; }
+  h1 { font-size: 1.4rem; margin: 0 0 0.25rem 0; }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.92em; }
+  .subtitle { color: var(--muted); margin: 0 0 1.25rem 0; font-size: 0.9rem; max-width: 72rem; }
+  .env {
+    display: flex; gap: 1.5rem; flex-wrap: wrap;
+    font-size: 0.8rem; color: var(--muted);
+    border: 1px solid var(--border); border-radius: 10px;
+    padding: 0.6rem 0.9rem; margin-bottom: 1.25rem;
+  }
+  .env b { color: var(--fg); font-weight: 600; }
+  .legend { display: flex; gap: 1.25rem; margin-bottom: 1rem; flex-wrap: wrap; }
   .legend-item { display: flex; align-items: center; gap: 0.4rem; font-size: 0.85rem; }
   .swatch { width: 0.8rem; height: 0.8rem; border-radius: 2px; display: inline-block; }
   .controls { display: flex; gap: 1.5rem; margin-bottom: 1.75rem; flex-wrap: wrap; align-items: center; }
   .control-group { display: flex; gap: 0.5rem; align-items: center; font-size: 0.85rem; }
-  .control-group span { color: var(--muted); }
+  .control-group > span { color: var(--muted); }
   .control-group button {
     border: 1px solid var(--border);
     background: var(--card-bg);
@@ -47,16 +63,13 @@
     padding: 0.3rem 0.7rem;
     font-size: 0.82rem;
     cursor: pointer;
+    font-family: inherit;
   }
-  .control-group button.active { background: var(--c0); color: #fff; border-color: var(--c0); }
+  .control-group button.active { background: var(--c-xynok_ecs); color: #fff; border-color: var(--c-xynok_ecs); }
   section { margin-bottom: 2.5rem; }
-  section > h2 { font-size: 1.05rem; margin-bottom: 0.2rem; }
-  section > p.desc { color: var(--muted); font-size: 0.85rem; margin-top: 0; margin-bottom: 1rem; }
-  .chart-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-    gap: 1rem;
-  }
+  section > h2 { font-size: 1.05rem; margin: 0 0 0.2rem 0; }
+  section > p.desc { color: var(--muted); font-size: 0.85rem; margin: 0 0 1rem 0; max-width: 72rem; }
+  .chart-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1rem; }
   .chart-card {
     background: var(--card-bg);
     border: 1px solid var(--border);
@@ -64,33 +77,46 @@
     padding: 1rem;
     overflow-x: auto;
   }
-  .chart-card h3 {
-    margin: 0 0 0.75rem 0;
-    font-size: 0.85rem;
-    color: var(--muted);
-    font-weight: 600;
-  }
+  .chart-card h3 { margin: 0 0 0.75rem 0; font-size: 0.85rem; color: var(--muted); font-weight: 600; }
   .bar-label { font-size: 0.72rem; fill: var(--fg); }
   .bar-value { font-size: 0.72rem; fill: var(--muted); }
+  .compare-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 1rem; }
   table { border-collapse: collapse; width: 100%; font-size: 0.8rem; }
   th, td { text-align: right; padding: 0.35rem 0.55rem; border-bottom: 1px solid var(--border); white-space: nowrap; }
   th:first-child, td:first-child { text-align: left; }
   th { color: var(--muted); font-weight: 600; }
   .table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 10px; }
+  .compare-card { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+  .compare-card > h3 {
+    margin: 0; padding: 0.6rem 0.8rem; font-size: 0.85rem; font-weight: 600;
+    background: var(--card-alt); border-bottom: 1px solid var(--border);
+  }
+  .compare-card .table-wrap { border: 0; border-radius: 0; }
+  td.best { color: var(--best); font-weight: 600; }
+  td.bad { color: var(--warn); font-weight: 600; }
+  .metric-name { color: var(--fg); }
+  .metric-note { color: var(--muted); font-weight: 400; font-size: 0.92em; }
+  .sub { display: block; color: var(--muted); font-size: 0.92em; font-weight: 400; }
+  .empty { color: var(--muted); font-size: 0.85rem; padding: 1rem; }
 </style>
 </head>
 <body>
-  <h1>xynok_ecs — query_single_thread benchmark</h1>
+  <h1>xynok_ecs &mdash; benchmark</h1>
   <p class="subtitle">
-    Comparing single-threaded query iteration across <code>xynok_ecs</code>, <code>bevy_ecs</code>,
-    and a plain <code>std::Vec</code> baseline, across every combination of query arity (1, 2, or 3
-    components) and archetype layout (all entities in one archetype, or fanned out across 5
-    archetypes that all carry the queried components). The query loop is timed in isolation from
-    setup: allocation observed during setup is reported separately from allocation (if any)
-    observed during the timed query loop itself. Each timed sample batches enough back-to-back
-    calls to outlast timer overhead, and library run order is randomized within each scenario to
-    avoid systematically penalizing whichever one happens to run under CPU throttling.
+    Two benchmarks on one page. The first is single-threaded query iteration across
+    <code>xynok_ecs</code>, <code>bevy_ecs</code> and a plain <code>std::Vec</code> baseline, at
+    every combination of query arity (1, 2 or 3 components) and archetype layout (all entities in
+    one archetype, or fanned out across 5 archetypes that all carry the queried components). The
+    second, further down, is a frame of a multi-threaded schedule: a group of systems that cannot
+    conflict, run by each library's own scheduler. Every timing here was produced by
+    <a href="https://github.com/criterion-rs/criterion.rs">criterion</a>, which picks the iteration
+    counts, runs the warm-up, collects the samples and bootstraps the confidence intervals. The
+    memory numbers come from a counting global allocator over the same workload, measured outside
+    the timed region: criterion answers &ldquo;how fast&rdquo;, and a stopwatch is the wrong
+    instrument for bytes.
   </p>
+
+  <div class="env" id="env"></div>
   <div class="legend" id="legend"></div>
 
   <div class="controls">
@@ -99,77 +125,382 @@
   </div>
 
   <section>
-    <h2>Query speed (mean time per pass, lower is better)</h2>
-    <p class="desc">Time to run one full read/write pass over every matching entity, for the selected scenario.</p>
-    <div class="chart-grid" id="chart-speed"></div>
+    <h2>Comparison table</h2>
+    <p class="desc">
+      Every benchmark heading side by side for the selected scenario, one table per entity count.
+      The better value in each row is highlighted; rows that are a check rather than a comparison
+      (query-loop allocation, leaked bytes) turn red when the answer is anything but zero.
+    </p>
+    <div class="compare-grid" id="compare"></div>
   </section>
 
   <section>
-    <h2>Query speed, p99 (tail latency, lower is better)</h2>
-    <p class="desc">99th-percentile time per pass — how bad the slow samples get, not just the average.</p>
+    <h2>Query speed (mean time per pass, lower is better)</h2>
+    <p class="desc">
+      Time for one full read/write pass over every matching entity. The whisker on each bar is
+      criterion's bootstrapped 95% confidence interval for the mean: bars whose whiskers overlap are
+      too close to call from this run.
+    </p>
+    <div class="chart-grid" id="chart-mean"></div>
+  </section>
+
+  <section>
+    <h2>Throughput (entities per second, higher is better)</h2>
+    <p class="desc">
+      The same measurement divided into the entity count, which is what makes 1k and 100k
+      comparable to each other rather than only within their own size.
+    </p>
+    <div class="chart-grid" id="chart-throughput"></div>
+  </section>
+
+  <section>
+    <h2>Tail latency, p99 (lower is better)</h2>
+    <p class="desc">
+      The 99th percentile of criterion's samples: how bad the slow passes get, not just the average
+      one. A library whose p99 sits far above its mean is inconsistent, and a frame budget cares
+      about that.
+    </p>
     <div class="chart-grid" id="chart-p99"></div>
   </section>
 
   <section>
-    <h2>Setup allocation (lower is better)</h2>
-    <p class="desc">Bytes allocated while creating every entity/component, before any query runs.</p>
-    <div class="chart-grid" id="chart-setup-alloc"></div>
-  </section>
-
-  <section>
-    <h2>Query-loop allocation (isolation check, should be ~0)</h2>
+    <h2>Memory footprint (lower is better)</h2>
     <p class="desc">
-      Bytes allocated strictly inside the timed query loop. Non-zero here means the measured
-      "speed" above is not query-only for that competitor at that size.
+      Bytes still held once the storage is built, so this includes whatever the library rounds up
+      to: chunk padding, table capacity growth, index tables. Arity does not change the storage, so
+      this is the same across the three component counts.
     </p>
-    <div class="chart-grid" id="chart-query-alloc"></div>
+    <div class="chart-grid" id="chart-resident"></div>
   </section>
 
   <section>
-    <h2>Leaked bytes after drop (should be 0)</h2>
-    <p class="desc">Live bytes still allocated after the storage was dropped, relative to before setup.</p>
+    <h2>Setup allocation (lower is better)</h2>
+    <p class="desc">
+      Every byte the storage asked for while being built, freed again or not. Much larger than the
+      footprint above means a lot of copying while growing.
+    </p>
+    <div class="chart-grid" id="chart-allocated"></div>
+  </section>
+
+  <section>
+    <h2>Query-loop allocation (isolation check, must be 0)</h2>
+    <p class="desc">
+      Bytes allocated inside the pass criterion times, measured over several passes so a library
+      that only allocates on the first one still shows up. Anything but zero means that benchmark's
+      timing includes allocator work and is not iteration-only.
+    </p>
+    <div class="chart-grid" id="chart-loop-alloc"></div>
+  </section>
+
+  <section>
+    <h2>Leaked bytes after drop (must be 0)</h2>
+    <p class="desc">Bytes still live once the storage has been dropped, relative to before it was built.</p>
     <div class="chart-grid" id="chart-leak"></div>
   </section>
 
+  <section class="parallel-section">
+    <h2>Multi-threaded schedule</h2>
+    <p class="desc">
+      From here on the numbers come from a different benchmark. One measurement is one frame: a
+      group of systems that provably never touch the same component in an incompatible way, handed
+      to <code>xynok_ecs</code>'s <code>add_system_parallel</code> on one side and to bevy's
+      multi-threaded executor on the other, both given the same number of worker threads. Every
+      system walks every entity, so throughput here counts entity visits (entities x systems) rather
+      than entities. The <code>std::Vec</code> baseline has no scheduler and sits this one out.
+    </p>
+    <div class="controls">
+      <div class="control-group"><span>group size:</span><div id="filter-systems"></div></div>
+    </div>
+    <div class="compare-grid" id="parallel-compare"></div>
+  </section>
+
+  <section class="parallel-section">
+    <h2>Frame time (mean, lower is better)</h2>
+    <p class="desc">
+      How long the whole group takes, which is however long its slowest system takes plus whatever
+      the scheduler charges for spreading the work. The whisker is criterion's bootstrapped 95%
+      confidence interval for the mean.
+    </p>
+    <div class="chart-grid" id="chart-frame-mean"></div>
+  </section>
+
+  <section class="parallel-section">
+    <h2>Frame throughput (entity visits per second, higher is better)</h2>
+    <p class="desc">
+      The same measurement divided into entity visits, so a 2-system group and a 4-system group are
+      comparable to each other rather than only within their own size.
+    </p>
+    <div class="chart-grid" id="chart-frame-throughput"></div>
+  </section>
+
+  <section class="parallel-section">
+    <h2>Allocation per frame (lower is better)</h2>
+    <p class="desc">
+      Bytes allocated anywhere in the process while a frame runs, averaged over the measured frames.
+      Unlike the query loop above, zero is not the expected answer: a scheduler that hands work to
+      other threads has jobs, queues and wakeups to pay for. What this says is whether that cost is
+      paid once at setup or on every single frame.
+    </p>
+    <div class="chart-grid" id="chart-frame-alloc"></div>
+  </section>
+
+  <section class="parallel-section">
+    <h2>All parallel scenarios</h2>
+    <p class="desc">
+      Every row of the multi-threaded benchmark, filters ignored.
+    </p>
+    <div class="table-wrap">
+      <table id="parallel-raw-table"></table>
+    </div>
+  </section>
+
   <section>
-    <h2>Raw results (all scenarios)</h2>
+    <h2>All scenarios</h2>
+    <p class="desc">
+      Every row of the query benchmark, filters ignored. <code>criterion id</code> is the directory
+      the timing was read out of, under <code>target/criterion</code>.
+    </p>
     <div class="table-wrap">
       <table id="raw-table"></table>
     </div>
   </section>
 
 <script>
-const DATA = __BENCH_DATA_JSON__;
-const COLORS = { "xynok_ecs": "var(--c0)", "bevy_ecs": "var(--c1)", "std::Vec": "var(--c2)" };
+const REPORT = __BENCH_DATA_JSON__;
+const ROWS = REPORT.rows;
+// Empty whenever `cargo bench --bench parallel` has never run, in which case every section built
+// from it is hidden rather than left as a page of dashes.
+const PARALLEL_ROWS = REPORT.parallel_rows ?? [];
 const SVGNS = "http://www.w3.org/2000/svg";
 
-const state = { componentCount: null, layout: null };
+const LAYOUT_LABELS = { "Single": "1 archetype", "Fragmented5": "5 archetypes" };
 
+const state = { componentCount: null, layout: null, systemCount: null };
+
+// ---------------------------------------------------------------- data helpers
+
+/** Library ids in a stable order, so a bar keeps its position between charts. */
+function librariesOf(rows) {
+  const seen = new Map();
+  for (const row of rows) if (!seen.has(row.library_id)) seen.set(row.library_id, row.library);
+  return [...seen.entries()].map(([id, name]) => ({ id, name }));
+}
 function libraries() {
-  return [...new Set(DATA.map(r => r.library))];
+  return librariesOf(ROWS);
+}
+/** The parallel benchmark has no `std::Vec` entry, so its charts hold two bars, not three. */
+function parallelLibraries() {
+  return librariesOf(PARALLEL_ROWS);
 }
 function entityCounts() {
-  return [...new Set(DATA.map(r => r.entity_count))].sort((a, b) => a - b);
+  return [...new Set(ROWS.map(r => r.entity_count))].sort((a, b) => a - b);
 }
 function componentCounts() {
-  return [...new Set(DATA.map(r => r.component_count))].sort((a, b) => a - b);
+  return [...new Set(ROWS.map(r => r.component_count))].sort((a, b) => a - b);
 }
 function layouts() {
-  return [...new Set(DATA.map(r => r.archetype_layout))];
+  return [...new Set(ROWS.map(r => r.archetype_layout))];
 }
-function scenarioData() {
-  return DATA.filter(r => r.component_count === state.componentCount && r.archetype_layout === state.layout);
+function colorOf(libraryId) {
+  return `var(--c-${libraryId})`;
+}
+/** The rows matching the current filter. */
+function scenarioRows() {
+  return ROWS.filter(r => r.component_count === state.componentCount && r.archetype_layout === state.layout);
+}
+function rowsAt(entityCount) {
+  return scenarioRows().filter(r => r.entity_count === entityCount);
+}
+function parallelEntityCounts() {
+  return [...new Set(PARALLEL_ROWS.map(r => r.entity_count))].sort((a, b) => a - b);
+}
+function systemCounts() {
+  return [...new Set(PARALLEL_ROWS.map(r => r.system_count))].sort((a, b) => a - b);
+}
+function parallelRowsAt(entityCount) {
+  return PARALLEL_ROWS.filter(r => r.system_count === state.systemCount && r.entity_count === entityCount);
+}
+/** Bytes and allocator calls for a single frame, from the total over the measured ones. */
+function bytesPerFrame(row) {
+  return row.memory.frame_bytes / REPORT.environment.frame_passes;
+}
+function allocationsPerFrame(row) {
+  return row.memory.frame_allocations / REPORT.environment.frame_passes;
 }
 
+// ---------------------------------------------------------------- formatting
+
 function fmtBytes(bytes) {
-  if (bytes >= 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(2) + " MB";
-  if (bytes >= 1024) return (bytes / 1024).toFixed(2) + " KB";
-  return bytes + " B";
+  if (bytes === null || bytes === undefined) return "-";
+  const negative = bytes < 0;
+  const value = Math.abs(bytes);
+  let text;
+  if (value >= 1024 * 1024) text = (value / (1024 * 1024)).toFixed(2) + " MB";
+  else if (value >= 1024) text = (value / 1024).toFixed(2) + " KB";
+  else text = value + " B";
+  return negative ? "-" + text : text;
 }
 function fmtNs(ns) {
-  if (ns >= 1_000_000) return (ns / 1_000_000).toFixed(3) + " ms";
-  if (ns >= 1_000) return (ns / 1_000).toFixed(2) + " us";
-  return Math.round(ns) + " ns";
+  if (ns === null || ns === undefined) return "-";
+  if (ns >= 1e6) return (ns / 1e6).toFixed(3) + " ms";
+  if (ns >= 1e3) return (ns / 1e3).toFixed(2) + " us";
+  if (ns >= 1) return ns.toFixed(0) + " ns";
+  return ns.toFixed(3) + " ns";
+}
+function fmtThroughput(eps) {
+  if (!eps) return "-";
+  if (eps >= 1e9) return (eps / 1e9).toFixed(2) + " Gelem/s";
+  if (eps >= 1e6) return (eps / 1e6).toFixed(1) + " Melem/s";
+  if (eps >= 1e3) return (eps / 1e3).toFixed(1) + " Kelem/s";
+  return eps.toFixed(0) + " elem/s";
+}
+function fmtCount(n) {
+  return n === null || n === undefined ? "-" : n.toLocaleString();
+}
+function fmtPercent(fraction) {
+  if (fraction === null || fraction === undefined) return "-";
+  return (fraction >= 0 ? "+" : "") + (fraction * 100).toFixed(1) + "%";
+}
+function fmtInterval(interval, formatter) {
+  if (!interval) return "-";
+  return `${formatter(interval.lower)} .. ${formatter(interval.upper)}`;
+}
+
+// ---------------------------------------------------------------- benchmark headings
+//
+// One entry per row of the comparison table. `get` pulls the number out of a report row, `better`
+// says which direction wins ("lower", "higher", or "zero" for the two checks that are not a
+// ranking at all), and `sub` is the second line under the value, where a confidence interval or a
+// per-entity figure goes.
+
+const METRICS = [
+  {
+    label: "Mean time / pass", note: "95% CI below",
+    get: r => r.timing?.mean.point, fmt: fmtNs, better: "lower",
+    sub: r => r.timing ? fmtInterval(r.timing.mean, fmtNs) : null,
+  },
+  {
+    label: "Median time / pass",
+    get: r => r.timing?.median.point, fmt: fmtNs, better: "lower",
+    sub: r => r.timing ? fmtInterval(r.timing.median, fmtNs) : null,
+  },
+  {
+    label: "Slope", note: "linear-regression fit",
+    get: r => r.timing?.slope?.point, fmt: fmtNs, better: "lower",
+    sub: r => r.timing?.slope ? fmtInterval(r.timing.slope, fmtNs) : null,
+  },
+  { label: "Fastest sample", get: r => r.timing?.min_ns, fmt: fmtNs, better: "lower" },
+  { label: "p95", get: r => r.timing?.p95_ns, fmt: fmtNs, better: "lower" },
+  { label: "p99", get: r => r.timing?.p99_ns, fmt: fmtNs, better: "lower" },
+  { label: "Slowest sample", get: r => r.timing?.max_ns, fmt: fmtNs, better: "lower" },
+  {
+    label: "Std deviation", note: "spread across samples",
+    get: r => r.timing?.std_dev?.point, fmt: fmtNs, better: "lower",
+  },
+  { label: "Throughput", get: r => r.timing?.elements_per_second, fmt: fmtThroughput, better: "higher" },
+  { label: "Time / entity", get: r => r.timing?.ns_per_entity, fmt: fmtNs, better: "lower" },
+  {
+    label: "Relative to fastest",
+    get: (r, ctx) => ctx.fastestMean ? r.timing?.mean.point / ctx.fastestMean : null,
+    fmt: v => v === null || v === undefined ? "-" : v.toFixed(2) + "x", better: "lower",
+  },
+  {
+    label: "Change vs previous run", note: "criterion, same benchmark id",
+    get: r => r.timing?.change_mean?.point, fmt: fmtPercent, better: "none",
+  },
+  { label: "Memory footprint", get: r => r.memory.resident_bytes, fmt: fmtBytes, better: "lower" },
+  {
+    label: "Bytes / entity",
+    get: r => r.memory.bytes_per_entity, fmt: v => v === null || v === undefined ? "-" : v.toFixed(1) + " B",
+    better: "lower",
+  },
+  { label: "Allocated during setup", get: r => r.memory.allocated_bytes, fmt: fmtBytes, better: "lower" },
+  { label: "Allocator calls during setup", get: r => r.memory.allocations, fmt: fmtCount, better: "lower" },
+  {
+    label: "Query-loop allocation", note: "must be 0",
+    get: r => r.memory.query_loop_bytes, fmt: fmtBytes, better: "zero",
+  },
+  {
+    label: "Leaked after drop", note: "must be 0",
+    get: r => r.memory.leaked_bytes, fmt: fmtBytes, better: "zero",
+  },
+  {
+    label: "Criterion samples", note: "sampling mode",
+    get: r => r.timing?.sample_count, fmt: fmtCount, better: "none",
+    sub: r => r.timing ? r.timing.sampling_mode.toLowerCase() : null,
+  },
+];
+
+// One entry per row of the parallel comparison table, same shape as METRICS above. The memory half
+// differs: what a frame allocates says more about a scheduler than what its world weighs.
+const PARALLEL_METRICS = [
+  {
+    label: "Mean time / frame", note: "95% CI below",
+    get: r => r.timing?.mean.point, fmt: fmtNs, better: "lower",
+    sub: r => r.timing ? fmtInterval(r.timing.mean, fmtNs) : null,
+  },
+  {
+    label: "Median time / frame",
+    get: r => r.timing?.median.point, fmt: fmtNs, better: "lower",
+    sub: r => r.timing ? fmtInterval(r.timing.median, fmtNs) : null,
+  },
+  { label: "Fastest frame", get: r => r.timing?.min_ns, fmt: fmtNs, better: "lower" },
+  { label: "p95", get: r => r.timing?.p95_ns, fmt: fmtNs, better: "lower" },
+  { label: "p99", get: r => r.timing?.p99_ns, fmt: fmtNs, better: "lower" },
+  { label: "Slowest frame", get: r => r.timing?.max_ns, fmt: fmtNs, better: "lower" },
+  {
+    label: "Std deviation", note: "spread across samples",
+    get: r => r.timing?.std_dev?.point, fmt: fmtNs, better: "lower",
+  },
+  {
+    label: "Throughput", note: "entity visits / s",
+    get: r => r.timing?.elements_per_second, fmt: fmtThroughput, better: "higher",
+  },
+  { label: "Time / entity visit", get: r => r.timing?.ns_per_entity, fmt: fmtNs, better: "lower" },
+  {
+    label: "Relative to fastest",
+    get: (r, ctx) => ctx.fastestMean ? r.timing?.mean.point / ctx.fastestMean : null,
+    fmt: v => v === null || v === undefined ? "-" : v.toFixed(2) + "x", better: "lower",
+  },
+  {
+    label: "Change vs previous run", note: "criterion, same benchmark id",
+    get: r => r.timing?.change_mean?.point, fmt: fmtPercent, better: "none",
+  },
+  {
+    label: "Allocated / frame", note: "every thread",
+    get: bytesPerFrame, fmt: v => fmtBytes(Math.round(v)), better: "lower",
+  },
+  {
+    label: "Allocator calls / frame",
+    get: allocationsPerFrame, fmt: v => v === null || v === undefined ? "-" : v.toFixed(1), better: "lower",
+  },
+  { label: "World footprint", get: r => r.memory.resident_bytes, fmt: fmtBytes, better: "lower" },
+  {
+    label: "Bytes / entity",
+    get: r => r.memory.bytes_per_entity, fmt: v => v === null || v === undefined ? "-" : v.toFixed(1) + " B",
+    better: "lower",
+  },
+  { label: "Allocated during setup", get: r => r.memory.allocated_bytes, fmt: fmtBytes, better: "lower" },
+  { label: "Allocator calls during setup", get: r => r.memory.allocations, fmt: fmtCount, better: "lower" },
+  {
+    label: "Criterion samples", note: "sampling mode",
+    get: r => r.timing?.sample_count, fmt: fmtCount, better: "none",
+    sub: r => r.timing ? r.timing.sampling_mode.toLowerCase() : null,
+  },
+];
+
+// ---------------------------------------------------------------- chrome
+
+function renderEnvironment() {
+  const env = REPORT.environment;
+  const when = env.generated_at_unix ? new Date(env.generated_at_unix * 1000).toLocaleString() : "unknown";
+  document.getElementById("env").innerHTML = [
+    `harness <b>${env.harness}</b>`,
+    `machine <b>${env.arch} / ${env.os}</b>`,
+    `cores <b>${env.available_parallelism}</b>`,
+    `schedule workers <b>${env.worker_threads}</b>`,
+    `generated <b>${when}</b>`,
+  ].map(part => `<div>${part}</div>`).join("");
 }
 
 function renderLegend() {
@@ -178,7 +509,7 @@ function renderLegend() {
   for (const lib of libraries()) {
     const item = document.createElement("div");
     item.className = "legend-item";
-    item.innerHTML = `<span class="swatch" style="background:${COLORS[lib] ?? "#999"}"></span>${lib}`;
+    item.innerHTML = `<span class="swatch" style="background:${colorOf(lib.id)}"></span>${lib.name}`;
     el.appendChild(item);
   }
 }
@@ -196,25 +527,126 @@ function renderFilters() {
 
   const layoutEl = document.getElementById("filter-layout");
   layoutEl.innerHTML = "";
-  const layoutLabels = { "Single": "1 archetype", "Fragmented5": "5 archetypes" };
   for (const l of layouts()) {
     const btn = document.createElement("button");
-    btn.textContent = layoutLabels[l] ?? l;
+    btn.textContent = LAYOUT_LABELS[l] ?? l;
     btn.className = l === state.layout ? "active" : "";
     btn.onclick = () => { state.layout = l; renderAll(); };
     layoutEl.appendChild(btn);
   }
+
+  const systemsEl = document.getElementById("filter-systems");
+  systemsEl.innerHTML = "";
+  for (const n of systemCounts()) {
+    const btn = document.createElement("button");
+    btn.textContent = `${n} systems`;
+    btn.className = n === state.systemCount ? "active" : "";
+    btn.onclick = () => { state.systemCount = n; renderParallel(); };
+    systemsEl.appendChild(btn);
+  }
 }
 
-/// Draws one grouped-bar SVG chart (one bar per library) for a single entity count, scaled to
-/// the max value within this chart only, so small entity counts stay readable.
-function renderBarChart(container, entityCount, values, formatter) {
-  const width = 300, height = 170, padding = { top: 10, right: 10, bottom: 34, left: 10 };
+// ---------------------------------------------------------------- comparison table
+
+/** Which library ids hold the best value in this metric row, or an empty set when nothing wins. */
+function winners(metric, values) {
+  if (metric.better !== "lower" && metric.better !== "higher") return new Set();
+  const present = [...values.entries()].filter(([, v]) => v !== null && v !== undefined && Number.isFinite(v));
+  if (present.length < 2) return new Set();
+  const best = metric.better === "lower"
+    ? Math.min(...present.map(([, v]) => v))
+    : Math.max(...present.map(([, v]) => v));
+  // Ties keep every library that reached the best value rather than picking one arbitrarily.
+  return new Set(present.filter(([, v]) => v === best).map(([id]) => id));
+}
+
+/** One comparison card: `metrics` down the side, one column per library in `libs`. */
+function renderCompareCard(container, title, rows, libs, metrics) {
+  const byLibrary = new Map(rows.map(r => [r.library_id, r]));
+  const means = rows.map(r => r.timing?.mean.point).filter(v => v !== null && v !== undefined);
+  const ctx = { fastestMean: means.length ? Math.min(...means) : null };
+
+  const table = document.createElement("table");
+  const thead = document.createElement("thead");
+  thead.innerHTML = "<tr><th>metric</th>" + libs.map(l => `<th>${l.name}</th>`).join("") + "</tr>";
+  table.appendChild(thead);
+
+  const tbody = document.createElement("tbody");
+  for (const metric of metrics) {
+    const values = new Map();
+    for (const lib of libs) {
+      const row = byLibrary.get(lib.id);
+      values.set(lib.id, row ? metric.get(row, ctx) : null);
+    }
+    // A metric nothing reported (no criterion data yet, no slope on a flat-sampled run) would be a
+    // row of dashes, so it is left out instead.
+    if ([...values.values()].every(v => v === null || v === undefined)) continue;
+
+    const best = winners(metric, values);
+    const tr = document.createElement("tr");
+    const note = metric.note ? ` <span class="metric-note">(${metric.note})</span>` : "";
+    let html = `<td><span class="metric-name">${metric.label}</span>${note}</td>`;
+    for (const lib of libs) {
+      const row = byLibrary.get(lib.id);
+      const value = values.get(lib.id);
+      const sub = row && metric.sub ? metric.sub(row) : null;
+      let cls = "";
+      if (best.has(lib.id)) cls = "best";
+      else if (metric.better === "zero" && value) cls = "bad";
+      html += `<td class="${cls}">${metric.fmt(value)}${sub ? `<span class="sub">${sub}</span>` : ""}</td>`;
+    }
+    tr.innerHTML = html;
+    tbody.appendChild(tr);
+  }
+  table.appendChild(tbody);
+
+  const card = document.createElement("div");
+  card.className = "compare-card";
+  card.innerHTML = `<h3>${title}</h3>`;
+  const wrap = document.createElement("div");
+  wrap.className = "table-wrap";
+  wrap.appendChild(table);
+  card.appendChild(wrap);
+  container.appendChild(card);
+}
+
+function renderCompare() {
+  const container = document.getElementById("compare");
+  container.innerHTML = "";
+  for (const ec of entityCounts()) {
+    const title = `${ec.toLocaleString()} entities &middot; ${state.componentCount} component${state.componentCount > 1 ? "s" : ""} &middot; ${LAYOUT_LABELS[state.layout] ?? state.layout}`;
+    renderCompareCard(container, title, rowsAt(ec), libraries(), METRICS);
+  }
+}
+
+function renderParallelCompare() {
+  const container = document.getElementById("parallel-compare");
+  container.innerHTML = "";
+  for (const ec of parallelEntityCounts()) {
+    const title = `${ec.toLocaleString()} entities &middot; ${state.systemCount} systems in one group`;
+    renderCompareCard(container, title, parallelRowsAt(ec), parallelLibraries(), PARALLEL_METRICS);
+  }
+}
+
+// ---------------------------------------------------------------- charts
+
+/**
+ * One grouped-bar chart, a bar per library, scaled to the largest value in this chart alone so a
+ * 1k card stays readable next to a 100k one. `errors` is optional; when a library has an entry it
+ * is drawn as a whisker for the confidence interval.
+ */
+function renderBarChart(container, title, values, errors, formatter, libs) {
+  const width = 320, height = 180, padding = { top: 16, right: 12, bottom: 34, left: 12 };
   const plotW = width - padding.left - padding.right;
   const plotH = height - padding.top - padding.bottom;
-  const libs = libraries();
-  const maxVal = Math.max(1, ...libs.map(l => values[l] ?? 0));
+
+  const upperBounds = libs.map(l => {
+    const error = errors?.get(l.id);
+    return Math.max(values.get(l.id) ?? 0, error?.upper ?? 0);
+  });
+  const maxVal = Math.max(...upperBounds, 0) || 1;
   const barW = plotW / libs.length;
+  const scale = value => (value / maxVal) * plotH;
 
   const svg = document.createElementNS(SVGNS, "svg");
   svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
@@ -222,8 +654,9 @@ function renderBarChart(container, entityCount, values, formatter) {
   svg.setAttribute("height", height);
 
   libs.forEach((lib, i) => {
-    const val = values[lib] ?? 0;
-    const barH = maxVal > 0 ? (val / maxVal) * plotH : 0;
+    const value = values.get(lib.id);
+    const has = value !== null && value !== undefined && Number.isFinite(value);
+    const barH = has ? scale(value) : 0;
     const x = padding.left + i * barW + barW * 0.15;
     const w = barW * 0.7;
     const y = padding.top + (plotH - barH);
@@ -233,19 +666,37 @@ function renderBarChart(container, entityCount, values, formatter) {
     rect.setAttribute("y", y);
     rect.setAttribute("width", w);
     rect.setAttribute("height", Math.max(barH, 1));
-    rect.setAttribute("fill", COLORS[lib] ?? "#999");
+    rect.setAttribute("fill", colorOf(lib.id));
     rect.setAttribute("rx", "3");
-    const title = document.createElementNS(SVGNS, "title");
-    title.textContent = `${lib}: ${formatter(val)}`;
-    rect.appendChild(title);
+    const tip = document.createElementNS(SVGNS, "title");
+    tip.textContent = `${lib.name}: ${has ? formatter(value) : "no data"}`;
+    rect.appendChild(tip);
     svg.appendChild(rect);
+
+    const error = errors?.get(lib.id);
+    if (has && error && error.upper > error.lower) {
+      const top = padding.top + (plotH - scale(error.upper));
+      const bottom = padding.top + (plotH - scale(error.lower));
+      const cx = x + w / 2;
+      const whisker = document.createElementNS(SVGNS, "path");
+      const cap = Math.min(w * 0.3, 8);
+      whisker.setAttribute("d", `M${cx - cap} ${top} H${cx + cap} M${cx} ${top} V${bottom} M${cx - cap} ${bottom} H${cx + cap}`);
+      whisker.setAttribute("stroke", "var(--fg)");
+      whisker.setAttribute("stroke-width", "1");
+      whisker.setAttribute("opacity", "0.55");
+      whisker.setAttribute("fill", "none");
+      const whiskerTip = document.createElementNS(SVGNS, "title");
+      whiskerTip.textContent = `${Math.round(error.confidence_level * 100)}% CI: ${formatter(error.lower)} .. ${formatter(error.upper)}`;
+      whisker.appendChild(whiskerTip);
+      svg.appendChild(whisker);
+    }
 
     const valueLabel = document.createElementNS(SVGNS, "text");
     valueLabel.setAttribute("x", x + w / 2);
-    valueLabel.setAttribute("y", Math.max(y - 4, 10));
+    valueLabel.setAttribute("y", Math.max(y - 5, 11));
     valueLabel.setAttribute("text-anchor", "middle");
     valueLabel.setAttribute("class", "bar-value");
-    valueLabel.textContent = formatter(val);
+    valueLabel.textContent = has ? formatter(value) : "-";
     svg.appendChild(valueLabel);
 
     const nameLabel = document.createElementNS(SVGNS, "text");
@@ -253,87 +704,176 @@ function renderBarChart(container, entityCount, values, formatter) {
     nameLabel.setAttribute("y", height - padding.bottom + 16);
     nameLabel.setAttribute("text-anchor", "middle");
     nameLabel.setAttribute("class", "bar-label");
-    nameLabel.textContent = lib;
+    nameLabel.textContent = lib.name;
     svg.appendChild(nameLabel);
   });
 
   const card = document.createElement("div");
   card.className = "chart-card";
-  card.innerHTML = `<h3>${entityCount.toLocaleString()} entities</h3>`;
+  card.innerHTML = `<h3>${title}</h3>`;
   card.appendChild(svg);
   container.appendChild(card);
 }
 
-function renderMetric(containerId, pick, formatter) {
+/** `pick` reads the value off a row; `error` optionally reads the interval to draw around it. */
+function renderMetricCharts(containerId, pick, formatter, error) {
   const container = document.getElementById(containerId);
   container.innerHTML = "";
-  const data = scenarioData();
   for (const ec of entityCounts()) {
-    const values = {};
-    for (const r of data.filter(r => r.entity_count === ec)) {
-      values[r.library] = pick(r);
-    }
-    renderBarChart(container, ec, values, formatter);
+    const rows = rowsAt(ec);
+    const values = new Map(rows.map(r => [r.library_id, pick(r)]));
+    const errors = error ? new Map(rows.map(r => [r.library_id, error(r)]).filter(([, e]) => e)) : null;
+    renderBarChart(container, `${ec.toLocaleString()} entities`, values, errors, formatter, libraries());
   }
 }
 
-function renderRawTable() {
-  const table = document.getElementById("raw-table");
+/** The same, over the parallel rows and whichever group size is selected. */
+function renderParallelCharts(containerId, pick, formatter, error) {
+  const container = document.getElementById(containerId);
+  container.innerHTML = "";
+  const libs = parallelLibraries();
+  for (const ec of parallelEntityCounts()) {
+    const rows = parallelRowsAt(ec);
+    const values = new Map(rows.map(r => [r.library_id, pick(r)]));
+    const errors = error ? new Map(rows.map(r => [r.library_id, error(r)]).filter(([, e]) => e)) : null;
+    renderBarChart(container, `${ec.toLocaleString()} entities`, values, errors, formatter, libs);
+  }
+}
+
+// ---------------------------------------------------------------- full table
+
+const RAW_COLUMNS = [
+  { header: "library", get: r => r.library, align: "left" },
+  { header: "entities", get: r => r.entity_count.toLocaleString() },
+  { header: "components", get: r => r.component_count },
+  { header: "layout", get: r => r.layout_label, align: "left" },
+  { header: "mean", get: r => fmtNs(r.timing?.mean.point) },
+  { header: "95% CI", get: r => r.timing ? fmtInterval(r.timing.mean, fmtNs) : "-" },
+  { header: "median", get: r => fmtNs(r.timing?.median.point) },
+  { header: "min", get: r => fmtNs(r.timing?.min_ns) },
+  { header: "p95", get: r => fmtNs(r.timing?.p95_ns) },
+  { header: "p99", get: r => fmtNs(r.timing?.p99_ns) },
+  { header: "max", get: r => fmtNs(r.timing?.max_ns) },
+  { header: "std dev", get: r => fmtNs(r.timing?.std_dev?.point) },
+  { header: "throughput", get: r => fmtThroughput(r.timing?.elements_per_second) },
+  { header: "change", get: r => fmtPercent(r.timing?.change_mean?.point) },
+  { header: "samples", get: r => fmtCount(r.timing?.sample_count) },
+  { header: "footprint", get: r => fmtBytes(r.memory.resident_bytes) },
+  { header: "B/entity", get: r => r.memory.bytes_per_entity.toFixed(1) },
+  { header: "setup alloc", get: r => fmtBytes(r.memory.allocated_bytes) },
+  { header: "alloc calls", get: r => fmtCount(r.memory.allocations) },
+  { header: "loop alloc", get: r => fmtBytes(r.memory.query_loop_bytes) },
+  { header: "leaked", get: r => fmtBytes(r.memory.leaked_bytes) },
+  { header: "criterion id", get: r => `<code>${r.criterion_id}</code>`, align: "left" },
+];
+
+const PARALLEL_RAW_COLUMNS = [
+  { header: "library", get: r => r.library, align: "left" },
+  { header: "entities", get: r => r.entity_count.toLocaleString() },
+  { header: "systems", get: r => r.system_count },
+  { header: "entity visits", get: r => r.entity_visits.toLocaleString() },
+  { header: "mean", get: r => fmtNs(r.timing?.mean.point) },
+  { header: "95% CI", get: r => r.timing ? fmtInterval(r.timing.mean, fmtNs) : "-" },
+  { header: "median", get: r => fmtNs(r.timing?.median.point) },
+  { header: "min", get: r => fmtNs(r.timing?.min_ns) },
+  { header: "p95", get: r => fmtNs(r.timing?.p95_ns) },
+  { header: "p99", get: r => fmtNs(r.timing?.p99_ns) },
+  { header: "max", get: r => fmtNs(r.timing?.max_ns) },
+  { header: "std dev", get: r => fmtNs(r.timing?.std_dev?.point) },
+  { header: "throughput", get: r => fmtThroughput(r.timing?.elements_per_second) },
+  { header: "change", get: r => fmtPercent(r.timing?.change_mean?.point) },
+  { header: "samples", get: r => fmtCount(r.timing?.sample_count) },
+  { header: "world", get: r => fmtBytes(r.memory.resident_bytes) },
+  { header: "B/entity", get: r => r.memory.bytes_per_entity.toFixed(1) },
+  { header: "setup alloc", get: r => fmtBytes(r.memory.allocated_bytes) },
+  { header: "alloc calls", get: r => fmtCount(r.memory.allocations) },
+  { header: "bytes/frame", get: r => fmtBytes(Math.round(bytesPerFrame(r))) },
+  { header: "allocs/frame", get: r => allocationsPerFrame(r).toFixed(1) },
+  { header: "criterion id", get: r => `<code>${r.criterion_id}</code>`, align: "left" },
+];
+
+function renderTable(tableId, columns, rows) {
+  const table = document.getElementById(tableId);
   table.innerHTML = "";
-  const headers = [
-    "library", "entities", "components", "layout", "setup alloc", "setup allocs",
-    "min", "mean", "median", "p95", "p99", "max", "stddev", "batch size",
-    "query-loop alloc", "leaked bytes",
-  ];
+
   const thead = document.createElement("thead");
-  thead.innerHTML = "<tr>" + headers.map(h => `<th>${h}</th>`).join("") + "</tr>";
+  thead.innerHTML = "<tr>" + columns.map(c => `<th>${c.header}</th>`).join("") + "</tr>";
   table.appendChild(thead);
 
-  const layoutLabels = { "Single": "1 archetype", "Fragmented5": "5 archetypes" };
   const tbody = document.createElement("tbody");
-  const rows = [...DATA].sort((a, b) =>
-    a.entity_count - b.entity_count
-    || a.component_count - b.component_count
-    || a.archetype_layout.localeCompare(b.archetype_layout)
-    || a.library.localeCompare(b.library)
-  );
-  for (const r of rows) {
+  for (const row of rows) {
     const tr = document.createElement("tr");
-    const cells = [
-      r.library,
-      r.entity_count.toLocaleString(),
-      r.component_count,
-      layoutLabels[r.archetype_layout] ?? r.archetype_layout,
-      fmtBytes(r.setup_alloc.bytes),
-      r.setup_alloc.allocations.toLocaleString(),
-      fmtNs(r.query_timing.min_ns),
-      fmtNs(r.query_timing.mean_ns),
-      fmtNs(r.query_timing.median_ns),
-      fmtNs(r.query_timing.p95_ns),
-      fmtNs(r.query_timing.p99_ns),
-      fmtNs(r.query_timing.max_ns),
-      fmtNs(r.query_timing.stddev_ns),
-      r.query_timing.batch_size,
-      fmtBytes(r.query_alloc.bytes),
-      r.leaked_bytes.toLocaleString(),
-    ];
-    tr.innerHTML = cells.map(c => `<td>${c}</td>`).join("");
+    tr.innerHTML = columns.map(column => {
+      const style = column.align === "left" ? ' style="text-align:left"' : "";
+      return `<td${style}>${column.get(row)}</td>`;
+    }).join("");
     tbody.appendChild(tr);
   }
   table.appendChild(tbody);
 }
 
+function renderRawTable() {
+  const sorted = [...ROWS].sort((a, b) =>
+    a.archetype_layout.localeCompare(b.archetype_layout)
+    || a.component_count - b.component_count
+    || a.entity_count - b.entity_count
+    || a.library.localeCompare(b.library)
+  );
+  renderTable("raw-table", RAW_COLUMNS, sorted);
+}
+
+function renderParallelRawTable() {
+  const sorted = [...PARALLEL_ROWS].sort((a, b) =>
+    a.system_count - b.system_count
+    || a.entity_count - b.entity_count
+    || a.library.localeCompare(b.library)
+  );
+  renderTable("parallel-raw-table", PARALLEL_RAW_COLUMNS, sorted);
+}
+
+// ---------------------------------------------------------------- entry point
+
 function renderAll() {
   renderFilters();
-  renderMetric("chart-speed", r => r.query_timing.mean_ns, fmtNs);
-  renderMetric("chart-p99", r => r.query_timing.p99_ns, fmtNs);
-  renderMetric("chart-setup-alloc", r => r.setup_alloc.bytes, fmtBytes);
-  renderMetric("chart-query-alloc", r => r.query_alloc.bytes, fmtBytes);
-  renderMetric("chart-leak", r => r.leaked_bytes, v => v.toLocaleString() + " B");
+  renderCompare();
+  renderMetricCharts("chart-mean", r => r.timing?.mean.point, fmtNs, r => r.timing?.mean);
+  renderMetricCharts("chart-throughput", r => r.timing?.elements_per_second, fmtThroughput);
+  renderMetricCharts("chart-p99", r => r.timing?.p99_ns, fmtNs);
+  renderMetricCharts("chart-resident", r => r.memory.resident_bytes, fmtBytes);
+  renderMetricCharts("chart-allocated", r => r.memory.allocated_bytes, fmtBytes);
+  renderMetricCharts("chart-loop-alloc", r => r.memory.query_loop_bytes, fmtBytes);
+  renderMetricCharts("chart-leak", r => r.memory.leaked_bytes, fmtBytes);
+  renderParallel();
+}
+
+/** Only the parallel half, which the group-size buttons redraw on their own. */
+function renderParallel() {
+  if (!PARALLEL_ROWS.length) return;
+  renderParallelCompare();
+  renderParallelCharts("chart-frame-mean", r => r.timing?.mean.point, fmtNs, r => r.timing?.mean);
+  renderParallelCharts("chart-frame-throughput", r => r.timing?.elements_per_second, fmtThroughput);
+  renderParallelCharts("chart-frame-alloc", bytesPerFrame, v => fmtBytes(Math.round(v)));
+  renderParallelRawTable();
+
+  // The buttons live in the first parallel section, so they are redrawn here too rather than
+  // leaving the pressed one behind.
+  const systemsEl = document.getElementById("filter-systems");
+  for (const btn of systemsEl.children) {
+    btn.className = btn.textContent === `${state.systemCount} systems` ? "active" : "";
+  }
 }
 
 state.componentCount = componentCounts()[0];
 state.layout = layouts()[0];
+state.systemCount = systemCounts()[0] ?? null;
+
+// A page built from a query-only run has nothing to put in these, and a section of dashes reads as
+// a result rather than as a benchmark that was never run.
+if (!PARALLEL_ROWS.length) {
+  for (const section of document.querySelectorAll(".parallel-section")) section.style.display = "none";
+}
+
+renderEnvironment();
 renderLegend();
 renderAll();
 renderRawTable();

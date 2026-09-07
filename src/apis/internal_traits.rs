@@ -5,21 +5,21 @@ use crate::apis::params::ComponentSpecs;
 use crate::apis::traits::TComponent;
 use crate::query::access_scope::AccessScope;
 use crate::world::query_spec::QuerySpecAccessor;
-pub trait TQuerySrcAccess
+pub trait TQuerySrcAccess<'a>
 {
-    fn new(accessor: &QuerySpecAccessor) -> Self;
+    fn new(accessor: &QuerySpecAccessor<'a>) -> Self;
 }
 pub trait TQueryParam
 {
     type QueryItem<'a>;
-    type SrcAccess<'a>: TQuerySrcAccess;
+    type SrcAccess<'a>: TQuerySrcAccess<'a>;
     const TYPE_ID: TypeId;
     fn access_scope(component_specs: &mut ComponentSpecs) -> Result<AccessScope, XynokEcsError>;
     #[track_caller]
     fn next<'a>(src_access: &mut Self::SrcAccess<'a>) -> Option<Self::QueryItem<'a>>;
-    fn build_src_access<'a>(src_access: &QuerySpecAccessor) -> Self::SrcAccess<'a>
+    fn build_src_access<'a>(accessor: &QuerySpecAccessor<'a>) -> Self::SrcAccess<'a>
     {
-        Self::SrcAccess::new(src_access)
+        Self::SrcAccess::new(accessor)
     }
 }
 

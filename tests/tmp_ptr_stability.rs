@@ -64,25 +64,6 @@ fn t_vec_addr_survives_query_counter_rehash()
     );
 }
 
-/// same thing, but the whole `World` is moved after the query is handed out.
-#[test]
-fn t_accessor_survives_world_move()
-{
-    let mut w = World::default();
-    let expected: u32 = (0..10u32)
-        .inspect(|&i| {
-            w.create(Hp(i));
-        })
-        .sum();
-    let query = w.create_query::<&Hp>();
-
-    let boxed = Box::new(w); // World body relocates to the heap
-    let mut moved = *boxed; // ... and back onto the stack, at a different address
-    let _ = moved.create_query::<&Mana>();
-
-    assert_eq!(query.into_iter().map(|hp| hp.0).sum::<u32>(), expected, "accessor did not survive the move");
-}
-
 // ------------------------------------------------------------------------------------------------
 // tier 3a - the archetype indices cached inside `QuerySpec.archetypes`
 // ------------------------------------------------------------------------------------------------

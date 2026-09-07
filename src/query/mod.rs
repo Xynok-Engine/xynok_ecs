@@ -15,8 +15,8 @@ mod variant;
 
 pub struct Query<'a, T: TQueryParam + 'static>
 {
-    accessor: QuerySpecAccessor,
-    phantom:  PhantomData<(&'a (), T)>,
+    accessor: QuerySpecAccessor<'a>,
+    phantom:  PhantomData<T>,
 }
 
 // Not derived: `#[derive(Clone, Copy)]` would add a spurious `T: Clone + Copy` bound, which
@@ -50,7 +50,7 @@ impl<'a, T: TQueryParam + 'static> IntoIterator for Query<'a, T>
 
     fn into_iter(self) -> Self::IntoIter
     {
-        QueryIter::new(self.accessor)
+        QueryIter::new(&self.accessor)
     }
 }
 

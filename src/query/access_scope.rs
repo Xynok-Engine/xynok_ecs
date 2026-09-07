@@ -123,7 +123,17 @@ impl AccessScopes
     /// parameter of the other
     pub fn can_parallel_with(&self, other: &Self) -> bool
     {
-        !self.scopes.iter().any(|mine| other.scopes.iter().any(|theirs| mine.conflicts_with(theirs)))
+        for e in self.scopes.iter()
+        {
+            for other_e in other.scopes.iter()
+            {
+                if e.conflicts_with(other_e)
+                {
+                    return false;
+                }
+            }
+        }
+        true
     }
 
     pub fn is_read_only(&self) -> bool

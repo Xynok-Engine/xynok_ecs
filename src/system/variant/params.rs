@@ -28,6 +28,11 @@ macro_rules! mutiple_param_system {
                 $($name::collect_access_scope(&mut result, component_specs)?;)*
                 Ok(result)
             }
+            fn prepare(&self, world: HeapMut<World>) -> Result<(), XynokEcsError>
+            {
+                $(let _= $name::init(world)?;)*
+                Ok(())
+            }
             fn run(&mut self, world: HeapMut<World>)-> Result<(), XynokEcsError>
             {
                 (self.0)($($name::init(world)?,)*);

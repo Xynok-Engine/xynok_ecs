@@ -19,13 +19,13 @@ pub struct SrcAccess<'a>
     current_col_ptr:   *const u8,
     _lifetime:         PhantomData<&'a ()>,
 }
-impl<'a> TQuerySrcAccess for SrcAccess<'a>
+impl<'a> TQuerySrcAccess<'a> for SrcAccess<'a>
 {
-    fn new(accessor: &QuerySpecAccessor) -> Self
+    fn new(accessor: &QuerySpecAccessor<'a>) -> Self
     {
-        let arch_indices = unsafe { accessor.arch_indices() };
+        let arch_indices = accessor.arch_indices();
         Self {
-            archetypes:        unsafe { &*accessor.archetypes },
+            archetypes:        accessor.archetypes,
             arch_indices:      arch_indices,
             total_arch:        arch_indices.len(),
             current_arch_idx:  0,

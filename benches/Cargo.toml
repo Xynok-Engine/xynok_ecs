@@ -4,12 +4,47 @@ version = "0.1.0"
 edition = "2024"
 publish = false
 
-[[bin]]
-name = "query_single_thread"
-path = "src/main.rs"
+[lints.clippy]
+redundant_field_names = "allow"
+
+[lib]
+name = "xynok_ecs_benches"
+path = "src/lib.rs"
 
 [dependencies]
 xynok_ecs = { path = ".." }
-bevy_ecs = "0.19.0"
+
+# `DefaultScheduler` takes its world as a `HeapPtr`, so the parallel benchmark needs the pointer
+# type itself.
+xynok_std = { git = "https://github.com/Xynok-Engine/xynok_std.git", tag = "v0.1.17" }
+
+# `multi_threaded` is what puts bevy's parallel executor on the table. Without it
+# `default_executor` hands back the single-threaded one, and `benches/parallel.rs` would be
+# comparing a thread pool against a for loop.
+bevy_ecs = { version = "0.19.0", features = ["multi_threaded"] }
+
+# The task pool bevy's executor runs on. Pulled in directly so the benchmark can size it to the
+# same worker count `xynok_ecs`'s scheduler uses instead of letting bevy pick from the machine.
+bevy_tasks = { version = "0.19.0", features = ["multi_threaded"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
+
+[dev-dependencies]
+# The timing harness. Criterion runs the warm-up, picks the iteration counts, collects the samples
+# and does the statistics (bootstrapped confidence intervals, outlier classification, comparison
+# against the previous run), which is the whole reason this crate no longer hand-rolls any of it.
+criterion = { version = "0.8.2", features = ["html_reports"] }
+
+# Reads back what `cargo bench` measured, adds the memory numbers criterion has no opinion about,
+# and writes the combined report.
+[[bin]]
+name = "report"
+path = "src/bin/report.rs"
+
+[[bench]]
+name = "query"
+harness = false
+
+[[bench]]
+name = "parallel"
+harness = false

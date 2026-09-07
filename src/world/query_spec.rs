@@ -19,33 +19,35 @@ pub struct QuerySpec
 
 /// A query's handle on the world's registries.
 ///
-/// It stores *where to look* rather than the addresses it found, which is what lets a system
-/// take several `Query` parameters at once: each parameter is initialised in turn, and
+/// It stores *where to look* rather than the specific addresses it found. This design allows a system
+/// to accept several `Query` parameters at once: each parameter is initialized in turn, and
 /// registering the second query can relocate the first one's `QuerySpec`. An accessor holding
 /// a pointer into that spec would be left dangling before the system body even runs.
 ///
-/// The registry pointers survive a move of the `World` itself because each registry is boxed -
-/// moving the world moves the `Box`, not the storage behind it.
+/// The borrows are plain shared references: the `Query` that owns this accessor already carries
+/// a lifetime, so the registries can be reached with a normal `&'a` instead of a raw pointer that
+/// every reader has to dereference inside `unsafe`. Writing through a `&mut T` query still goes
+/// through the chunk's raw pointer, so a shared borrow of the registries is all we need here.
 #[derive(Clone, Copy)]
-pub struct QuerySpecAccessor
+pub struct QuerySpecAccessor<'a>
 {
-    pub queries:         *const QuerySpecs,
     pub query_idx:       usize,
-    pub archetypes:      *const ArchetypeSpecs,
-    pub component_specs: *const ComponentSpecs,
+    pub queries:         &'a QuerySpecs,
+    pub archetypes:      &'a ArchetypeSpecs,
+    pub component_specs: &'a ComponentSpecs,
 }
 
-impl QuerySpecAccessor
+impl<'a> QuerySpecAccessor<'a>
 {
     /// Indices of the archetypes this query currently matches.
-    ///
-    /// # Safety
-    /// The registries this accessor points at must still be alive.
     #[inline]
     #[track_caller]
-    pub unsafe fn arch_indices<'a>(&self) -> &'a [usize]
+    pub fn arch_indices(&self) -> &'a [usize]
     {
-        match unsafe { (*self.queries).value_at(self.query_idx) }
+        // copy the `&'a` out of `&self` first, so the slice keeps the accessor's lifetime
+        // instead of being reborrowed for the shorter life of this `&self`
+        let queries: &'a QuerySpecs = self.queries;
+        match queries.value_at(self.query_idx)
         {
             Some(spec) => spec.archetypes.as_slice(),
             None => panic!("query index {} is not in the world's query registry", self.query_idx),

@@ -1,10 +1,13 @@
 use std::collections::HashMap;
 use std::hash::Hash;
 
-use xynok_std::unsafe_ptr::HeapPtr;
+use xynok_concurrency::thread_pool::cfg::CfgThreadPool;
+use xynok_concurrency::thread_pool::ThreadPool;
+use xynok_std::unsafe_ptr::{HeapMut, HeapPtr};
 
+use crate::schedule::step::ScheduleStep;
 use crate::schedule::system_spec::SystemSpecs;
-use crate::system::traits::{SystemTypeStorage, TIntoSystem};
+use crate::system::traits::{SystemTypeStorage, TIntoSystem, TIntoSystems};
 use crate::world::World;
 
 pub trait TScheduler: Sized
@@ -18,16 +21,17 @@ pub trait TScheduler: Sized
     fn add_system<P, T: TIntoSystem<P>>(&mut self, session: Self::SessionType, system: T) -> &mut Self;
 
     #[track_caller]
+    fn add_system_parallel<P, T: TIntoSystems<P>>(&mut self, session: Self::SessionType, systems: T) -> &mut Self;
+
+    #[track_caller]
     fn run(&mut self, session: Self::SessionType);
 }
 pub struct DefaultScheduler
 {
-    world:   HeapPtr<World>,
-    systems: HashMap<DefaultScheduleSession, Vec<SystemTypeStorage>>,
-    /// Keyed by system type, so the same `fn` added to two sessions is described once. Only
-    /// safe because everything in a spec is derived from the system's type - anything
-    /// per-instance would have to live beside the boxed system in `systems` instead.
-    specs:   SystemSpecs,
+    world:        HeapPtr<World>,
+    system_specs: SystemSpecs,
+    steps:        HashMap<DefaultScheduleSession, Vec<ScheduleStep>>,
+    thread_pool:  ThreadPool,
 }
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
@@ -55,36 +59,49 @@ impl TScheduler for DefaultScheduler
             Err(e) => panic!("{}", e),
         };
 
-        // Before the system is ever run, so a system whose parameters alias each other is
-        // reported at the `add_system` call site rather than at the first `run`
-        if let Err(e) = self.specs.register(s.as_ref(), &mut self.world.component_counter)
-        {
-            panic!("{}: {}", s.name(), e);
-        }
-        if let Some(systems) = self.systems.get_mut(&session)
-        {
-            systems.push(s);
-        }
-        else
-        {
-            let systems = vec![s];
-            self.systems.insert(session, systems);
-        }
+        self.register(&s);
+        self.steps.entry(session).or_default().push(ScheduleStep::Single(s));
         self
     }
 
+    fn add_system_parallel<P, T: TIntoSystems<P>>(&mut self, session: Self::SessionType, systems: T) -> &mut Self
+    {
+        let group = match systems.into_systems()
+        {
+            Ok(r) => r,
+            Err(e) => panic!("{}", e),
+        };
+
+        for s in group.iter()
+        {
+            self.register(s);
+        }
+        if let Err(e) = self.system_specs.check_group_can_parallel(&group)
+        {
+            panic!("{}", e);
+        }
+
+        self.steps.entry(session).or_default().push(ScheduleStep::Parallel(group));
+        self
+    }
+
+    #[inline]
     fn run(&mut self, session: Self::SessionType)
     {
-        if let Some(systems) = self.systems.get_mut(&session)
+        let Some(steps) = self.steps.get_mut(&session)
+        else
         {
-            for s in systems
+            return;
+        };
+        let world = self.world.as_ref_mut();
+
+        for step in steps.iter_mut()
+        {
+            match step
             {
-                match s.run(self.world.as_ref_mut())
-                {
-                    Ok(_) =>
-                    {}
-                    Err(e) => panic!("{}", e),
-                }
+                ScheduleStep::Single(tsystem) => run_system(tsystem, world),
+
+                ScheduleStep::Parallel(tsystems) => run_system_group(&self.thread_pool, tsystems, world),
             }
         }
     }
@@ -92,9 +109,65 @@ impl TScheduler for DefaultScheduler
     fn new(world: HeapPtr<World>) -> Self
     {
         Self {
-            world,
-            systems: HashMap::new(),
-            specs: SystemSpecs::default(),
+            world:        world,
+            steps:        HashMap::new(),
+            system_specs: SystemSpecs::default(),
+            thread_pool:  ThreadPool::new(CfgThreadPool::new("Default Xynok ECS Scheduler ThreadPool", 4)),
+        }
+    }
+}
+#[track_caller]
+fn run_system(system: &mut SystemTypeStorage, world: HeapMut<World>)
+{
+    match system.run(world)
+    {
+        Ok(_) =>
+        {}
+        Err(e) => panic!("{}", e),
+    }
+}
+
+#[track_caller]
+fn run_system_group(pool: &ThreadPool, group: &mut [SystemTypeStorage], world: HeapMut<World>)
+{
+    if let [only] = group
+    {
+        run_system(only, world);
+        return;
+    }
+
+    // The preparation pass, on this very thread: initialising a query writes into the world's
+    // registries, and two jobs writing there at once is a race. After this pass, `init` inside a
+    // job is a table lookup, which is a read, and concurrent reads are fine.
+    for system in group.iter()
+    {
+        match system.prepare(world)
+        {
+            Ok(_) =>
+            {}
+            Err(e) => panic!("{}", e),
+        }
+    }
+
+    pool.scope(|s| {
+        for system in group.iter_mut()
+        {
+            s.spawn(move || run_system(system, world));
+        }
+    });
+}
+impl DefaultScheduler
+{
+    /// Records a system's spec before it ever gets a chance to run.
+    ///
+    /// That is what reports a system whose parameters alias each other at the `add_system` call
+    /// site rather than at the first `run`.
+    #[track_caller]
+    fn register(&mut self, s: &SystemTypeStorage)
+    {
+        if let Err(e) = self.system_specs.register(s.as_ref(), self.world.component_specs_mut())
+        {
+            panic!("{}: {}", s.name(), e);
         }
     }
 }
