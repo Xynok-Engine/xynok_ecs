@@ -3,8 +3,9 @@ use std::hash::Hash;
 
 use xynok_std::unsafe_ptr::HeapPtr;
 
+use crate::schedule::step::ScheduleStep;
 use crate::schedule::system_spec::SystemSpecs;
-use crate::system::traits::{SystemTypeStorage, TIntoSystem};
+use crate::system::traits::{SystemTypeStorage, TIntoSystem, TIntoSystems};
 use crate::world::World;
 
 pub trait TScheduler: Sized
@@ -17,7 +18,8 @@ pub trait TScheduler: Sized
     #[track_caller]
     fn add_system<P, T: TIntoSystem<P>>(&mut self, session: Self::SessionType, system: T) -> &mut Self;
 
-    //fn add_systems
+    #[track_caller]
+    fn add_system_parallel<P, T: TIntoSystems<P>>(&mut self, session: Self::SessionType, systems: T) -> &mut Self;
 
     #[track_caller]
     fn run(&mut self, session: Self::SessionType);
@@ -29,6 +31,7 @@ pub struct DefaultScheduler
     world:        HeapPtr<World>,
     systems:      HashMap<DefaultScheduleSession, Vec<SystemTypeStorage>>,
     system_specs: SystemSpecs,
+    steps:        HashMap<DefaultScheduleSession, Vec<ScheduleStep>>,
 }
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
@@ -56,21 +59,29 @@ impl TScheduler for DefaultScheduler
             Err(e) => panic!("{}", e),
         };
 
-        // Before the system is ever run, so a system whose parameters alias each other is
-        // reported at the `add_system` call site rather than at the first `run`
-        if let Err(e) = self.system_specs.register(s.as_ref(), self.world.component_specs_mut())
+        self.register(&s);
+        self.steps.entry(session).or_default().push(ScheduleStep::Single(s));
+        self
+    }
+
+    fn add_system_parallel<P, T: TIntoSystems<P>>(&mut self, session: Self::SessionType, systems: T) -> &mut Self
+    {
+        let group = match systems.into_systems()
         {
-            panic!("{}: {}", s.name(), e);
-        }
-        if let Some(systems) = self.systems.get_mut(&session)
+            Ok(r) => r,
+            Err(e) => panic!("{}", e),
+        };
+
+        for s in group.iter()
         {
-            systems.push(s);
+            self.register(s);
         }
-        else
+        if let Err(e) = self.system_specs.check_group_can_parallel(&group)
         {
-            let systems = vec![s];
-            self.systems.insert(session, systems);
+            panic!("{}", e);
         }
+
+        self.steps.entry(session).or_default().push(ScheduleStep::Parallel(group));
         self
     }
 
@@ -96,6 +107,23 @@ impl TScheduler for DefaultScheduler
             world,
             systems: HashMap::new(),
             system_specs: SystemSpecs::default(),
+            steps: HashMap::new(),
+        }
+    }
+}
+
+impl DefaultScheduler
+{
+    /// Records a system's spec before it ever gets a chance to run.
+    ///
+    /// That is what reports a system whose parameters alias each other at the `add_system` call
+    /// site rather than at the first `run`.
+    #[track_caller]
+    fn register(&mut self, s: &SystemTypeStorage)
+    {
+        if let Err(e) = self.system_specs.register(s.as_ref(), self.world.component_specs_mut())
+        {
+            panic!("{}: {}", s.name(), e);
         }
     }
 }
