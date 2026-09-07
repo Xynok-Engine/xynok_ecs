@@ -19,3 +19,5 @@ mod system;
 mod collection;
 
 pub use xynok_ecs_proc_macro::*;
+
+// trigger tag 0.26
