@@ -1,9 +1,16 @@
 //! The shape of the combined report, and the three ways it gets written out.
 //!
-//! A row is one (library, layout, arity, entity count) scenario with two halves joined onto it:
-//! the timing half comes from criterion, the memory half from the counting allocator. Either half
-//! can be missing, which is normal rather than an error: a filtered `cargo bench` run only produces
-//! timings for the benchmarks it ran.
+//! There are two kinds of row, one per benchmark target.
+//!
+//! A [`BenchRow`] is one (library, layout, arity, entity count) scenario of the single-threaded
+//! query benchmark, with two halves joined onto it: the timing half comes from criterion, the
+//! memory half from the counting allocator. Either half can be missing, which is normal rather than
+//! an error: a filtered `cargo bench` run only produces timings for the benchmarks it ran.
+//!
+//! A [`ParallelRow`] is one (library, group size, entity count) scenario of the multi-threaded
+//! benchmark. It is a separate type rather than a flag on `BenchRow` because it answers a different
+//! question and its memory half is measured differently: a frame runs on several threads at once,
+//! so the allocation figure has to come from the process-wide counters.
 
 pub mod html;
 pub mod json;
@@ -12,6 +19,7 @@ pub mod table;
 use serde::Serialize;
 
 use crate::criterion_data::{CriterionResult, Estimate};
+use crate::parallel::SystemGroup;
 use crate::workload::ArchetypeLayout;
 
 /// A criterion estimate, flattened for the report.
@@ -62,9 +70,11 @@ pub struct Timing
     pub sample_count:        usize,
     pub total_iters:         f64,
     pub sampling_mode:       String,
-    /// Entities per second, which is what makes different entity counts comparable.
+    /// Elements per second, which is what makes different entity counts comparable. An element is
+    /// one entity for a query benchmark, and one entity-visit (entity count x group size) for a
+    /// parallel one, matching the throughput each target declares to criterion.
     pub elements_per_second: Option<f64>,
-    /// Mean time divided by the entity count: how long one entity costs in this scenario.
+    /// Mean time divided by that same element count: how long one of them costs in this scenario.
     pub ns_per_entity:       f64,
     /// Relative change of the mean since the previous run, as a fraction (`0.03` is 3% slower).
     /// `None` until a scenario has been benchmarked twice.
@@ -74,7 +84,8 @@ pub struct Timing
 
 impl Timing
 {
-    pub fn from_criterion(result: &CriterionResult, entity_count: usize) -> Self
+    /// `elements` is what criterion was given as throughput, and what `ns_per_entity` divides by.
+    pub fn from_criterion(result: &CriterionResult, elements: usize) -> Self
     {
         Timing {
             mean:                result.mean.into(),
@@ -90,7 +101,7 @@ impl Timing
             total_iters:         result.total_iters,
             sampling_mode:       result.sampling_mode.clone(),
             elements_per_second: result.elements_per_second(),
-            ns_per_entity:       result.mean.point_estimate / entity_count.max(1) as f64,
+            ns_per_entity:       result.mean.point_estimate / elements.max(1) as f64,
             change_mean:         result.change_mean.map(Into::into),
             change_median:       result.change_median.map(Into::into),
         }
@@ -124,6 +135,55 @@ pub const QUERY_LOOP_PASSES: usize = 32;
 /// counted as steady-state allocation.
 pub const QUERY_LOOP_WARMUP: usize = 8;
 
+/// Frames run inside the measured region when checking a parallel schedule for allocation, and the
+/// untimed ones before it. More than a handful because a thread pool's first few frames look
+/// nothing like its steady state: queues grow, workers wake up, and a task that was allocated once
+/// gets reused from then on.
+pub const FRAME_PASSES: usize = 64;
+pub const FRAME_WARMUP: usize = 16;
+
+/// What the counting allocator saw around a frame of a parallel schedule.
+///
+/// The world half is measured the same way [`Memory`] is, on the thread that built it. The frame
+/// half cannot be: a frame runs on every worker at once, so it is read from the process-wide
+/// counters instead, which is only sound because a schedule step joins its workers before it
+/// returns.
+///
+/// There is no leak figure here, unlike [`Memory`]. Both libraries keep a thread pool alive past
+/// the end of a scenario, and bevy's is a process-wide singleton that is never dropped at all, so
+/// "still live after the runner was dropped" would be measuring the pools rather than the worlds.
+#[derive(Serialize, Clone, Copy, Debug, Default)]
+pub struct FrameMemory
+{
+    /// Bytes still held once the world is built, before any frame has run.
+    pub resident_bytes:    u64,
+    pub bytes_per_entity:  f64,
+    /// Every byte the world asked for while being built, freed again or not.
+    pub allocated_bytes:   u64,
+    pub allocations:       u64,
+    /// Bytes allocated anywhere in the process during [`FRAME_PASSES`] frames. Unlike the query
+    /// loop this is not expected to be 0: a scheduler that hands work to other threads has jobs,
+    /// queues and wakeups to pay for. What it is good for is the per-frame figure below, which says
+    /// whether that cost is paid once or on every single frame.
+    pub frame_bytes:       u64,
+    pub frame_allocations: u64,
+}
+
+impl FrameMemory
+{
+    /// Bytes allocated per frame, averaged over the measured frames.
+    pub fn bytes_per_frame(&self) -> f64
+    {
+        self.frame_bytes as f64 / FRAME_PASSES as f64
+    }
+
+    /// Allocator calls per frame, averaged the same way.
+    pub fn allocations_per_frame(&self) -> f64
+    {
+        self.frame_allocations as f64 / FRAME_PASSES as f64
+    }
+}
+
 #[derive(Serialize, Clone, Debug)]
 pub struct BenchRow
 {
@@ -143,6 +203,26 @@ pub struct BenchRow
     pub memory:           Memory,
 }
 
+/// One scenario of the multi-threaded benchmark: a group of systems, run as one frame.
+#[derive(Serialize, Clone, Debug)]
+pub struct ParallelRow
+{
+    pub library:       String,
+    pub library_id:    String,
+    pub entity_count:  usize,
+    /// How many systems the group holds.
+    pub system_count:  usize,
+    pub system_group:  SystemGroup,
+    pub group_label:   String,
+    /// Entity visits one frame performs, which is `entity_count * system_count`: every system in
+    /// the group walks every entity. This is the throughput `benches/parallel.rs` declares.
+    pub entity_visits: usize,
+    pub criterion_id:  String,
+    /// `None` when `cargo bench --bench parallel` has not run this scenario yet.
+    pub timing:        Option<Timing>,
+    pub memory:        FrameMemory,
+}
+
 /// Where and when the numbers were produced. Timings only mean something next to this.
 #[derive(Serialize, Clone, Debug)]
 pub struct Environment
@@ -154,6 +234,10 @@ pub struct Environment
     /// Seconds since the unix epoch, formatted on the page rather than here.
     pub generated_at_unix:     u64,
     pub query_loop_passes:     usize,
+    pub frame_passes:          usize,
+    /// Worker threads both schedulers were given for the parallel benchmark. Next to
+    /// `available_parallelism` this says how much of the machine the frame numbers could use.
+    pub worker_threads:        usize,
 }
 
 impl Environment
@@ -170,6 +254,8 @@ impl Environment
                 .map(|d| d.as_secs())
                 .unwrap_or(0),
             query_loop_passes:     QUERY_LOOP_PASSES,
+            frame_passes:          FRAME_PASSES,
+            worker_threads:        crate::parallel::WORKER_THREADS,
         }
     }
 }
@@ -181,6 +267,8 @@ pub const CRITERION_VERSION: &str = "0.8";
 #[derive(Serialize, Clone, Debug)]
 pub struct Report
 {
-    pub environment: Environment,
-    pub rows:        Vec<BenchRow>,
+    pub environment:   Environment,
+    pub rows:          Vec<BenchRow>,
+    /// The multi-threaded benchmark's rows. Empty when only the query benchmark has been run.
+    pub parallel_rows: Vec<ParallelRow>,
 }

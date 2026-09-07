@@ -1,31 +1,41 @@
 # xynok_ecs
 [![discord invite link](https://img.shields.io/discord/1495504680711880714?logo=discord)](https://discord.gg/a2qzfrFzWT)
-## Current Benchmark(v0.1.0)
+
+## Introduction
+
+This repository contains a lightweight ECS library designed specifically for the Xynok engine. My goal is not to build a feature-rich, general-purpose ECS, but rather to provide a lean implementation that covers the essential requirements for my engine's architecture.
+
+## Core Functionality
+
+The library focuses on providing the fundamental building blocks necessary for entity and component management. Currently, it supports:
+
+- Entity initialization
+- Component addition and removal
+- Manual system scheduling
+
+Notably, this library lacks complex abstractions such as job graphs or automatic parallelization. All operations must be scheduled manually by the developer.
+
+## Performance and Benchmarks
+
+I have included a benchmark comparison against [Bevy](https://github.com/bevyengine/bevy), but I want to be clear about what these numbers represent. While the current benchmarks show this library outperforming Bevy in certain scenarios, this is a result of its simplicity rather than superior architectural optimization. 
+
+Because this library implements a significantly smaller feature set compared to Bevy, it naturally incurs less overhead. It is not "faster" in the sense of being a more efficient implementation of equivalent features.
+
 ![almost_faster_2x_bevy_ecs](assets/benchmark_v0.1.0.png)
 
-## Features
-| status | feature | description or note |
-| --------------- | --------------- | --------------- |
-| ✅ | register archetype | register an archetype without spawning any data |
-| ✅ | create/destroy | create and destroy entities and their associated data |
-| ✅ | add/remove/merge component | add, remove, and merge components for an entity. Merging will override existing components. |
-| ✅ | tuple archetype | clients can create an archetype with varying numbers of components. Currently, the maximum is 16 components per archetype. |
-| ✅ | query | an iterator for querying components from an archetype |
-| canceled | Shared - Archetype Component | [This is the reason](https://youtu.be/k_RyU6QKQ-A) |
-| in progress | system & scheduler | [issue_link](https://github.com/Xynok-Engine/xynok_ecs/issues/3)|
-| todo | changed/added detection | the foundation for the observer pattern and architectures related to asset and resource pipelines (mesh, texture, sound, etc.) |
-| canceled | persistent query | canceled: avoids the overhead of recreating every query whenever the structure changes. Currently, the query refresh process is spread across an entire frame. |
-| todo | singleton |  |
-| todo | Benchmark with flec | https://www.flecs.dev/flecs/md_docs_2Docs.html |
-| todo | entity graph |  |
-| Item1.2 | Item2.2 | Item3.2 |
-| Item1.2 | Item2.2 | Item3.2 |
+## Current Limitations
+
+This project is still in its early stages. Please keep the following in mind:
+
+- The library has not been tested across a wide variety of hardware configurations.
+- Testing & benchmarks has been confined to basic use cases.
+- It has not yet been subjected to complex, real-world stress tests.
 
 
 ## Install
 ```toml
 [dependencies]
-xynok_ecs = { git = "https://github.com/Xynok-Engine/xynok_ecs.git", tag = "v0.1.15" }
+xynok_ecs = { git = "https://github.com/Xynok-Engine/xynok_ecs.git", tag = "v0.1.21" }
 ```
 ## Concepts
 To understand how the entire codebase works, you can check out these [videos](https://www.youtube.com/@xynok_youtube/playlists). I created them when I first started this repo. They explain the core concepts and the most important ideas that the codebase implements. I might update them in the future, but for now, they are a close match to the current state of the code.
@@ -41,40 +51,17 @@ cargo run --example <name_of_rust_file_in_examples_folder>
 cargo run --example archetype
 ```
 
-## For Contributors
-
-**step 1:** join the [discord](https://discord.gg/a2qzfrFzWT) server to get in touch with the maintainers.
-
-**step 2:**: After that, you can track our progress on the [project board](https://github.com/orgs/Xynok-Engine/projects/1).
-> [!IMPORTANT] 
-> Only pick tasks that haven't been assigned yet.
-
-
-### Tests
-Storage-layout unit tests (chunk alignment, entity packing) live inline next to the code they
-test in `src/` (`#[cfg(test)] mod test`), since they need private access that code outside the
-crate can't have.
+## Benchmarks
 
 **Cmd:**
 ```bash
-cargo test --lib
+./benches/scripts/bench.sh                              # everything, then the report
+./benches/scripts/bench.sh 1k                           # only ids containing "1k"
+cargo bench -p xynok_ecs_benches --bench query          # single-threaded timings
+cargo bench -p xynok_ecs_benches --bench parallel       # multi-threaded timings
+cargo run --release -p xynok_ecs_benches --bin report   # memory, then the report
 ```
 
-World-behavior tests (create/destroy, add/remove/merge component, drop glue, query, stress) are
-integration tests under `tests/`, split by topic (`tests/create_destroy.rs`, `tests/chunk.rs`,
-`tests/add_component.rs`, `tests/query.rs`, ...) with shared fixtures in `tests/common/mod.rs`.
-They only use the crate's public API, plus a narrow read-only introspection module
-(`xynok_ecs::world::testing`) gated behind the `test-util` Cargo feature, for checking storage
-invariants the public API can't observe directly (row-swap mapping, chunk reuse, free-chunk
-count). `Cargo.toml` already enables `test-util` for this crate's own `[dev-dependencies]`, so
-no extra flags are needed to run them.
-
-**Cmd:**
-```bash
-cargo test
-```
-
-### Benchmarks
 `benches/` is a separate crate (`xynok_ecs_benches`) comparing single-threaded query iteration
 against `bevy_ecs` and a plain `std::Vec` baseline, across every combination of query arity
 (1, 2 or 3 components), archetype layout (1 archetype or 5) and entity count (1k, 10k, 100k).
@@ -96,15 +83,17 @@ The report binary joins the two and writes `benches/output/results.json` plus
 non-zero if any scenario allocates in the timed loop or leaks, so it works as a CI check too.
 Criterion's own report lands at `target/criterion/report/index.html`.
 
-**Cmd:**
-```bash
-./benches/scripts/bench.sh          # bench, then report
-./benches/scripts/bench.sh 1k       # only the benchmarks whose id contains "1k"
-```
+### Multi-threaded scheduling
+A second target, `benches/parallel.rs`, compares the two schedulers rather than the two query
+loops. One benchmark is one frame: a group of systems that provably never touch the same component,
+handed to `xynok_ecs`'s `add_system_parallel` on one side and to bevy's multi-threaded executor on
+the other. Both pools run 4 worker threads, group sizes are 2 and 4 systems, and the entity counts
+are the same 1k/10k/100k. The `std::Vec` baseline sits this one out, having no scheduler to compare.
 
-Or the two steps by hand (the report needs `--release`; a debug build makes the numbers meaningless):
-```bash
-cargo bench -p xynok_ecs_benches --bench query
-cargo run --release -p xynok_ecs_benches --bin report
-```
+It gets its own half of the report, with one difference in what is measured. A frame runs on
+several threads at once, so its allocation figure comes from process-wide counters rather than
+per-thread ones, and unlike the query loop it is not expected to be zero: a scheduler that hands
+work to other threads has jobs, queues and wakeups to pay for. What the report shows is the
+per-frame figure, which is the difference between paying that cost once and paying it every frame.
+Those rows are reported but never fail the run.
 

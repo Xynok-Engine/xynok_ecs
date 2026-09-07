@@ -13,7 +13,19 @@ path = "src/lib.rs"
 
 [dependencies]
 xynok_ecs = { path = ".." }
-bevy_ecs = "0.19.0"
+
+# `DefaultScheduler` takes its world as a `HeapPtr`, so the parallel benchmark needs the pointer
+# type itself.
+xynok_std = { git = "https://github.com/Xynok-Engine/xynok_std.git", tag = "v0.1.17" }
+
+# `multi_threaded` is what puts bevy's parallel executor on the table. Without it
+# `default_executor` hands back the single-threaded one, and `benches/parallel.rs` would be
+# comparing a thread pool against a for loop.
+bevy_ecs = { version = "0.19.0", features = ["multi_threaded"] }
+
+# The task pool bevy's executor runs on. Pulled in directly so the benchmark can size it to the
+# same worker count `xynok_ecs`'s scheduler uses instead of letting bevy pick from the machine.
+bevy_tasks = { version = "0.19.0", features = ["multi_threaded"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 
@@ -31,4 +43,8 @@ path = "src/bin/report.rs"
 
 [[bench]]
 name = "query"
+harness = false
+
+[[bench]]
+name = "parallel"
 harness = false

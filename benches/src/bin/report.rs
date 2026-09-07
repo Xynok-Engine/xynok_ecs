@@ -2,8 +2,9 @@
 //! writes the combined report.
 //!
 //! ```bash
-//! cargo bench -p xynok_ecs_benches --bench query      # produces the timings
-//! cargo run --release -p xynok_ecs_benches --bin report   # produces the report
+//! cargo bench -p xynok_ecs_benches --bench query         # single-threaded timings
+//! cargo bench -p xynok_ecs_benches --bench parallel      # multi-threaded timings
+//! cargo run --release -p xynok_ecs_benches --bin report  # produces the report
 //! ```
 //!
 //! `scripts/bench.sh` runs both in order, which is the usual way in.
@@ -28,8 +29,15 @@
 //! measured once per (library, layout, entity count) and shared across the three arities. The query
 //! loop does depend on it, so that one is measured for every arity.
 //!
-//! The process exits non-zero if any scenario allocates in the timed loop or leaks, so this doubles
-//! as a check that can run in CI.
+//! The multi-threaded benchmark gets the same treatment, with one difference that matters. Its
+//! frame runs on several threads at once, so per-thread counters would see only the caller's share
+//! of it and the process-wide ones are used instead. And unlike the query loop, allocation inside a
+//! frame is not a defect: a scheduler that hands work to other threads has jobs and queues to pay
+//! for. What the report says about it is the per-frame figure, which is the difference between
+//! paying that cost once and paying it every frame.
+//!
+//! The process exits non-zero if any query scenario allocates in the timed loop or leaks, so this
+//! doubles as a check that can run in CI. The parallel rows are reported but never fail the run.
 
 use std::collections::HashMap;
 use std::hint::black_box;
@@ -37,7 +45,11 @@ use std::path::Path;
 
 use xynok_ecs_benches::config::require_release_build;
 use xynok_ecs_benches::criterion_data::{self, CriterionResult};
-use xynok_ecs_benches::report::{BenchRow, Environment, Memory, QUERY_LOOP_PASSES, QUERY_LOOP_WARMUP, Report, Timing, html, json, table};
+use xynok_ecs_benches::parallel::{self, PARALLEL_ENTITY_COUNTS, ParallelWorkload, SystemGroup};
+use xynok_ecs_benches::report::{
+    BenchRow, Environment, FRAME_PASSES, FRAME_WARMUP, FrameMemory, Memory, ParallelRow, QUERY_LOOP_PASSES, QUERY_LOOP_WARMUP, Report, Timing, html, json,
+    table,
+};
 use xynok_ecs_benches::workload::{ArchetypeLayout, COMPONENT_COUNTS, ENTITY_COUNTS, QueryWorkload, count_label};
 use xynok_ecs_benches::{alloc_probe, bevy, stdvec, xynok};
 
@@ -130,6 +142,78 @@ fn build_row<W: QueryWorkload>(entity_count: usize, layout: ArchetypeLayout, foo
     }
 }
 
+/// The world footprint of one parallel scenario, before any frame has run.
+///
+/// Measured on this thread, like the query benchmark's: building a world is single-threaded on both
+/// sides, whatever the schedule does afterwards.
+fn measure_parallel_world<W: ParallelWorkload>(entity_count: usize) -> (u64, f64, u64, u64)
+{
+    let before = alloc_probe::snapshot();
+    let world = W::build_world_only(entity_count);
+    let after = alloc_probe::snapshot();
+
+    let built = alloc_probe::delta(&before, &after);
+    let resident = alloc_probe::live_delta(&before, &after).max(0) as u64;
+    drop(world);
+
+    (resident, resident as f64 / entity_count.max(1) as f64, built.bytes, built.allocations)
+}
+
+/// Allocation during [`FRAME_PASSES`] frames, across every thread.
+///
+/// The process-wide counters are the only ones that can see a worker's share of a frame. They are
+/// only readable like this because a schedule step joins its workers before it returns, so by the
+/// time the second snapshot is taken there is nothing left in flight.
+fn measure_frames<W: ParallelWorkload>(entity_count: usize, group: SystemGroup) -> (u64, u64)
+{
+    let mut runner = W::setup(entity_count, group);
+
+    for _ in 0..FRAME_WARMUP
+    {
+        W::run_frame(black_box(&mut runner));
+    }
+
+    let before = alloc_probe::process_snapshot();
+    for _ in 0..FRAME_PASSES
+    {
+        W::run_frame(black_box(&mut runner));
+    }
+    let measured = alloc_probe::delta(&before, &alloc_probe::process_snapshot());
+
+    (measured.bytes, measured.allocations)
+}
+
+/// Builds one parallel row: the memory half measured here, the timing half looked up by the
+/// criterion id `benches/parallel.rs` filed it under.
+fn build_parallel_row<W: ParallelWorkload>(entity_count: usize, group: SystemGroup, criterion: &HashMap<String, CriterionResult>) -> ParallelRow
+{
+    let (resident_bytes, bytes_per_entity, allocated_bytes, allocations) = measure_parallel_world::<W>(entity_count);
+    let (frame_bytes, frame_allocations) = measure_frames::<W>(entity_count, group);
+
+    let criterion_id = format!("parallel/{}/{}/{}", group.slug(), W::NAME, count_label(entity_count));
+    let entity_visits = entity_count * group.count();
+
+    ParallelRow {
+        library:       W::DISPLAY_NAME.to_string(),
+        library_id:    W::NAME.to_string(),
+        entity_count:  entity_count,
+        system_count:  group.count(),
+        system_group:  group,
+        group_label:   group.label(),
+        entity_visits: entity_visits,
+        timing:        criterion.get(&criterion_id).map(|result| Timing::from_criterion(result, entity_visits)),
+        criterion_id:  criterion_id,
+        memory:        FrameMemory {
+            resident_bytes:    resident_bytes,
+            bytes_per_entity:  bytes_per_entity,
+            allocated_bytes:   allocated_bytes,
+            allocations:       allocations,
+            frame_bytes:       frame_bytes,
+            frame_allocations: frame_allocations,
+        },
+    }
+}
+
 fn main()
 {
     require_release_build();
@@ -144,7 +228,7 @@ fn main()
     if criterion.is_empty()
     {
         eprintln!("warning: no criterion results found. The report will have memory numbers but no timings.");
-        eprintln!("         run `cargo bench -p xynok_ecs_benches --bench query` first.");
+        eprintln!("         run `cargo bench -p xynok_ecs_benches --bench query` and `--bench parallel` first.");
     }
     else if let Some(dir) = &criterion_dir
     {
@@ -189,9 +273,20 @@ fn main()
         }
     }
 
+    let mut parallel_rows = Vec::new();
+    for group in SystemGroup::ALL
+    {
+        for &entity_count in &PARALLEL_ENTITY_COUNTS
+        {
+            parallel_rows.push(build_parallel_row::<parallel::xynok::ParallelFrame>(entity_count, group, &criterion));
+            parallel_rows.push(build_parallel_row::<parallel::bevy::ParallelFrame>(entity_count, group, &criterion));
+        }
+    }
+
     let report = Report {
-        environment: Environment::detect(),
-        rows:        rows,
+        environment:   Environment::detect(),
+        rows:          rows,
+        parallel_rows: parallel_rows,
     };
 
     table::print(&report);
