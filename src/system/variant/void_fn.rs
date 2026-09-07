@@ -28,6 +28,11 @@ impl<F: Fn() + Send + Sync + 'static> TSystem for SystemAlias<F, ()>
     {
         Ok(AccessScopes::default())
     }
+
+    fn prepare(&self, _world: HeapMut<World>) -> Result<(), XynokEcsError>
+    {
+        Ok(())
+    }
 }
 
 impl<F: Fn() + Send + Sync + 'static> TIntoSystem<()> for F

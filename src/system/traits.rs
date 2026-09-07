@@ -41,8 +41,10 @@ pub trait TSystem: Send + Sync + 'static
     /// two would be ambiguous at the call site.
     fn system_type_id(&self) -> TypeId;
 
-    fn run(&mut self, world: HeapMut<World>) -> Result<(), XynokEcsError>;
+    /// Warm up the system's query parameters. We must ensure all accessed data is available when the system starts running
+    fn prepare(&self, world: HeapMut<World>) -> Result<(), XynokEcsError>;
 
+    fn run(&mut self, world: HeapMut<World>) -> Result<(), XynokEcsError>;
     /// One entry per parameter, never merged into a single scope - [`AccessScopes`] explains
     /// what merging would throw away
     fn access_scope(&self, component_specs: &mut ComponentSpecs) -> Result<AccessScopes, XynokEcsError>;
