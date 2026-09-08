@@ -1519,7 +1519,8 @@ dependencies = [
 
 [[package]]
 name = "xynok_concurrency"
-version = "0.1.82"
+version = "0.1.83"
+source = "git+https://github.com/Xynok-Engine/xynok_concurrency.git?tag=v0.1.83#ab81914f2bf86b8bedaab8fba88d2e73698e6865"
 dependencies = [
  "loom",
  "paste",
@@ -1528,7 +1529,7 @@ dependencies = [
 
 [[package]]
 name = "xynok_ecs"
-version = "0.1.28"
+version = "0.1.30"
 dependencies = [
  "thiserror",
  "xynok_concurrency",
