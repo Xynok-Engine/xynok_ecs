@@ -6,35 +6,30 @@ tags:
   - tutorial
   - ecs
 ---
-
 ## Overview
-Xynok ECS is a lean library that provides a balanced feature set instead of trying to be a feature-packed ECS solution.
-The primary goal of Xynok ECS is to provide a fundamental, simple, and effective ECS API for your application to manage data and logic.
 
-If you want a fully, major, massive documentation and large community ecs library in Rust, I highly recommend [Bevy](https://github.com/bevyengine/bevy).
+Xynok ECS is a lean library designed to provide a balanced feature set rather than attempting to be an all-encompassing ECS solution. Its primary goal is to offer a fundamental, straightforward, and effective API for managing data and logic within your application.
 
-Buf if you want to understand any piece of code and how ecs actually work from scratch, xynok ecs is a good option(theo góc nhìn của tôi). So, let go !
+If you are looking for an ECS library with extensive documentation and a large community, I highly recommend [Bevy](https://github.com/bevyengine/bevy). However, if you want to understand how ECS works from the ground up by exploring the source code yourself, Xynok ECS is a great choice. Let's dive in.
 
-## Concepts
-Xynok_ecs is built on Chunk base architecture. Each chunk has fixed size matching L3 of CPU hardware device. 
-Each chunk contains a fixed amount of components data pack. That mean when you walk through a chunk, you can get fully data of an entity.
+## Architecture
 
-## Components
-xynok_Ecs provides 2 type of components:
-- normal component
-- shared component: All entities in an Archetype will reuse same component.
+Xynok ECS is built on a chunk-based architecture. Each chunk has a fixed size that aligns with the L3 cache of the CPU. Because each chunk contains a fixed amount of component data, iterating through a chunk allows you to access the complete data set for an entity efficiently.
 
-## Features
+## Component Types
 
-### Modifers
+Xynok ECS supports two types of components:
 
-xynok_ecs provides 3 api to let you edit components of an entity:
+- **Normal components:** Standard data components attached to individual entities.
+- **Shared components:** Components where all entities within a specific Archetype reference the same data instance.
 
-- add: you add an component/ or a set of component to an entity, this entity will be moved to another Archetype matching new layout
-- add: you add an component/ or a set of component to an entity, this entity will be moved to another Archetype matching new layout. If any of these component already exist
-in entity, it drop old ones and replace with new values.
-- remove: remove a component/or a set of componts from entity,  this entity will be moved to another Archetype matching new layout
+## Modifiers
 
+Xynok ECS provides three primary APIs for modifying the components of an entity. Whenever you modify an entity, it is moved to the Archetype that matches its new component layout:
+
+- **Add:** Adds a component or a set of components to an entity.
+- **Insert:** Adds a component or a set of components to an entity. If any of these components already exist, the library drops the old values and replaces them with the new ones.
+- **Remove:** Removes a component or a set of components from an entity.
 ### Query
 ```rust
 ```
