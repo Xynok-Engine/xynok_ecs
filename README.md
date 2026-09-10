@@ -11,6 +11,7 @@ The library focuses on providing the fundamental building blocks necessary for e
 
 - Entity initialization
 - Component addition and removal
+- [Archetype-scoped shared components](docs/shared_components.md), with key filters and mutable payload views
 - Manual system scheduling
 
 Notably, this library lacks complex abstractions such as job graphs or automatic parallelization. All operations must be scheduled manually by the developer.
