@@ -7,7 +7,7 @@ use crate::apis::identifies::XynokEcsError;
 use crate::apis::params::ComponentSpecs;
 use crate::apis::traits::TComponentDescriptor;
 use crate::apis::ComponentDescriptor;
-use crate::chunk::column::ColumnDescriptor;
+use crate::chunk::column::{ColumnDescriptor, StateOffset};
 use crate::chunk::header::Header;
 use crate::collection::component_bit_set::ComponentBitSet;
 use crate::entity::Entity;
@@ -26,6 +26,7 @@ pub struct ChunkLayoutParams<'a>
 {
     pub components:                 &'a [ComponentDescriptor],
     pub component_specs:            &'a ComponentSpecs,
+    pub state_offsets_temp:         &'a mut HashMap<TypeId, StateOffset>,
     pub component_descriptors_temp: &'a mut HashMap<TypeId, ColumnDescriptor>,
     pub component_bit_set_temp:     &'a mut ComponentBitSet,
 }
@@ -93,7 +94,7 @@ fn build_component_but_set(dst: &mut ComponentBitSet, src: &[ComponentDescriptor
 /// Attempts to build a layout for `max_entities` rows, returns `None` if the total size exceeds [`CHUNK_SIZE_IN_BYTE`]
 fn try_layout(max_entities: usize, params: &mut ChunkLayoutParams) -> Result<ChunkLayout, XynokEcsError>
 {
-    let header = Header::new(max_entities, params.components.len());
+    let header = Header::new(max_entities, params.components, params.state_offsets_temp);
     let mut cursor = header.size;
     // Header's own bitset requires CPU_WORD alignment, so this is the floor even when
     // the archetype has no components (and thus no des.align to fold over)
@@ -108,7 +109,11 @@ fn try_layout(max_entities: usize, params: &mut ChunkLayoutParams) -> Result<Chu
         {
             return Err(XynokEcsError::ArchetypeIsTooLarge);
         }
-        params.component_descriptors_temp.insert(des.storage_type_id, des.as_column_descriptor(cursor));
+        let state_offset = params.state_offsets_temp.remove(&des.storage_type_id).unwrap();
+
+        params
+            .component_descriptors_temp
+            .insert(des.storage_type_id, des.as_column_descriptor(cursor, state_offset));
 
         let column_bytes = match des.byte_size.checked_mul(max_entities)
         {
@@ -200,10 +205,12 @@ mod test
     fn layout_with(descriptors: &[ComponentDescriptor], specs: &ComponentSpecs) -> Result<ChunkLayout, XynokEcsError>
     {
         let mut temp = HashMap::new();
+        let mut offset = HashMap::new();
         let mut bit_set = ComponentBitSet::default();
         ChunkLayout::new(ChunkLayoutParams {
             components:                 descriptors,
             component_specs:            specs,
+            state_offsets_temp:         &mut offset,
             component_descriptors_temp: &mut temp,
             component_bit_set_temp:     &mut bit_set,
         })

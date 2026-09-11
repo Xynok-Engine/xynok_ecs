@@ -11,6 +11,11 @@ pub trait TComponent: Sized
     type StorageType: TComponent + 'static;
     const STORAGE_LOCATION: StorageLocation;
     const STATE_DETECTION: StateDetection;
+
+    /// This value is used when a component implements [`TEnableAble`] for two purposes:
+    /// - When initializing this component, the enable state is set to this value.
+    /// - When querying this component, the query is valid if this value matches the enable state.
+    const ENABLE_VALUE: bool = true;
 }
 pub trait TEnableAble {}
 pub trait TChangeAble {}
@@ -27,6 +32,7 @@ impl<T: TComponent + 'static> TComponentDescriptor for T
         byte_size:        std::mem::size_of::<T::StorageType>(),
         align:            std::mem::align_of::<T::StorageType>(),
         storage_location: T::STORAGE_LOCATION,
+        state_detection:  T::STATE_DETECTION,
         fn_drop:          drop_glue::<T::StorageType>,
     };
 }

@@ -1,6 +1,8 @@
+use crate::apis::constants::BITS_PER_BYTE;
 use crate::apis::identifies::XynokEcsError;
 use crate::apis::params::{ChunkTakeComponentParams, ComponentSpecs, SwappedRow};
 use crate::apis::traits::TComponent;
+use crate::chunk::column::StateOffset;
 use crate::chunk::layout::ChunkLayout;
 use crate::entity::Entity;
 
@@ -350,5 +352,107 @@ impl Chunk
         };
 
         Ok(unsafe { self.ptr.add(col_des.offset) })
+    }
+
+    #[inline]
+    fn state_offset<T: TComponent + 'static>(&self, layout: &ChunkLayout) -> Result<StateOffset, XynokEcsError>
+    {
+        let col_des = match layout.component_col_descriptors.get(&std::any::TypeId::of::<T::StorageType>())
+        {
+            Some(des) => des,
+            None =>
+            {
+                return Err(XynokEcsError::ChunkDoesNotContainComponent(
+                    std::any::type_name::<T::QueryType>(),
+                    std::any::type_name::<T::StorageType>(),
+                ));
+            }
+        };
+        Ok(col_des.state_offset.clone())
+    }
+
+    #[inline]
+    unsafe fn get_bit(&self, region_offset: usize, row: usize) -> bool
+    {
+        unsafe {
+            let byte = *self.ptr.add(region_offset + row / BITS_PER_BYTE);
+            (byte >> (row % BITS_PER_BYTE)) & 1 == 1
+        }
+    }
+    #[inline]
+    unsafe fn set_bit(&mut self, region_offset: usize, row: usize, value: bool)
+    {
+        unsafe {
+            let byte_ptr = self.ptr.add(region_offset + row / BITS_PER_BYTE);
+            let mask = 1u8 << (row % BITS_PER_BYTE);
+            if value
+            {
+                *byte_ptr |= mask;
+            }
+            else
+            {
+                *byte_ptr &= !mask;
+            }
+        }
+    }
+
+    #[inline]
+    pub(crate) fn get_enable_bit<T: TComponent + 'static>(&self, layout: &ChunkLayout, row: usize) -> Result<bool, XynokEcsError>
+    {
+        let offset = self
+            .state_offset::<T>(layout)?
+            .enable_offset
+            .ok_or(XynokEcsError::ComponentStateNotAvailable(std::any::type_name::<T::StorageType>(), "enable"))?;
+        Ok(unsafe { self.get_bit(offset, row) })
+    }
+    #[inline]
+    pub(crate) fn set_enable_bit<T: TComponent + 'static>(&mut self, layout: &ChunkLayout, row: usize, value: bool) -> Result<(), XynokEcsError>
+    {
+        let offset = self
+            .state_offset::<T>(layout)?
+            .enable_offset
+            .ok_or(XynokEcsError::ComponentStateNotAvailable(std::any::type_name::<T::StorageType>(), "enable"))?;
+        unsafe { self.set_bit(offset, row, value) };
+        Ok(())
+    }
+
+    #[inline]
+    pub(crate) fn get_added_bit<T: TComponent + 'static>(&self, layout: &ChunkLayout, row: usize) -> Result<bool, XynokEcsError>
+    {
+        let offset = self
+            .state_offset::<T>(layout)?
+            .added_offset
+            .ok_or(XynokEcsError::ComponentStateNotAvailable(std::any::type_name::<T::StorageType>(), "added"))?;
+        Ok(unsafe { self.get_bit(offset, row) })
+    }
+    #[inline]
+    pub(crate) fn set_added_bit<T: TComponent + 'static>(&mut self, layout: &ChunkLayout, row: usize, value: bool) -> Result<(), XynokEcsError>
+    {
+        let offset = self
+            .state_offset::<T>(layout)?
+            .added_offset
+            .ok_or(XynokEcsError::ComponentStateNotAvailable(std::any::type_name::<T::StorageType>(), "added"))?;
+        unsafe { self.set_bit(offset, row, value) };
+        Ok(())
+    }
+
+    #[inline]
+    pub(crate) fn get_changed_tick<T: TComponent + 'static>(&self, layout: &ChunkLayout, row: usize) -> Result<u32, XynokEcsError>
+    {
+        let offset = self
+            .state_offset::<T>(layout)?
+            .changed_offset
+            .ok_or(XynokEcsError::ComponentStateNotAvailable(std::any::type_name::<T::StorageType>(), "changed"))?;
+        Ok(unsafe { *(self.ptr.add(offset) as *const u32).add(row) })
+    }
+    #[inline]
+    pub(crate) fn set_changed_tick<T: TComponent + 'static>(&mut self, layout: &ChunkLayout, row: usize, tick: u32) -> Result<(), XynokEcsError>
+    {
+        let offset = self
+            .state_offset::<T>(layout)?
+            .changed_offset
+            .ok_or(XynokEcsError::ComponentStateNotAvailable(std::any::type_name::<T::StorageType>(), "changed"))?;
+        unsafe { *(self.ptr.add(offset) as *mut u32).add(row) = tick };
+        Ok(())
     }
 }

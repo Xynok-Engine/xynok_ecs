@@ -18,5 +18,6 @@ pub struct ComponentDescriptor
     pub byte_size:        usize,
     pub align:            usize,
     pub storage_location: identifies::StorageLocation,
+    pub state_detection:  identifies::StateDetection,
     pub fn_drop:          custom_type::FnComponentDropItSelf,
 }

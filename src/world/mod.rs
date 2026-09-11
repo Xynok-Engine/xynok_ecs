@@ -593,6 +593,7 @@ impl World
             a:                              self.archetypes.get(&a_arch_id).unwrap(),
             b:                              self.archetypes.get(&b_arch_id).unwrap(),
             component_specs:                &self.component_counter,
+            state_offsets_temp:             &mut self.temp_alloc.state_offsets,
             temp_tys:                       &mut self.temp_alloc.hashset_type_ids,
             temp_comp_des:                  &mut self.temp_alloc.comp_descriptors,
             component_col_descriptors_temp: &mut self.temp_alloc.col_descriptors,
@@ -615,6 +616,7 @@ impl World
             a:                              self.archetypes.get(&a_arch_id).unwrap(),
             b:                              self.archetypes.get(&b_arch_id).unwrap(),
             component_specs:                &self.component_counter,
+            state_offsets_temp:             &mut self.temp_alloc.state_offsets,
             temp_tys:                       &mut self.temp_alloc.hashset_type_ids,
             temp_comp_des:                  &mut self.temp_alloc.comp_descriptors,
             component_col_descriptors_temp: &mut self.temp_alloc.col_descriptors,
@@ -637,6 +639,7 @@ impl World
         let params = ChunkLayoutParams {
             components:                 T::COMPONENT_DESCRIPTORS,
             component_specs:            &self.component_counter,
+            state_offsets_temp:         &mut self.temp_alloc.state_offsets,
             component_descriptors_temp: &mut self.temp_alloc.col_descriptors,
             component_bit_set_temp:     &mut self.temp_alloc.component_bit_set_a,
         };

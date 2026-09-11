@@ -13,7 +13,10 @@ pub trait TQueryParam
 {
     type QueryItem<'a>;
     type SrcAccess<'a>: TQuerySrcAccess<'a>;
+
+    /// must be unique
     const TYPE_ID: TypeId;
+
     fn access_scope(component_specs: &mut ComponentSpecs) -> Result<AccessScope, XynokEcsError>;
     #[track_caller]
     fn next<'a>(src_access: &mut Self::SrcAccess<'a>) -> Option<Self::QueryItem<'a>>;

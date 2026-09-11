@@ -9,7 +9,9 @@ use std::marker::PhantomData;
 pub mod query_iter;
 
 pub(crate) mod access_scope;
-mod src_access;
+pub(crate) mod src_access;
+pub(crate) mod src_access_enable;
+pub(crate) mod src_access_change;
 mod tuple;
 mod variant;
 

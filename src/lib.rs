@@ -11,6 +11,7 @@ pub mod query;
 pub mod entity;
 pub mod schedule;
 pub mod cmd_buffer;
+pub mod wrapper;
 
 mod utils;
 mod chunk;

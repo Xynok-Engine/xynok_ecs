@@ -68,6 +68,9 @@ pub enum XynokEcsError
 
     #[error("Query<{0}> was not prepared before the system ran !")]
     QueryIsNotPrepared(&'static str),
+
+    #[error("Component `{0}` does not support `{1}` state detection")]
+    ComponentStateNotAvailable(&'static str, &'static str),
 }
 
 // src: https://crates.io/crates/thiserror

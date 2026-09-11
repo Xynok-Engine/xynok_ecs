@@ -5,7 +5,7 @@ use crate::apis::identifies::XynokEcsError;
 use crate::apis::params::ComponentSpecs;
 use crate::apis::ComponentDescriptor;
 use crate::archetype::Archetype;
-use crate::chunk::column::ColumnDescriptor;
+use crate::chunk::column::{ColumnDescriptor, StateOffset};
 use crate::chunk::layout::{ChunkLayout, ChunkLayoutParams};
 use crate::collection::component_bit_set::ComponentBitSet;
 use crate::collection::sequence_value_hash_map::SequenceValueHashMap;
@@ -30,6 +30,7 @@ pub struct PairArchetypeSpecParams<'a>
     pub temp_comp_des:                  &'a mut Vec<ComponentDescriptor>,
     pub temp_tys:                       &'a mut HashSet<TypeId>,
     pub component_col_descriptors_temp: &'a mut HashMap<TypeId, ColumnDescriptor>,
+    pub state_offsets_temp:             &'a mut HashMap<TypeId, StateOffset>,
     pub component_bit_set:              &'a mut ComponentBitSet,
 }
 
@@ -50,6 +51,7 @@ impl ArchetypeSpec
 
         let target_layout = ChunkLayout::new(ChunkLayoutParams {
             components:                 components_des,
+            state_offsets_temp:         params.state_offsets_temp,
             component_specs:            params.component_specs,
             component_descriptors_temp: params.component_col_descriptors_temp,
             component_bit_set_temp:     params.component_bit_set,
@@ -69,6 +71,7 @@ impl ArchetypeSpec
         build_component_descriptors_from_src_a_exclude_src_b(components_des, params.component_specs, params.temp_tys, params.a, params.b)?;
 
         let target_layout = ChunkLayout::new(ChunkLayoutParams {
+            state_offsets_temp:         params.state_offsets_temp,
             components:                 components_des,
             component_specs:            params.component_specs,
             component_descriptors_temp: params.component_col_descriptors_temp,

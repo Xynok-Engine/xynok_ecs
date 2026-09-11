@@ -1,5 +1,11 @@
-use crate::apis::constants::{BITS_PER_BYTE, CPU_WORD};
+use std::any::TypeId;
+use std::collections::HashMap;
+
+use crate::apis::constants::{BITS_PER_BYTE, CHANGED_TICK_BYTE_SIZE, CPU_WORD};
+use crate::apis::identifies::StateDetection;
 use crate::apis::traits::TComponentDescriptor;
+use crate::apis::ComponentDescriptor;
+use crate::chunk::column::StateOffset;
 use crate::entity::Entity;
 use crate::utils::align_up;
 
@@ -10,14 +16,42 @@ pub struct Header
 }
 impl Header
 {
-    pub fn new(max_entities: usize, component_count: usize) -> Self
+    pub fn new(max_entities: usize, components: &[ComponentDescriptor], state_offsets: &mut HashMap<TypeId, StateOffset>) -> Self
     {
-        // enable value bits
-        let bit_count = max_entities * component_count;
-        let bitset_size = align_up(bit_count.div_ceil(BITS_PER_BYTE), CPU_WORD);
+        let mut offset = 0usize;
+        state_offsets.clear();
+        for e in components.iter()
+        {
+            let needs_enable = matches!(e.state_detection, StateDetection::EnableAble | StateDetection::EnableAbleAndChangeAble);
+            let needs_change = matches!(e.state_detection, StateDetection::ChangeAble | StateDetection::EnableAbleAndChangeAble);
 
+            let mut state_offset = StateOffset::default();
+
+            if needs_enable
+            {
+                // enabled bit: 1 bit per entity
+                state_offset.enable_offset = Some(offset);
+                let enable_bytes = align_up(max_entities.div_ceil(BITS_PER_BYTE), CPU_WORD);
+                offset = align_up(offset + enable_bytes, CPU_WORD);
+            }
+
+            if needs_change
+            {
+                // added bit: 1 bit per entity
+                state_offset.added_offset = Some(offset);
+                let added_bytes = align_up(max_entities.div_ceil(BITS_PER_BYTE), CPU_WORD);
+                offset = align_up(offset + added_bytes, CPU_WORD);
+
+                // changed tick: 1 u32 per entity
+                state_offset.changed_offset = Some(offset);
+                let changed_bytes = align_up(max_entities * CHANGED_TICK_BYTE_SIZE, CPU_WORD);
+                offset = align_up(offset + changed_bytes, CPU_WORD);
+            }
+
+            state_offsets.insert(e.storage_type_id, state_offset);
+        }
         // entities
-        let entities_offset = align_up(bitset_size, Entity::COMPONENT_DESCRIPTOR.align);
+        let entities_offset = align_up(offset, Entity::COMPONENT_DESCRIPTOR.align);
         let entities_size = max_entities * Entity::COMPONENT_DESCRIPTOR.byte_size;
 
         let size = align_up(entities_offset + entities_size, CPU_WORD);
