@@ -9,9 +9,27 @@ pub enum StorageLocation
     Archetype,
 }
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, PartialEq, Eq)]
 pub enum XynokEcsError
 {
+    #[error("entity does not exist")]
+    EntityDoesNotExist,
+
+    #[error("entity does not carry this shared component")]
+    SharedComponentDoesNotExist,
+
+    #[error("entity already carries this shared component")]
+    SharedComponentAlreadyExists,
+
+    #[error("no archetype holds this shared key for the entity's components yet; create it with add_shared_component")]
+    UnresolvedSharedKey,
+
+    #[error("an archetype already holds a value for this shared key; join it with add_shared_component_by_key")]
+    SharedDestinationExists,
+
+    #[error("the new value has another shared key than the current one; move with set_shared_component_by_key, or use override_shared_component")]
+    SharedKeyMismatch,
+
     #[error("Exceeded the maximum number of entities: {0}")]
     EntityAmountOverflow(usize),
 

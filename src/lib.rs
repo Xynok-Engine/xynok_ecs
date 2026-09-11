@@ -15,7 +15,10 @@ pub mod cmd_buffer;
 mod utils;
 mod chunk;
 mod archetype;
+mod archetype_chunk;
 mod system;
 mod collection;
 
 pub use xynok_ecs_proc_macro::*;
+
+pub mod shared;

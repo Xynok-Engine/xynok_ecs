@@ -7,7 +7,7 @@ use crate::apis::params::ComponentSpecs;
 use crate::apis::traits::TComponent;
 use crate::query::access_scope::AccessScope;
 use crate::world::arch_spec::ArchetypeSpecs;
-use crate::world::query_spec::QuerySpecAccessor;
+use crate::world::query_spec::QuerySelection;
 
 macro_rules! impl_tuple_query_param {
     ($src:ident; $($q:ident : $ptr:ident),+) => {
@@ -18,6 +18,7 @@ macro_rules! impl_tuple_query_param {
             total_arch:        usize,
             current_arch_idx:  usize,
             current_chunk_idx: usize,
+            chunk_end:         usize,
             current_row_idx:   usize,
             current_chunk_len: usize,
             $($ptr: *mut u8,)+
@@ -25,15 +26,15 @@ macro_rules! impl_tuple_query_param {
         }
         impl<'a, $($q: TQueryColumn),+> TQuerySrcAccess<'a> for $src<'a, $($q,)+>
         {
-            fn new(accessor: &QuerySpecAccessor<'a>) -> Self
+            fn new(selection: QuerySelection<'a>) -> Self
             {
-                let arch_indices = accessor.arch_indices();
                 Self {
-                    archetypes:        accessor.archetypes,
-                    arch_indices:      arch_indices,
-                    total_arch:        arch_indices.len(),
+                    archetypes:        selection.archetypes,
+                    arch_indices:      selection.arch_indices,
+                    total_arch:        selection.arch_indices.len(),
                     current_arch_idx:  0,
-                    current_chunk_idx: 0,
+                    current_chunk_idx: selection.first_chunk,
+                    chunk_end:         selection.chunk_end,
                     current_row_idx:   0,
                     current_chunk_len: 0,
                     $($ptr: std::ptr::null_mut(),)+
@@ -79,7 +80,7 @@ macro_rules! impl_tuple_query_param {
                         None => panic!("archetype index {arch_idx} cached by the query is not in the world's archetype registry"),
                     };
 
-                    if self.current_chunk_idx >= arch_spec.arch.chunk_count()
+                    if self.current_chunk_idx >= arch_spec.arch.chunk_count().min(self.chunk_end)
                     {
                         self.current_arch_idx += 1;
                         self.current_chunk_idx = 0;

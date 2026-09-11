@@ -119,13 +119,13 @@ fn t_query_conflicting_access_on_the_same_component_is_rejected()
     let _ = w.create_query::<(&Hp, &mut Hp)>();
 }
 
-/// Persistent query
+/// Query specs are cached, while query views borrow the world.
 #[test]
-fn t_a_query_outlives_the_registration_of_other_queries()
+fn t_cached_query_refreshes_after_registration_of_other_queries()
 {
     let mut w = World::default();
 
-    let query = w.create_query::<&Hp>();
+    let _ = w.create_query::<&Hp>();
     let expected: u32 = (0..10u32)
         .inspect(|&i| {
             w.create(Hp(i));
@@ -141,7 +141,7 @@ fn t_a_query_outlives_the_registration_of_other_queries()
     let _ = w.create_query::<(&Hp, &Pos)>();
     let _ = w.create_query::<(&Mana, &Pos)>();
 
-    let sum: u32 = query.into_iter().map(|hp| hp.0).sum();
+    let sum: u32 = w.create_query::<&Hp>().into_iter().map(|hp| hp.0).sum();
 
-    assert!(sum != expected, "persistent queries are not supported yet");
+    assert_eq!(sum, expected);
 }

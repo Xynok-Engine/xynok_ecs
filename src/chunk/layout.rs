@@ -13,6 +13,8 @@ use crate::collection::component_bit_set::ComponentBitSet;
 use crate::entity::Entity;
 use crate::utils::align_up;
 
+/// `Clone` because every shared variant of an archetype reuses the layout of its plain archetype.
+#[derive(Clone)]
 pub struct ChunkLayout
 {
     pub max_len:                   usize,

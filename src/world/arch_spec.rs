@@ -1,10 +1,11 @@
 use std::any::TypeId;
 use std::collections::{HashMap, HashSet};
 
+use crate::apis::ComponentDescriptor;
 use crate::apis::identifies::XynokEcsError;
 use crate::apis::params::ComponentSpecs;
-use crate::apis::ComponentDescriptor;
 use crate::archetype::Archetype;
+use crate::archetype_chunk::ArchetypeChunk;
 use crate::chunk::column::ColumnDescriptor;
 use crate::chunk::layout::{ChunkLayout, ChunkLayoutParams};
 use crate::collection::component_bit_set::ComponentBitSet;
@@ -18,9 +19,11 @@ pub type ArchetypeSpecs = SequenceValueHashMap<usize, ArchetypeSpec>;
 
 pub struct ArchetypeSpec
 {
-    pub arch:       Archetype,
-    pub layout:     ChunkLayout,
-    pub archetypes: HashMap<usize, Archetype>,
+    pub arch:   Archetype,
+    pub layout: ChunkLayout,
+    /// The shared values every entity of this archetype uses. Empty for an archetype without
+    /// shared components, and for a shared archetype that became empty and waits to be reused.
+    pub shared: ArchetypeChunk,
 }
 pub struct PairArchetypeSpecParams<'a>
 {
@@ -38,9 +41,9 @@ impl ArchetypeSpec
     pub fn new(layout: ChunkLayout) -> Self
     {
         Self {
-            arch:       Archetype::default(),
-            layout:     layout,
-            archetypes: HashMap::new(),
+            arch:   Archetype::default(),
+            layout: layout,
+            shared: ArchetypeChunk::default(),
         }
     }
     pub fn new_from_pair(params: PairArchetypeSpecParams) -> Result<Self, XynokEcsError>
@@ -55,11 +58,7 @@ impl ArchetypeSpec
             component_bit_set_temp:     params.component_bit_set,
         })?;
 
-        Ok(Self {
-            arch:       Archetype::default(),
-            layout:     target_layout,
-            archetypes: HashMap::new(),
-        })
+        Ok(Self::new(target_layout))
     }
 
     /// treat MergeArchetypeSpecParams.b as an exclusion
@@ -75,11 +74,7 @@ impl ArchetypeSpec
             component_bit_set_temp:     params.component_bit_set,
         })?;
 
-        Ok(Self {
-            arch:       Archetype::default(),
-            layout:     target_layout,
-            archetypes: HashMap::new(),
-        })
+        Ok(Self::new(target_layout))
     }
 }
 impl ArchetypeSpec
@@ -118,9 +113,11 @@ impl ArchetypeSpec
         }
         false
     }
+    /// Whether every component of `other` is carried here, either as a chunk column or as a
+    /// shared value. Both live in the same id space, so one query scope can ask for both.
     pub fn contains_all_type_id_components_of(&self, other: &ComponentBitSet) -> bool
     {
-        self.layout.component_bit_set.contains_all(other)
+        self.layout.component_bit_set.contains_all_with(self.shared.component_bit_set(), other)
     }
 
     /// Whether any component of `other` is carried here. Used to drop an archetype an access
@@ -128,7 +125,7 @@ impl ArchetypeSpec
     /// nothing.
     pub fn intersects_type_id_components_of(&self, other: &ComponentBitSet) -> bool
     {
-        self.layout.component_bit_set.intersects(other)
+        self.layout.component_bit_set.intersects(other) || self.shared.component_bit_set().intersects(other)
     }
 }
 

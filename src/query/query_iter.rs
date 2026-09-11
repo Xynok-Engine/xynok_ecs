@@ -1,7 +1,7 @@
 use std::marker::PhantomData;
 
 use crate::apis::internal_traits::TQueryParam;
-use crate::world::query_spec::QuerySpecAccessor;
+use crate::world::query_spec::QuerySelection;
 
 pub struct QueryIter<'a, T: TQueryParam + 'static>
 {
@@ -23,10 +23,10 @@ impl<'a, T: TQueryParam + 'static> Iterator for QueryIter<'a, T>
 
 impl<'a, T: TQueryParam + 'static> QueryIter<'a, T>
 {
-    pub(crate) fn new(accessor: &QuerySpecAccessor<'a>) -> Self
+    pub(crate) fn new(selection: QuerySelection<'a>) -> Self
     {
         Self {
-            src_access: T::build_src_access(accessor),
+            src_access: T::build_src_access(selection),
             phantom:    PhantomData,
         }
     }

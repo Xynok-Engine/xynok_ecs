@@ -16,7 +16,7 @@ xynok_ecs = { path = ".." }
 
 # `DefaultScheduler` takes its world as a `HeapPtr`, so the parallel benchmark needs the pointer
 # type itself.
-xynok_std = { git = "https://github.com/Xynok-Engine/xynok_std.git", tag = "v0.1.17" }
+xynok_std = { git = "https://github.com/Xynok-Engine/xynok_std.git" }
 
 # `multi_threaded` is what puts bevy's parallel executor on the table. Without it
 # `default_executor` hands back the single-threaded one, and `benches/parallel.rs` would be

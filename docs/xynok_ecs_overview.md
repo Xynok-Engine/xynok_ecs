@@ -28,8 +28,14 @@ Xynok ECS supports two types of components:
 Xynok ECS provides three primary APIs for modifying the components of an entity. Whenever you modify an entity, it is moved to the Archetype that matches its new component layout:
 
 - **Add:** Adds a component or a set of components to an entity.
-- **Insert:** Adds a component or a set of components to an entity. If any of these components already exist, the library drops the old values and replaces them with the new ones.
+- **Merge:** Adds a component or a set of components to an entity. If any of these components already exist, the library drops the old values and replaces them with the new ones.
 - **Remove:** Removes a component or a set of components from an entity.
 ### Query
+https://github.com/rust-lang/rust/issues/36887
 ```rust
 ```
+
+## System
+Currently, xynok_ecs provides a `DefaultScheduler` and a `TScheduler`.
+- `DefaultScheduler`: represents the basic concept and how a scheduler should function.
+- `TScheduler`: an interface contract if you want to create your own looper.

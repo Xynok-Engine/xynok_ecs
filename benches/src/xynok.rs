@@ -1,6 +1,6 @@
-//! `xynok_ecs` under test.
+//! `xynok_ecs` under test. Preparation warms the world-owned query cache; each timed
+//! traversal reacquires a borrowing view without retaining a detached mutable query.
 
-use xynok_ecs::query::Query;
 use xynok_ecs::world::World;
 
 use crate::workload::{
@@ -37,7 +37,7 @@ pub struct Query1;
 
 impl QueryWorkload for Query1
 {
-    type PreparedQuery = Query<'static, &'static mut Position>;
+    type PreparedQuery = ();
     type Storage = World;
 
     const COMPONENT_COUNT: u8 = 1;
@@ -51,12 +51,12 @@ impl QueryWorkload for Query1
 
     fn prepare_query(storage: &mut World) -> Self::PreparedQuery
     {
-        storage.create_query::<&mut Position>()
+        let _ = storage.create_query::<&mut Position>();
     }
 
-    fn run_query_once(_storage: &mut World, query: &mut Self::PreparedQuery)
+    fn run_query_once(storage: &mut World, _query: &mut Self::PreparedQuery)
     {
-        for position in *query
+        for position in storage.create_query::<&mut Position>()
         {
             position.x += 1.0;
             position.y += 1.0;
@@ -68,7 +68,7 @@ pub struct Query2;
 
 impl QueryWorkload for Query2
 {
-    type PreparedQuery = Query<'static, (&'static mut Position, &'static Velocity)>;
+    type PreparedQuery = ();
     type Storage = World;
 
     const COMPONENT_COUNT: u8 = 2;
@@ -82,12 +82,12 @@ impl QueryWorkload for Query2
 
     fn prepare_query(storage: &mut World) -> Self::PreparedQuery
     {
-        storage.create_query::<(&mut Position, &Velocity)>()
+        let _ = storage.create_query::<(&mut Position, &Velocity)>();
     }
 
-    fn run_query_once(_storage: &mut World, query: &mut Self::PreparedQuery)
+    fn run_query_once(storage: &mut World, _query: &mut Self::PreparedQuery)
     {
-        for (position, velocity) in *query
+        for (position, velocity) in storage.create_query::<(&mut Position, &Velocity)>()
         {
             position.x += velocity.x;
             position.y += velocity.y;
@@ -99,7 +99,7 @@ pub struct Query3;
 
 impl QueryWorkload for Query3
 {
-    type PreparedQuery = Query<'static, (&'static mut Position, &'static Velocity, &'static mut Health)>;
+    type PreparedQuery = ();
     type Storage = World;
 
     const COMPONENT_COUNT: u8 = 3;
@@ -113,12 +113,12 @@ impl QueryWorkload for Query3
 
     fn prepare_query(storage: &mut World) -> Self::PreparedQuery
     {
-        storage.create_query::<(&mut Position, &Velocity, &mut Health)>()
+        let _ = storage.create_query::<(&mut Position, &Velocity, &mut Health)>();
     }
 
-    fn run_query_once(_storage: &mut World, query: &mut Self::PreparedQuery)
+    fn run_query_once(storage: &mut World, _query: &mut Self::PreparedQuery)
     {
-        for (position, velocity, health) in *query
+        for (position, velocity, health) in storage.create_query::<(&mut Position, &Velocity, &mut Health)>()
         {
             position.x += velocity.x;
             position.y += velocity.y;

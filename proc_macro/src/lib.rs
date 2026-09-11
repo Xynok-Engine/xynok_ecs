@@ -1,6 +1,7 @@
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{parse_macro_input, punctuated::Punctuated, DeriveInput, Ident, Token};
+use syn::punctuated::Punctuated;
+use syn::{DeriveInput, Ident, Token, parse_macro_input};
 
 #[proc_macro_attribute]
 pub fn component(args: TokenStream, input: TokenStream) -> TokenStream
@@ -34,16 +35,16 @@ pub fn component(args: TokenStream, input: TokenStream) -> TokenStream
         }
     }
 
-    let is_archetype = flags.iter().any(|f| f == "archetype");
-
-    let location = if is_archetype
+    if let Some(flag) = flags.iter().find(|f| *f == "shared")
     {
-        quote! { xynok_ecs::apis::identifies::StorageLocation::Archetype }
+        return syn::Error::new(
+            flag.span(),
+            "shared components are not declared with #[component]; implement xynok_ecs::shared::TSharedComponent and add them with World::add_shared_component",
+        )
+        .to_compile_error()
+        .into();
     }
-    else
-    {
-        quote! { xynok_ecs::apis::identifies::StorageLocation::Chunk }
-    };
+    let location = quote! { xynok_ecs::apis::identifies::StorageLocation::Chunk };
 
     let expanded = quote! {
         #input

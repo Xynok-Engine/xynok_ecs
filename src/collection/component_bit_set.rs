@@ -1,7 +1,7 @@
 /// How many component ids fit in one word of the set
 const BITS_PER_WORD: usize = 64;
 
-#[derive(Default, Clone, Debug)]
+#[derive(Default, Clone, Debug, PartialEq, Eq)]
 pub struct ComponentBitSet
 {
     words: Vec<u64>,
@@ -85,6 +85,22 @@ impl ComponentBitSet
         true
     }
 
+    /// Same as [`Self::contains_all`], but against the union of `self` and `extra`, without
+    /// building that union. An archetype keeps its chunk columns and its shared values in two
+    /// separate sets, and a query may need ids from both.
+    pub fn contains_all_with(&self, extra: &Self, other: &Self) -> bool
+    {
+        for (idx, word) in other.words.iter().enumerate()
+        {
+            let mine = self.words.get(idx).copied().unwrap_or(0) | extra.words.get(idx).copied().unwrap_or(0);
+            if word & !mine != 0
+            {
+                return false;
+            }
+        }
+        true
+    }
+
     /// Ids of the set bits, ascending
     #[inline]
     pub fn iter(&self) -> ComponentBitSetIter<'_>
@@ -146,7 +162,7 @@ impl Iterator for ComponentBitSetIter<'_>
 #[cfg(test)]
 mod test
 {
-    use super::{ComponentBitSet, BITS_PER_WORD};
+    use super::{BITS_PER_WORD, ComponentBitSet};
 
     fn set_of(ids: &[usize]) -> ComponentBitSet
     {

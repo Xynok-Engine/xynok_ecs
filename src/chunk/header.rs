@@ -3,6 +3,7 @@ use crate::apis::traits::TComponentDescriptor;
 use crate::entity::Entity;
 use crate::utils::align_up;
 
+#[derive(Clone)]
 pub struct Header
 {
     pub entities_offset: usize,

@@ -49,7 +49,7 @@ fn t_exists_tracks_the_entity_lifecycle()
 #[test]
 fn t_exists_rejects_an_unknown_handle()
 {
-    let mut w = World::default();
+    let w = World::default();
     assert!(!w.exists(Entity::new(999, 1).unwrap()), "an index past the entity table must not exist");
     assert!(!w.exists(Entity::NULL), "the null handle must never exist");
 }

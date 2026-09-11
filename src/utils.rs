@@ -1,7 +1,6 @@
-use std::any::TypeId;
-
-use crate::apis::params::{ComponentSpec, ComponentSpecs};
+use crate::apis::params::ComponentSpecs;
 use crate::apis::traits::{TComponent, TComponentDescriptor};
+use crate::archetype_chunk::SharedValue;
 use crate::query::access_scope::AccessScope;
 use crate::world::arch_spec::ArchetypeSpecs;
 /// Resolves `T` to its registry index, registering it when the world has not seen it yet.
@@ -12,9 +11,7 @@ use crate::world::arch_spec::ArchetypeSpecs;
 /// archetype - the query would then match everything and read columns that do not exist.
 pub(crate) fn component_id_for<T: TComponent + 'static>(component_specs: &mut ComponentSpecs) -> usize
 {
-    component_specs.get_or_insert_with(TypeId::of::<T::StorageType>(), || ComponentSpec {
-        descriptor: T::COMPONENT_DESCRIPTOR,
-    })
+    component_specs.register_component(T::COMPONENT_DESCRIPTOR)
 }
 
 pub(crate) fn normalize_set(set: &mut Vec<usize>)
@@ -25,11 +22,19 @@ pub(crate) fn normalize_set(set: &mut Vec<usize>)
 /// Collects the *indices* of every archetype the scope matches. An index stays correct as the
 /// registry grows, so a `QuerySpec` built here does not need re-pointing, only refreshing when
 /// new archetypes appear.
-pub(crate) fn build_archetype_which_contains(archetypes: &ArchetypeSpecs, dst: &mut Vec<usize>, access_scope: &AccessScope)
+///
+/// `shared_filter` narrows the result to archetypes holding that exact shared value, which is
+/// how a static `TSharedFilter` is applied once here instead of on every traversal.
+pub(crate) fn build_archetype_which_contains(
+    archetypes: &ArchetypeSpecs,
+    dst: &mut Vec<usize>,
+    access_scope: &AccessScope,
+    shared_filter: Option<SharedValue>,
+)
 {
     for (idx, arch) in archetypes.values().enumerate()
     {
-        if access_scope.belong_to(arch)
+        if access_scope.belong_to(arch) && shared_filter.is_none_or(|value| arch.shared.contains_value(value))
         {
             dst.push(idx);
         }

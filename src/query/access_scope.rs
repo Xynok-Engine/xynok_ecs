@@ -39,6 +39,12 @@ impl AccessScope
         self.write.is_empty()
     }
 
+    /// Whether the query reads or writes component `id`. Excluding it does not count.
+    pub fn read_or_write(&self, id: usize) -> bool
+    {
+        self.read.contains(id) || self.write.contains(id)
+    }
+
     /// Whether `arch` is one of the archetypes this scope iterates.
     ///
     /// The `exclude` half is not decoration: [`Self::matches_archetypes_disjoint_from`] proves

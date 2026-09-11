@@ -4,10 +4,10 @@ use crate::apis::identifies::XynokEcsError;
 use crate::apis::params::ComponentSpecs;
 use crate::apis::traits::TComponent;
 use crate::query::access_scope::AccessScope;
-use crate::world::query_spec::QuerySpecAccessor;
+use crate::world::query_spec::QuerySelection;
 pub trait TQuerySrcAccess<'a>
 {
-    fn new(accessor: &QuerySpecAccessor<'a>) -> Self;
+    fn new(selection: QuerySelection<'a>) -> Self;
 }
 pub trait TQueryParam
 {
@@ -17,9 +17,9 @@ pub trait TQueryParam
     fn access_scope(component_specs: &mut ComponentSpecs) -> Result<AccessScope, XynokEcsError>;
     #[track_caller]
     fn next<'a>(src_access: &mut Self::SrcAccess<'a>) -> Option<Self::QueryItem<'a>>;
-    fn build_src_access<'a>(accessor: &QuerySpecAccessor<'a>) -> Self::SrcAccess<'a>
+    fn build_src_access<'a>(selection: QuerySelection<'a>) -> Self::SrcAccess<'a>
     {
-        Self::SrcAccess::new(accessor)
+        Self::SrcAccess::new(selection)
     }
 }
 

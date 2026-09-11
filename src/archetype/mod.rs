@@ -213,6 +213,11 @@ impl Archetype
     {
         &self.chunks[chunk_idx]
     }
+    /// No entity left in any chunk. Walks the chunk list, so keep it off per-row paths.
+    pub(crate) fn is_empty(&self) -> bool
+    {
+        self.chunks.iter().all(Chunk::is_empty)
+    }
     pub(crate) fn dispose(&mut self, layout: &ChunkLayout, component_specs: &ComponentSpecs)
     {
         for c in self.chunks.iter_mut()

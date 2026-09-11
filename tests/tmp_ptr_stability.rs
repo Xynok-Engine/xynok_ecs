@@ -1,8 +1,8 @@
-//! TEMPORARY - scratch verification, delete after reading.
+//! Registry growth and query cache refresh regressions.
 mod common;
 
 use common::*;
-use xynok_ecs::world::{testing, World};
+use xynok_ecs::world::{World, testing};
 
 /// Registers enough distinct archetypes to push `World::archetypes` past several of its growth
 /// boundaries (hashbrown reallocates at 3, 7, 14, 28 entries for a map built empty).
@@ -26,10 +26,9 @@ fn register_many_archetypes(w: &mut World)
     w.register_archetype::<(Hp, Mana, Marker)>();
 }
 
-/// entities exist BEFORE the query is built, so `QuerySpec.archetypes` is non-empty from the
-/// start. Only the *address* of that Vec is under test here, not its freshness.
+/// Reacquiring a query after registry growth reuses its specification and refreshes matches.
 #[test]
-fn t_vec_addr_survives_query_counter_rehash()
+fn t_cached_query_refreshes_after_query_registry_growth()
 {
     let mut w = World::default();
     let expected: u32 = (0..10u32)
@@ -58,9 +57,9 @@ fn t_vec_addr_survives_query_counter_rehash()
     w.create((Hp(1), Mana(2)));
     w.create((Pos { x: 1f32, y: 1f32 }, Mana(2)));
     assert_eq!(
-        query.into_iter().map(|hp| hp.0).sum::<u32>(),
-        expected,
-        "the Vec behind the accessor moved during rehash"
+        w.create_query::<&Hp>().into_iter().map(|hp| hp.0).sum::<u32>(),
+        expected + 1,
+        "cached query did not refresh after registry growth"
     );
 }
 
@@ -116,7 +115,7 @@ fn t_query_reads_correctly_after_new_archetypes()
     register_many_archetypes(&mut w);
 
     assert_eq!(
-        query.into_iter().map(|hp| hp.0).sum::<u32>(),
+        w.create_query::<&Hp>().into_iter().map(|hp| hp.0).sum::<u32>(),
         expected,
         "query read through a relocated ArchetypeSpec"
     );

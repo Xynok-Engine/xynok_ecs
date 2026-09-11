@@ -7,19 +7,22 @@ use xynok_std::collection::Queue;
 use crate::apis::identifies::XynokEcsError;
 use crate::apis::internal_traits::TQueryParam;
 use crate::apis::params::{
-    ArchetypeTakeAndRemoveComponentParams, ArchetypeTakeAndWriteComponentParams, ComponentSpec, ComponentSpecs, EntityInChunkIndices, EntityIndices, SwappedRow,
+    ArchetypeTakeAndRemoveComponentParams, ArchetypeTakeAndWriteComponentParams, ComponentSpecs, EntityInChunkIndices, EntityIndices, SwappedRow,
 };
 use crate::apis::safe_counter::SafeCounter;
 use crate::apis::traits::TArchetype;
 use crate::chunk::layout::{ChunkLayout, ChunkLayoutParams};
 use crate::entity::Entity;
 use crate::query::Query;
+use crate::shared::{TSharedComponentQueryParam, TSharedFilterParam};
 use crate::utils::normalize_set;
 use crate::world::arch_spec::{ArchetypeSpec, ArchetypeSpecs, PairArchetypeSpecParams};
 use crate::world::entity_spec::EntitySpec;
 use crate::world::query_spec::{QuerySpec, QuerySpecAccessor, QuerySpecs};
+use crate::world::shared::{SharedArchetypeKey, SharedKeyTables};
 use crate::world::temp_allocation::WorldTempAllocation;
 mod temp_allocation;
+mod shared;
 
 pub(crate) mod entity_spec;
 pub(crate) mod arch_spec;
@@ -37,7 +40,13 @@ pub struct World
     archetypes:               ArchetypeSpecs,
     component_counter:        ComponentSpecs,
     query_counter:            QuerySpecs,
+    /// Component set -> the archetype holding exactly those components and no shared value
     component_set_counter:    HashMap<Vec<usize>, usize>,
+    /// Component set and shared values -> the shared variant holding them
+    shared_archetype_counter: HashMap<SharedArchetypeKey, usize>,
+    /// Component set -> shared variants of it that became empty and wait to be reused
+    free_shared_archetypes:   HashMap<Vec<usize>, Vec<usize>>,
+    shared_keys:              SharedKeyTables,
     archetype_counter:        HashMap<TypeId, usize>,
     entities:                 Vec<EntitySpec>,
     free_entities:            Queue<usize>,
@@ -54,6 +63,9 @@ impl Default for World
             component_counter:        ComponentSpecs::new(),
             archetype_counter:        HashMap::new(),
             component_set_counter:    HashMap::new(),
+            shared_archetype_counter: HashMap::new(),
+            free_shared_archetypes:   HashMap::new(),
+            shared_keys:              HashMap::new(),
             query_counter:            QuerySpecs::new(),
             free_entities:            Queue::new(),
             temp_alloc:               WorldTempAllocation::new(),
@@ -98,7 +110,7 @@ impl World
         new_e
     }
 
-    pub fn exists(&mut self, e: Entity) -> bool
+    pub fn exists(&self, e: Entity) -> bool
     {
         match e.idx() < self.entities.len()
         {
@@ -137,6 +149,7 @@ impl World
         };
 
         self.erase_entity(e);
+        self.release_if_empty(arch_id);
     }
 
     #[track_caller]
@@ -185,6 +198,8 @@ impl World
         };
         // put back
         self.temp_alloc.vec_usize = component_set;
+        // an entity with shared values keeps them: move to the variant of the new component set
+        let target_arch_id = self.with_shared_values_of(a_arch_id, target_arch_id);
 
         let src_idx = self.archetypes.index_of(&a_arch_id).unwrap();
         let target_idx = self.archetypes.index_of(&target_arch_id).unwrap();
@@ -212,6 +227,7 @@ impl World
             self.update_entity_indices(swapped_row);
         }
         self.update_entity_spec(e, target_arch_id, take_and_write_result.new_indices_took);
+        self.release_if_empty(a_arch_id);
     }
 
     /// Adds the components of `T` to `e` if they are not already present, otherwise overwrites the
@@ -244,6 +260,8 @@ impl World
         };
         // put back
         self.temp_alloc.vec_usize = component_set;
+        // an entity with shared values keeps them: move to the variant of the new component set
+        let target_arch_id = self.with_shared_values_of(a_arch_id, target_arch_id);
 
         // every component of `T` is already part of `e`'s archetype: overwrite the row in place, no move needed
         if target_arch_id == a_arch_id
@@ -284,6 +302,7 @@ impl World
             self.update_entity_indices(swapped_row);
         }
         self.update_entity_spec(e, target_arch_id, take_and_write_result.new_indices_took);
+        self.release_if_empty(a_arch_id);
     }
 
     #[track_caller]
@@ -325,6 +344,8 @@ impl World
         };
         // put back
         self.temp_alloc.vec_usize = component_set;
+        // an entity with shared values keeps them: move to the variant of the new component set
+        let target_arch_id = self.with_shared_values_of(a_arch_id, target_arch_id);
 
         let src_idx = self.archetypes.index_of(&a_arch_id).unwrap();
         let target_idx = self.archetypes.index_of(&target_arch_id).unwrap();
@@ -352,12 +373,13 @@ impl World
             self.update_entity_indices(swapped_row);
         }
         self.update_entity_spec(e, target_arch_id, result.new_indices_took);
+        self.release_if_empty(a_arch_id);
 
         result.val
     }
 
     #[track_caller]
-    pub fn create_query<'a, T: TQueryParam + 'static>(&mut self) -> Query<'a, T>
+    pub fn create_query<'a, T: TQueryParam + 'static>(&'a mut self) -> Query<'a, T>
     {
         match Query::new(self)
         {
@@ -373,27 +395,32 @@ impl World
     {
         &mut self.component_counter
     }
-    pub(crate) fn get_or_create_query_src_access<'a, T: TQueryParam + 'static>(&mut self) -> Result<QuerySpecAccessor<'a>, XynokEcsError>
+    pub(crate) fn get_or_create_query_src_access<'a, T: TQueryParam + 'static, S: TSharedComponentQueryParam + 'static, F: TSharedFilterParam>(
+        &mut self,
+    ) -> Result<QuerySpecAccessor<'a>, XynokEcsError>
     {
         let current_global_arch_version = self.global_archetype_version.current_val();
+        let query_key = (T::TYPE_ID, TypeId::of::<S>(), TypeId::of::<F>());
 
-        let query_idx = match self.query_counter.index_of(&T::TYPE_ID)
+        let query_idx = match self.query_counter.index_of(&query_key)
         {
             Some(idx) => idx,
             None =>
             {
                 // Registers any component the world has not seen yet, so it has to run
                 // before anything borrows the component registry again
-                let access_scope = T::access_scope(&mut self.component_counter)?;
+                let access_scope = Query::<T, S, F>::access_scope(&mut self.component_counter)?;
+                let shared_filter = F::resolve(self);
 
                 let mut target_archetypes = Vec::new();
-                crate::utils::build_archetype_which_contains(&self.archetypes, &mut target_archetypes, &access_scope);
+                crate::utils::build_archetype_which_contains(&self.archetypes, &mut target_archetypes, &access_scope, shared_filter);
                 self.query_counter.insert(
-                    T::TYPE_ID,
+                    query_key,
                     QuerySpec {
-                        access_scope: access_scope,
-                        archetypes:   target_archetypes,
-                        version:      current_global_arch_version,
+                        access_scope:  access_scope,
+                        archetypes:    target_archetypes,
+                        shared_filter: shared_filter,
+                        version:       current_global_arch_version,
                     },
                 )
             }
@@ -407,7 +434,12 @@ impl World
         if query_spec.version != current_global_arch_version
         {
             query_spec.archetypes.clear();
-            crate::utils::build_archetype_which_contains(&self.archetypes, &mut query_spec.archetypes, &query_spec.access_scope);
+            crate::utils::build_archetype_which_contains(
+                &self.archetypes,
+                &mut query_spec.archetypes,
+                &query_spec.access_scope,
+                query_spec.shared_filter,
+            );
             query_spec.version = current_global_arch_version;
         }
 
@@ -529,9 +561,7 @@ impl World
         // collect component id: a component's id is its index in the registry
         for des in T::COMPONENT_DESCRIPTORS
         {
-            let id = self
-                .component_counter
-                .get_or_insert_with(des.storage_type_id, || ComponentSpec { descriptor: des.clone() });
+            let id = self.component_counter.register_component(des.clone());
             component_set.push(id);
         }
         normalize_set(component_set);
@@ -546,7 +576,7 @@ impl World
             }
             None =>
             {
-                let arch_id = self.component_set_counter.len();
+                let arch_id = self.archetypes.len();
                 self.component_set_counter.insert(component_set.clone(), arch_id);
                 self.archetype_counter.insert(std::any::TypeId::of::<T>(), arch_id);
                 self.create_archetype::<T>(arch_id);
@@ -571,7 +601,7 @@ impl World
             Ok(r) => r,
             Err(e) => panic!("{}", e),
         };
-        let arch_id = self.component_set_counter.len();
+        let arch_id = self.archetypes.len();
         self.component_set_counter.insert(component_set.to_vec(), arch_id);
         self.archetypes.insert(arch_id, new_arch);
         self.structure_changed();
@@ -593,7 +623,7 @@ impl World
             Ok(r) => r,
             Err(e) => panic!("{}", e),
         };
-        let arch_id = self.component_set_counter.len();
+        let arch_id = self.archetypes.len();
         self.component_set_counter.insert(component_set.to_vec(), arch_id);
         self.archetypes.insert(arch_id, new_arch);
         self.structure_changed();
