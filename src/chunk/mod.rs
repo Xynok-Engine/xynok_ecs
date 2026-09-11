@@ -1,4 +1,4 @@
-use crate::apis::constants::BITS_PER_BYTE;
+use crate::apis::constants::{ChangedTick, BITS_PER_BYTE};
 use crate::apis::identifies::XynokEcsError;
 use crate::apis::params::{ChunkTakeComponentParams, ComponentSpecs, SwappedRow};
 use crate::apis::traits::TComponent;
@@ -371,8 +371,11 @@ impl Chunk
         Ok(col_des.state_offset.clone())
     }
 
+    // ---- fast path: caller already resolved & cached `region_offset` once per chunk
+    // (mirrors how `SrcAccess` caches `current_col_ptr` once per chunk instead of
+    // hitting `component_col_descriptors` on every row). No HashMap lookup, no Result.
     #[inline]
-    unsafe fn get_bit(&self, region_offset: usize, row: usize) -> bool
+    pub(crate) unsafe fn get_bit_unchecked(&self, region_offset: usize, row: usize) -> bool
     {
         unsafe {
             let byte = *self.ptr.add(region_offset + row / BITS_PER_BYTE);
@@ -380,7 +383,7 @@ impl Chunk
         }
     }
     #[inline]
-    unsafe fn set_bit(&mut self, region_offset: usize, row: usize, value: bool)
+    pub(crate) unsafe fn set_bit_unchecked(&mut self, region_offset: usize, row: usize, value: bool)
     {
         unsafe {
             let byte_ptr = self.ptr.add(region_offset + row / BITS_PER_BYTE);
@@ -395,7 +398,19 @@ impl Chunk
             }
         }
     }
+    #[inline]
+    pub(crate) unsafe fn get_changed_tick_unchecked(&self, region_offset: usize, row: usize) -> ChangedTick
+    {
+        unsafe { *(self.ptr.add(region_offset) as *const ChangedTick).add(row) }
+    }
+    #[inline]
+    pub(crate) unsafe fn set_changed_tick_unchecked(&mut self, region_offset: usize, row: usize, tick: ChangedTick)
+    {
+        unsafe { *(self.ptr.add(region_offset) as *mut ChangedTick).add(row) = tick };
+    }
 
+    // ---- checked path: does the `component_col_descriptors` lookup every call, meant for
+    // one-off access outside a query's hot loop. Both delegate to the `_unchecked` fns above.
     #[inline]
     pub(crate) fn get_enable_bit<T: TComponent + 'static>(&self, layout: &ChunkLayout, row: usize) -> Result<bool, XynokEcsError>
     {
@@ -403,7 +418,7 @@ impl Chunk
             .state_offset::<T>(layout)?
             .enable_offset
             .ok_or(XynokEcsError::ComponentStateNotAvailable(std::any::type_name::<T::StorageType>(), "enable"))?;
-        Ok(unsafe { self.get_bit(offset, row) })
+        Ok(unsafe { self.get_bit_unchecked(offset, row) })
     }
     #[inline]
     pub(crate) fn set_enable_bit<T: TComponent + 'static>(&mut self, layout: &ChunkLayout, row: usize, value: bool) -> Result<(), XynokEcsError>
@@ -412,7 +427,7 @@ impl Chunk
             .state_offset::<T>(layout)?
             .enable_offset
             .ok_or(XynokEcsError::ComponentStateNotAvailable(std::any::type_name::<T::StorageType>(), "enable"))?;
-        unsafe { self.set_bit(offset, row, value) };
+        unsafe { self.set_bit_unchecked(offset, row, value) };
         Ok(())
     }
 
@@ -423,7 +438,7 @@ impl Chunk
             .state_offset::<T>(layout)?
             .added_offset
             .ok_or(XynokEcsError::ComponentStateNotAvailable(std::any::type_name::<T::StorageType>(), "added"))?;
-        Ok(unsafe { self.get_bit(offset, row) })
+        Ok(unsafe { self.get_bit_unchecked(offset, row) })
     }
     #[inline]
     pub(crate) fn set_added_bit<T: TComponent + 'static>(&mut self, layout: &ChunkLayout, row: usize, value: bool) -> Result<(), XynokEcsError>
@@ -432,27 +447,27 @@ impl Chunk
             .state_offset::<T>(layout)?
             .added_offset
             .ok_or(XynokEcsError::ComponentStateNotAvailable(std::any::type_name::<T::StorageType>(), "added"))?;
-        unsafe { self.set_bit(offset, row, value) };
+        unsafe { self.set_bit_unchecked(offset, row, value) };
         Ok(())
     }
 
     #[inline]
-    pub(crate) fn get_changed_tick<T: TComponent + 'static>(&self, layout: &ChunkLayout, row: usize) -> Result<u32, XynokEcsError>
+    pub(crate) fn get_changed_tick<T: TComponent + 'static>(&self, layout: &ChunkLayout, row: usize) -> Result<ChangedTick, XynokEcsError>
     {
         let offset = self
             .state_offset::<T>(layout)?
             .changed_offset
             .ok_or(XynokEcsError::ComponentStateNotAvailable(std::any::type_name::<T::StorageType>(), "changed"))?;
-        Ok(unsafe { *(self.ptr.add(offset) as *const u32).add(row) })
+        Ok(unsafe { self.get_changed_tick_unchecked(offset, row) })
     }
     #[inline]
-    pub(crate) fn set_changed_tick<T: TComponent + 'static>(&mut self, layout: &ChunkLayout, row: usize, tick: u32) -> Result<(), XynokEcsError>
+    pub(crate) fn set_changed_tick<T: TComponent + 'static>(&mut self, layout: &ChunkLayout, row: usize, tick: ChangedTick) -> Result<(), XynokEcsError>
     {
         let offset = self
             .state_offset::<T>(layout)?
             .changed_offset
             .ok_or(XynokEcsError::ComponentStateNotAvailable(std::any::type_name::<T::StorageType>(), "changed"))?;
-        unsafe { *(self.ptr.add(offset) as *mut u32).add(row) = tick };
+        unsafe { self.set_changed_tick_unchecked(offset, row, tick) };
         Ok(())
     }
 }
