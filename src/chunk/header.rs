@@ -37,12 +37,15 @@ impl Header
 
             if needs_change
             {
-                // added bit: 1 bit per entity
+                // added tick: 1 tick per entity. Same tick type as `changed`, both set together
+                // on insert; only `changed` moves afterwards on mutation. A bit can't tell two
+                // independent readers (different last-run ticks) apart, same reason `changed`
+                // is a tick and not a bit.
                 state_offset.added_offset = Some(offset);
-                let added_bytes = align_up(max_entities.div_ceil(BITS_PER_BYTE), CPU_WORD);
+                let added_bytes = align_up(max_entities * CHANGED_TICK_BYTE_SIZE, CPU_WORD);
                 offset = align_up(offset + added_bytes, CPU_WORD);
 
-                // changed tick: 1 u32 per entity
+                // changed tick: 1 tick per entity
                 state_offset.changed_offset = Some(offset);
                 let changed_bytes = align_up(max_entities * CHANGED_TICK_BYTE_SIZE, CPU_WORD);
                 offset = align_up(offset + changed_bytes, CPU_WORD);

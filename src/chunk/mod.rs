@@ -1,5 +1,5 @@
 use crate::apis::constants::{ChangedTick, BITS_PER_BYTE};
-use crate::apis::identifies::XynokEcsError;
+use crate::apis::identifies::{StateDetection, XynokEcsError};
 use crate::apis::params::{ChunkTakeComponentParams, ComponentSpecs, SwappedRow};
 use crate::apis::traits::TComponent;
 use crate::chunk::column::StateOffset;
@@ -10,6 +10,45 @@ pub(crate) mod layout;
 pub(crate) mod column;
 
 mod header;
+
+// Free functions operating on an already-resolved region pointer (chunk base + state offset).
+// Query-side access structs (`SrcAccess`, `SrcAccessEnable`, `SrcAccessChange`) resolve that
+// pointer once per chunk (like `current_col_ptr`) and call these directly per row, with no
+// `Chunk` borrow and no `component_col_descriptors` lookup in the hot loop.
+#[inline]
+pub(crate) unsafe fn read_bit(region_ptr: *const u8, row: usize) -> bool
+{
+    unsafe {
+        let byte = *region_ptr.add(row / BITS_PER_BYTE);
+        (byte >> (row % BITS_PER_BYTE)) & 1 == 1
+    }
+}
+#[inline]
+pub(crate) unsafe fn write_bit(region_ptr: *mut u8, row: usize, value: bool)
+{
+    unsafe {
+        let byte_ptr = region_ptr.add(row / BITS_PER_BYTE);
+        let mask = 1u8 << (row % BITS_PER_BYTE);
+        if value
+        {
+            *byte_ptr |= mask;
+        }
+        else
+        {
+            *byte_ptr &= !mask;
+        }
+    }
+}
+#[inline]
+pub(crate) unsafe fn read_changed_tick(region_ptr: *const u8, row: usize) -> ChangedTick
+{
+    unsafe { *(region_ptr as *const ChangedTick).add(row) }
+}
+#[inline]
+pub(crate) unsafe fn write_changed_tick(region_ptr: *mut u8, row: usize, tick: ChangedTick)
+{
+    unsafe { *(region_ptr as *mut ChangedTick).add(row) = tick };
+}
 
 pub struct Chunk
 {
@@ -279,23 +318,39 @@ impl Chunk
     {
         self.len -= 1;
     }
-    /// Drop the old value and assign the new one
-    pub(crate) unsafe fn replace_at<T: TComponent + 'static>(&mut self, layout: &ChunkLayout, row: usize, value: T) -> Result<(), XynokEcsError>
+    /// Drop the old value and assign the new one. The component already existed in this row, so
+    /// only `changed` moves; `enable`/`added` are untouched (see `write_at` for a fresh insert)
+    pub(crate) unsafe fn replace_at<T: TComponent + 'static>(&mut self, layout: &ChunkLayout, row: usize, value: T, tick: ChangedTick) -> Result<(), XynokEcsError>
     {
         let col_ptr = self.components_ptr::<T>(layout)?;
         unsafe {
             let slot = (col_ptr as *mut T).add(row);
             *slot = value;
         }
+        if matches!(T::STATE_DETECTION, StateDetection::ChangeAble | StateDetection::EnableAbleAndChangeAble)
+        {
+            self.set_changed_tick::<T>(layout, row, tick)?;
+        }
         Ok(())
     }
-    /// Writes directly to memory without dropping the old value. Typically used when the memory has just been initialized
-    pub(crate) unsafe fn write_at<T: TComponent + 'static>(&mut self, layout: &ChunkLayout, row: usize, value: T) -> Result<(), XynokEcsError>
+    /// Writes directly to memory without dropping the old value. Typically used when the memory
+    /// has just been initialized, i.e. this component is appearing in this row for the first
+    /// time: `enable` is seeded to `T::ENABLE_VALUE` and `added`/`changed` both start at `tick`
+    pub(crate) unsafe fn write_at<T: TComponent + 'static>(&mut self, layout: &ChunkLayout, row: usize, value: T, tick: ChangedTick) -> Result<(), XynokEcsError>
     {
         let col_ptr = self.components_ptr::<T>(layout)?;
         unsafe {
             let slot = (col_ptr as *mut T).add(row);
             slot.write(value);
+        }
+        if matches!(T::STATE_DETECTION, StateDetection::EnableAble | StateDetection::EnableAbleAndChangeAble)
+        {
+            self.set_enable_bit::<T>(layout, row, T::ENABLE_VALUE)?;
+        }
+        if matches!(T::STATE_DETECTION, StateDetection::ChangeAble | StateDetection::EnableAbleAndChangeAble)
+        {
+            self.set_added_tick::<T>(layout, row, tick)?;
+            self.set_changed_tick::<T>(layout, row, tick)?;
         }
         Ok(())
     }
@@ -377,36 +432,22 @@ impl Chunk
     #[inline]
     pub(crate) unsafe fn get_bit_unchecked(&self, region_offset: usize, row: usize) -> bool
     {
-        unsafe {
-            let byte = *self.ptr.add(region_offset + row / BITS_PER_BYTE);
-            (byte >> (row % BITS_PER_BYTE)) & 1 == 1
-        }
+        unsafe { read_bit(self.ptr.add(region_offset), row) }
     }
     #[inline]
     pub(crate) unsafe fn set_bit_unchecked(&mut self, region_offset: usize, row: usize, value: bool)
     {
-        unsafe {
-            let byte_ptr = self.ptr.add(region_offset + row / BITS_PER_BYTE);
-            let mask = 1u8 << (row % BITS_PER_BYTE);
-            if value
-            {
-                *byte_ptr |= mask;
-            }
-            else
-            {
-                *byte_ptr &= !mask;
-            }
-        }
+        unsafe { write_bit(self.ptr.add(region_offset), row, value) }
     }
     #[inline]
     pub(crate) unsafe fn get_changed_tick_unchecked(&self, region_offset: usize, row: usize) -> ChangedTick
     {
-        unsafe { *(self.ptr.add(region_offset) as *const ChangedTick).add(row) }
+        unsafe { read_changed_tick(self.ptr.add(region_offset), row) }
     }
     #[inline]
     pub(crate) unsafe fn set_changed_tick_unchecked(&mut self, region_offset: usize, row: usize, tick: ChangedTick)
     {
-        unsafe { *(self.ptr.add(region_offset) as *mut ChangedTick).add(row) = tick };
+        unsafe { write_changed_tick(self.ptr.add(region_offset), row, tick) }
     }
 
     // ---- checked path: does the `component_col_descriptors` lookup every call, meant for
@@ -432,22 +473,22 @@ impl Chunk
     }
 
     #[inline]
-    pub(crate) fn get_added_bit<T: TComponent + 'static>(&self, layout: &ChunkLayout, row: usize) -> Result<bool, XynokEcsError>
+    pub(crate) fn get_added_tick<T: TComponent + 'static>(&self, layout: &ChunkLayout, row: usize) -> Result<ChangedTick, XynokEcsError>
     {
         let offset = self
             .state_offset::<T>(layout)?
             .added_offset
             .ok_or(XynokEcsError::ComponentStateNotAvailable(std::any::type_name::<T::StorageType>(), "added"))?;
-        Ok(unsafe { self.get_bit_unchecked(offset, row) })
+        Ok(unsafe { self.get_changed_tick_unchecked(offset, row) })
     }
     #[inline]
-    pub(crate) fn set_added_bit<T: TComponent + 'static>(&mut self, layout: &ChunkLayout, row: usize, value: bool) -> Result<(), XynokEcsError>
+    pub(crate) fn set_added_tick<T: TComponent + 'static>(&mut self, layout: &ChunkLayout, row: usize, tick: ChangedTick) -> Result<(), XynokEcsError>
     {
         let offset = self
             .state_offset::<T>(layout)?
             .added_offset
             .ok_or(XynokEcsError::ComponentStateNotAvailable(std::any::type_name::<T::StorageType>(), "added"))?;
-        unsafe { self.set_bit_unchecked(offset, row, value) };
+        unsafe { self.set_changed_tick_unchecked(offset, row, tick) };
         Ok(())
     }
 

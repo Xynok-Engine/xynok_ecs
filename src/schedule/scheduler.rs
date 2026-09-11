@@ -119,12 +119,19 @@ impl TScheduler for DefaultScheduler
 #[track_caller]
 fn run_system(system: &mut SystemTypeStorage, world: HeapMut<World>)
 {
+    // one tick per system run: every write this system makes is stamped with the same tick, and
+    // the next system (even a concurrent one in the same parallel group) sees a strictly later
+    // one - `advance_tick` is an atomic increment, so this is race-free across threads
+    let this_run = world.as_ref_mut().advance_tick();
+
     match system.run(world)
     {
         Ok(_) =>
         {}
         Err(e) => panic!("{}", e),
     }
+
+    system.set_last_run_tick(this_run);
 }
 
 #[track_caller]

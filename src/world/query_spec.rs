@@ -1,5 +1,6 @@
 use std::any::TypeId;
 
+use crate::apis::constants::ChangedTick;
 use crate::apis::params::ComponentSpecs;
 use crate::collection::sequence_value_hash_map::SequenceValueHashMap;
 use crate::query::access_scope::AccessScope;
@@ -35,6 +36,10 @@ pub struct QuerySpecAccessor<'a>
     pub queries:         &'a QuerySpecs,
     pub archetypes:      &'a ArchetypeSpecs,
     pub component_specs: &'a ComponentSpecs,
+    /// The tick as of this *system's* previous run (not any other system's), copied from
+    /// `World::current_system_last_run` when this accessor was built. `Changed`/`Added` query
+    /// filters compare a row's tick against this.
+    pub last_run_tick:   ChangedTick,
 }
 
 impl<'a> QuerySpecAccessor<'a>

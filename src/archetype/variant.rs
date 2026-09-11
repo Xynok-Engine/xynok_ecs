@@ -1,5 +1,6 @@
 use crate::{
     apis::{
+        constants::ChangedTick,
         identifies::XynokEcsError,
         traits::{TArchetype, TComponent, TComponentDescriptor},
     },
@@ -12,9 +13,9 @@ impl<T: TComponent + 'static> TArchetype for T
     const QUERY_TYPE_IDS: &[std::any::TypeId] = &[TypeId::of::<T::QueryType>()];
     const STORAGE_TYPE_IDS: &[std::any::TypeId] = &[TypeId::of::<T::StorageType>()];
 
-    fn write_at(layout: &ChunkLayout, chunk: &mut crate::chunk::Chunk, write_idx: usize, val: Self) -> Result<(), XynokEcsError>
+    fn write_at(layout: &ChunkLayout, chunk: &mut crate::chunk::Chunk, write_idx: usize, val: Self, tick: ChangedTick) -> Result<(), XynokEcsError>
     {
-        unsafe { chunk.write_at::<T>(layout, write_idx, val) }
+        unsafe { chunk.write_at::<T>(layout, write_idx, val, tick) }
     }
 
     fn take_from(layout: &ChunkLayout, chunk: &mut crate::chunk::Chunk, idx: usize) -> Result<Self, XynokEcsError>
@@ -22,9 +23,9 @@ impl<T: TComponent + 'static> TArchetype for T
         unsafe { chunk.take_at::<T>(layout, idx) }
     }
 
-    fn replace_at(layout: &ChunkLayout, chunk: &mut crate::chunk::Chunk, row: usize, val: Self) -> Result<(), XynokEcsError>
+    fn replace_at(layout: &ChunkLayout, chunk: &mut crate::chunk::Chunk, row: usize, val: Self, tick: ChangedTick) -> Result<(), XynokEcsError>
     {
-        unsafe { chunk.replace_at::<T>(layout, row, val) }
+        unsafe { chunk.replace_at::<T>(layout, row, val, tick) }
     }
 }
 
@@ -40,11 +41,11 @@ macro_rules! tuple_arch {
             const QUERY_TYPE_IDS: &[std::any::TypeId] = &[$(TypeId::of::<$component::QueryType>(),)*];
             const STORAGE_TYPE_IDS: &[std::any::TypeId] = &[$(TypeId::of::<$component::StorageType>(),)*];
 
-            fn write_at(layout: &ChunkLayout, chunk: &mut crate::chunk::Chunk, write_idx: usize, val: Self) -> Result<(), XynokEcsError>
+            fn write_at(layout: &ChunkLayout, chunk: &mut crate::chunk::Chunk, write_idx: usize, val: Self, tick: ChangedTick) -> Result<(), XynokEcsError>
             {
                 unsafe
                 {
-                    $(chunk.write_at::<$component>(layout, write_idx, val.$idx)?;)*
+                    $(chunk.write_at::<$component>(layout, write_idx, val.$idx, tick)?;)*
                 }
                 Ok(())
             }
@@ -54,11 +55,11 @@ macro_rules! tuple_arch {
                 unsafe { Ok(($(chunk.take_at::<$component>(layout, idx)?,)*)) }
             }
 
-            fn replace_at(layout: &ChunkLayout, chunk: &mut crate::chunk::Chunk, row: usize, val: Self) -> Result<(), XynokEcsError>
+            fn replace_at(layout: &ChunkLayout, chunk: &mut crate::chunk::Chunk, row: usize, val: Self, tick: ChangedTick) -> Result<(), XynokEcsError>
             {
                 unsafe
                 {
-                    $(chunk.replace_at::<$component>(layout, row, val.$idx)?;)*
+                    $(chunk.replace_at::<$component>(layout, row, val.$idx, tick)?;)*
                 }
                 Ok(())
             }

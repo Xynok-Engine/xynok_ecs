@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 
+use crate::apis::constants::ChangedTick;
 use crate::apis::identifies::XynokEcsError;
 use crate::apis::params::{
     ArchetypeTakeAndRemoveComponentParams, ArchetypeTakeAndWriteComponentParams, ChunkTakeComponentParams, ComponentSpecs, EntityInChunkIndices,
@@ -36,7 +37,7 @@ impl Archetype
     ///
     /// `StorageType = T` restricts this to archetypes whose value is already in storage form.
     /// Query-only wrappers (e.g. `Disabled<Hp>`, where `StorageType = Hp`) are therefore not writable.
-    pub fn push<T: TArchetype + 'static>(&mut self, layout: &ChunkLayout, e: Entity, val: T) -> Result<EntityInChunkIndices, XynokEcsError>
+    pub fn push<T: TArchetype + 'static>(&mut self, layout: &ChunkLayout, e: Entity, val: T, tick: ChangedTick) -> Result<EntityInChunkIndices, XynokEcsError>
     {
         let free_chunk_idx = self.take_a_free_chunk_idx(layout);
 
@@ -44,7 +45,7 @@ impl Archetype
 
         let idx_in_chunk = unsafe {
             let idx_in_chunk = chunk.len();
-            T::write_at(layout, chunk, idx_in_chunk, val)?;
+            T::write_at(layout, chunk, idx_in_chunk, val, tick)?;
             let dst_e = chunk.get_entity_uncheck_mut(layout, idx_in_chunk);
             *dst_e = e;
             chunk.increase_len();
@@ -116,7 +117,7 @@ impl Archetype
                 }
             };
 
-            T::write_at(params.dst_layout, chunk, idx_in_chunk, params.write_val)?;
+            T::write_at(params.dst_layout, chunk, idx_in_chunk, params.write_val, params.tick)?;
 
             chunk.increase_len();
             src_chunk.decrease_len();
@@ -140,10 +141,10 @@ impl Archetype
     }
     /// used by merge_component() when every component of `T` is already present in this archetype:
     /// overwrites the existing values of the row in place, dropping the old ones, without moving the entity
-    pub fn replace_at<T: TArchetype + 'static>(&mut self, layout: &ChunkLayout, chunk_idx: usize, idx_in_chunk: usize, val: T) -> Result<(), XynokEcsError>
+    pub fn replace_at<T: TArchetype + 'static>(&mut self, layout: &ChunkLayout, chunk_idx: usize, idx_in_chunk: usize, val: T, tick: ChangedTick) -> Result<(), XynokEcsError>
     {
         let chunk = unsafe { self.chunks.get_unchecked_mut(chunk_idx) };
-        T::replace_at(layout, chunk, idx_in_chunk, val)
+        T::replace_at(layout, chunk, idx_in_chunk, val, tick)
     }
     pub fn take_and_remove_from<T: TArchetype + 'static>(
         &mut self,

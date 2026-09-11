@@ -1,7 +1,7 @@
 use std::{any::TypeId, marker::PhantomData};
 
 use crate::{
-    apis::{traits::TArchetype, ComponentDescriptor},
+    apis::{constants::ChangedTick, traits::TArchetype, ComponentDescriptor},
     archetype::Archetype,
     chunk::{layout::ChunkLayout, Chunk},
     collection::sequence_value_hash_map::SequenceValueHashMap,
@@ -43,6 +43,7 @@ pub struct ArchetypeTakeAndWriteComponentParams<'a, T: TArchetype + 'static>
     pub dst_layout:      &'a ChunkLayout,
     pub component_specs: &'a ComponentSpecs,
     pub write_val:       T,
+    pub tick:            ChangedTick,
 }
 pub struct ArchetypeTakeAndRemoveComponentParams<'a, T: TArchetype + 'static>
 {

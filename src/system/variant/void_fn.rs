@@ -1,5 +1,6 @@
 use xynok_std::unsafe_ptr::HeapMut;
 
+use crate::apis::constants::ChangedTick;
 use crate::apis::identifies::XynokEcsError;
 use crate::apis::params::ComponentSpecs;
 use crate::query::access_scope::AccessScopes;
@@ -20,7 +21,7 @@ impl<F: Fn() + Send + Sync + 'static> TSystem for SystemAlias<F, ()>
 
     fn run(&mut self, _world: HeapMut<World>) -> Result<(), XynokEcsError>
     {
-        (self.0)();
+        (self.func)();
         Ok(())
     }
 
@@ -33,12 +34,25 @@ impl<F: Fn() + Send + Sync + 'static> TSystem for SystemAlias<F, ()>
     {
         Ok(())
     }
+
+    fn last_run_tick(&self) -> ChangedTick
+    {
+        self.last_run_tick
+    }
+    fn set_last_run_tick(&mut self, tick: ChangedTick)
+    {
+        self.last_run_tick = tick;
+    }
 }
 
 impl<F: Fn() + Send + Sync + 'static> TIntoSystem<()> for F
 {
     fn into_system(self) -> Result<SystemTypeStorage, XynokEcsError>
     {
-        Ok(Box::new(SystemAlias(self, ParamAlias::<()>::default())))
+        Ok(Box::new(SystemAlias {
+            func:          self,
+            params:        ParamAlias::<()>::default(),
+            last_run_tick: 0,
+        }))
     }
 }

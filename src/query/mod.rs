@@ -2,8 +2,8 @@ use crate::apis::identifies::XynokEcsError;
 use crate::apis::internal_traits::{TQueryParam, TReadOnlyQueryParam};
 use crate::apis::traits::TArchetype;
 use crate::query::query_iter::QueryIter;
-use crate::world::query_spec::QuerySpecAccessor;
 use crate::world::World;
+use crate::world::query_spec::QuerySpecAccessor;
 use std::marker::PhantomData;
 
 pub mod query_iter;
@@ -11,7 +11,8 @@ pub mod query_iter;
 pub(crate) mod access_scope;
 pub(crate) mod src_access;
 pub(crate) mod src_access_enable;
-pub(crate) mod src_access_change;
+pub(crate) mod src_access_changed;
+pub(crate) mod src_access_added;
 mod tuple;
 mod variant;
 
@@ -66,9 +67,9 @@ impl<'a, T: TReadOnlyQueryParam + 'static> Copy for Query<'a, T> {}
 
 impl<'a, T: TQueryParam + 'static> Query<'a, T>
 {
-    pub(crate) fn new(world: &'a mut World) -> Result<Self, XynokEcsError>
+    pub(crate) fn new(world: &'a mut World, last_run_tick: crate::apis::constants::ChangedTick) -> Result<Self, XynokEcsError>
     {
-        let accessor = world.get_or_create_query_src_access::<T>()?;
+        let accessor = world.get_or_create_query_src_access::<T>(last_run_tick)?;
         Ok(Self {
             accessor: accessor,
             phantom:  PhantomData,

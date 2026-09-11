@@ -50,9 +50,9 @@ pub trait TArchetype: Sized
     const QUERY_TYPE_IDS: &[TypeId];
     const STORAGE_TYPE_IDS: &[TypeId];
 
-    fn write_at(layout: &ChunkLayout, chunk: &mut Chunk, write_idx: usize, val: Self) -> Result<(), XynokEcsError>;
+    fn write_at(layout: &ChunkLayout, chunk: &mut Chunk, write_idx: usize, val: Self, tick: crate::apis::constants::ChangedTick) -> Result<(), XynokEcsError>;
+    fn replace_at(layout: &ChunkLayout, chunk: &mut Chunk, row: usize, val: Self, tick: crate::apis::constants::ChangedTick) -> Result<(), XynokEcsError>;
     fn take_from(layout: &ChunkLayout, chunk: &mut Chunk, idx: usize) -> Result<Self, XynokEcsError>;
-    fn replace_at(layout: &ChunkLayout, chunk: &mut Chunk, row: usize, val: Self) -> Result<(), XynokEcsError>;
 }
 
 pub trait TEnablableComponent {}

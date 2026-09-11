@@ -30,13 +30,22 @@ macro_rules! mutiple_param_system {
             }
             fn prepare(&self, world: HeapMut<World>) -> Result<(), XynokEcsError>
             {
-                $(let _= $name::init(world)?;)*
+                $(let _= $name::init(world, self.last_run_tick)?;)*
                 Ok(())
             }
             fn run(&mut self, world: HeapMut<World>)-> Result<(), XynokEcsError>
             {
-                (self.0)($($name::init(world)?,)*);
+                let last_run_tick = self.last_run_tick;
+                (self.func)($($name::init(world, last_run_tick)?,)*);
                 Ok(())
+            }
+            fn last_run_tick(&self) -> crate::apis::constants::ChangedTick
+            {
+                self.last_run_tick
+            }
+            fn set_last_run_tick(&mut self, tick: crate::apis::constants::ChangedTick)
+            {
+                self.last_run_tick = tick;
             }
         }
 
@@ -46,7 +55,11 @@ macro_rules! mutiple_param_system {
         {
             fn into_system(self) -> Result<SystemTypeStorage, XynokEcsError>
             {
-                Ok(Box::new(SystemAlias(self, ParamAlias::<($($name,)*)>::default())))
+                Ok(Box::new(SystemAlias {
+                    func:          self,
+                    params:        ParamAlias::<($($name,)*)>::default(),
+                    last_run_tick: 0,
+                }))
             }
         }
     };

@@ -1,9 +1,11 @@
 use std::any::TypeId;
 use std::collections::HashMap;
 use std::marker::PhantomData;
+use std::sync::atomic::Ordering;
 
 use xynok_std::collection::Queue;
 
+use crate::apis::constants::{AtomicChangedTick, ChangedTick};
 use crate::apis::identifies::XynokEcsError;
 use crate::apis::internal_traits::TQueryParam;
 use crate::apis::params::{
@@ -43,6 +45,10 @@ pub struct World
     free_entities:            Queue<usize>,
     temp_alloc:               WorldTempAllocation,
     global_archetype_version: SafeCounter,
+    // atomic because a parallel system group calls `advance_tick` from multiple threads at once
+    // (see `schedule::scheduler::run_system_group`); only uniqueness/monotonicity is required
+    // between systems, not any particular ordering, so `Relaxed` is enough
+    tick:                     AtomicChangedTick,
 }
 impl Default for World
 {
@@ -58,6 +64,7 @@ impl Default for World
             free_entities:            Queue::new(),
             temp_alloc:               WorldTempAllocation::new(),
             global_archetype_version: SafeCounter::new(1, usize::MAX - 1),
+            tick:                     AtomicChangedTick::new(0),
         }
     }
 }
@@ -86,9 +93,10 @@ impl World
             Ok(r) => r,
             Err(e) => panic!("{}", e),
         };
+        let tick = self.current_tick();
         let (arch_id, arch_spec) = self.get_or_create_archetype_spec_mut::<T>();
 
-        let entity_chunk_indices = match arch_spec.arch.push(&arch_spec.layout, new_e, val)
+        let entity_chunk_indices = match arch_spec.arch.push(&arch_spec.layout, new_e, val, tick)
         {
             Ok(r) => r,
             Err(e) => panic!("{}", e),
@@ -186,6 +194,7 @@ impl World
         // put back
         self.temp_alloc.vec_usize = component_set;
 
+        let tick = self.current_tick();
         let src_idx = self.archetypes.index_of(&a_arch_id).unwrap();
         let target_idx = self.archetypes.index_of(&target_arch_id).unwrap();
         let [src_arch_spec, target_arch_spec] = self.archetypes.values_mut_slice().get_disjoint_mut([src_idx, target_idx]).unwrap();
@@ -201,6 +210,7 @@ impl World
             dst_layout:      &target_arch_spec.layout,
             component_specs: &self.component_counter,
             write_val:       val,
+            tick:            tick,
         };
         let take_and_write_result = match target_arch_spec.arch.take_and_write_from(params)
         {
@@ -245,11 +255,13 @@ impl World
         // put back
         self.temp_alloc.vec_usize = component_set;
 
+        let tick = self.current_tick();
+
         // every component of `T` is already part of `e`'s archetype: overwrite the row in place, no move needed
         if target_arch_id == a_arch_id
         {
             let arch_spec = self.archetypes.get_mut(&a_arch_id).unwrap();
-            match arch_spec.arch.replace_at(&arch_spec.layout, a_chunk_idx, a_idx_in_chunk, val)
+            match arch_spec.arch.replace_at(&arch_spec.layout, a_chunk_idx, a_idx_in_chunk, val, tick)
             {
                 Ok(_) =>
                 {}
@@ -273,6 +285,7 @@ impl World
             dst_layout:      &target_arch_spec.layout,
             component_specs: &self.component_counter,
             write_val:       val,
+            tick:            tick,
         };
         let take_and_write_result = match target_arch_spec.arch.take_and_write_from(params)
         {
@@ -388,7 +401,9 @@ impl World
     #[track_caller]
     pub fn create_query<'a, T: TQueryParam + 'static>(&'a mut self) -> Query<'a, T>
     {
-        match Query::new(self)
+        // not run through a system, so there is no "last run" to compare against; `0` is the
+        // same value change-detection storage starts zeroed to, so nothing looks pre-changed
+        match Query::new(self, 0)
         {
             Ok(r) => r,
             Err(e) => panic!("{}", e),
@@ -402,7 +417,31 @@ impl World
     {
         &mut self.component_counter
     }
-    pub(crate) fn get_or_create_query_src_access<'a, T: TQueryParam + 'static>(&'a mut self) -> Result<QuerySpecAccessor<'a>, XynokEcsError>
+
+    /// The tick as of the last call to [`advance_tick`](Self::advance_tick). Change-detection
+    /// storage (`added`/`changed`) starts zeroed, so `0` permanently means "never touched" and
+    /// is never handed out by `advance_tick`.
+    #[inline]
+    pub(crate) fn current_tick(&self) -> ChangedTick
+    {
+        self.tick.load(Ordering::Relaxed)
+    }
+
+    /// Moves the world's tick forward and returns the new value. Called once per system run
+    /// (see `schedule::scheduler::run_system`), the same granularity Bevy advances its
+    /// `change_tick` at: every write within one system run is stamped with that one tick, and
+    /// two different systems always see two different ticks even if they run back to back - even
+    /// when they run concurrently in the same parallel group, since this is an atomic increment
+    #[inline]
+    pub(crate) fn advance_tick(&self) -> ChangedTick
+    {
+        self.tick.fetch_add(1, Ordering::Relaxed) + 1
+    }
+
+    pub(crate) fn get_or_create_query_src_access<'a, T: TQueryParam + 'static>(
+        &'a mut self,
+        last_run_tick: ChangedTick,
+    ) -> Result<QuerySpecAccessor<'a>, XynokEcsError>
     {
         let current_global_arch_version = self.global_archetype_version.current_val();
 
@@ -448,6 +487,7 @@ impl World
             queries:         &this.query_counter,
             archetypes:      &this.archetypes,
             component_specs: &this.component_counter,
+            last_run_tick:   last_run_tick,
         })
     }
 }

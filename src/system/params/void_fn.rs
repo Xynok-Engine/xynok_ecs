@@ -1,5 +1,6 @@
 use xynok_std::unsafe_ptr::HeapMut;
 
+use crate::apis::constants::ChangedTick;
 use crate::apis::identifies::XynokEcsError;
 use crate::apis::params::ComponentSpecs;
 use crate::query::access_scope::AccessScopes;
@@ -15,7 +16,7 @@ impl TSystemParam for ()
         Ok(())
     }
 
-    fn init(_world: HeapMut<World>) -> Result<Self, XynokEcsError>
+    fn init(_world: HeapMut<World>, _last_run_tick: ChangedTick) -> Result<Self, XynokEcsError>
     {
         Ok(())
     }
