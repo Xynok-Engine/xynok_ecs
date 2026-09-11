@@ -22,6 +22,13 @@ pub trait TQueryParam
         Self::SrcAccess::new(accessor)
     }
 }
+/// Marker for read-only queries (`&T`, or tuples where all elements are `&T`).
+///
+/// `Query<T>` can only be `Clone` or `Copy` if `T` implements this trait. The reason is that each copy creates a new iterator starting from the beginning. If we allowed this for `&mut T`, two copies would produce two `&mut` references pointing to the same component. Multiple `&T` references at once are perfectly fine.
+///
+/// # Safety
+/// Only implement this for parameters where `QueryItem` does not allow writing to the component. Implementing this for a parameter containing `&mut` would lead to `&mut` aliasing within safe code.
+pub unsafe trait TReadOnlyQueryParam: TQueryParam {}
 
 pub trait TQueryColumn: TQueryParam
 {

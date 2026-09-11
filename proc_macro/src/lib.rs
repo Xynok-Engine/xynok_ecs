@@ -1,6 +1,7 @@
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{parse_macro_input, punctuated::Punctuated, DeriveInput, Ident, Token};
+use syn::punctuated::Punctuated;
+use syn::{parse_macro_input, DeriveInput, Ident, Token};
 
 #[proc_macro_attribute]
 pub fn component(args: TokenStream, input: TokenStream) -> TokenStream
@@ -23,7 +24,7 @@ pub fn component(args: TokenStream, input: TokenStream) -> TokenStream
         }
     };
 
-    const KNOWN: &[&str] = &["shared"];
+    const KNOWN: &[&str] = &["enableable", "changeable"];
     for flag in &flags
     {
         if !KNOWN.contains(&flag.to_string().as_str())
@@ -34,16 +35,10 @@ pub fn component(args: TokenStream, input: TokenStream) -> TokenStream
         }
     }
 
-    let is_archetype = flags.iter().any(|f| f == "archetype");
+    //let is_enableable = flags.iter().any(|f| f == "enableable");
+    //let is_changeable = flags.iter().any(|f| f == "changeable");
 
-    let location = if is_archetype
-    {
-        quote! { xynok_ecs::apis::identifies::StorageLocation::Archetype }
-    }
-    else
-    {
-        quote! { xynok_ecs::apis::identifies::StorageLocation::Chunk }
-    };
+    let location = quote! { xynok_ecs::apis::identifies::StorageLocation::Chunk };
 
     let expanded = quote! {
         #input

@@ -2,7 +2,7 @@ use std::any::TypeId;
 use std::marker::PhantomData;
 
 use crate::apis::identifies::XynokEcsError;
-use crate::apis::internal_traits::{TQueryColumn, TQueryParam, TQuerySrcAccess};
+use crate::apis::internal_traits::{TQueryColumn, TQueryParam, TQuerySrcAccess, TReadOnlyQueryParam};
 use crate::apis::params::ComponentSpecs;
 use crate::apis::traits::TComponent;
 use crate::query::access_scope::AccessScope;
@@ -134,6 +134,8 @@ macro_rules! impl_tuple_query_param {
                 src_access.next()
             }
         }
+        // SAFETY: a tuple is read-only exactly when every element in it is read-only
+        unsafe impl<$($q: TQueryColumn + TReadOnlyQueryParam),+> TReadOnlyQueryParam for ($($q,)+) {}
     };
 }
 

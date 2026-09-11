@@ -1,7 +1,7 @@
 use std::any::TypeId;
 
 use crate::apis::identifies::XynokEcsError;
-use crate::apis::internal_traits::{TQueryColumn, TQueryParam};
+use crate::apis::internal_traits::{TQueryColumn, TQueryParam, TReadOnlyQueryParam};
 use crate::apis::params::ComponentSpecs;
 use crate::apis::traits::TComponent;
 use crate::query::access_scope::AccessScope;
@@ -29,6 +29,9 @@ impl<T: TComponent + 'static> TQueryParam for &T
         src_access.next::<T>()
     }
 }
+// SAFETY: `&T` only hands out `&'a T`, nothing can be written through it
+unsafe impl<T: TComponent + 'static> TReadOnlyQueryParam for &T {}
+
 impl<T: TComponent + 'static> TQueryParam for &mut T
 {
     type QueryItem<'a> = &'a mut T;

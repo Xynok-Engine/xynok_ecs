@@ -356,8 +356,37 @@ impl World
         result.val
     }
 
+    /// Builds a query over the world's current state.
+    ///
+    /// The query borrows the world mutably for as long as it lives, so treat it as a short lived
+    /// value: create it, iterate it, let it go.
+    ///
+    /// ```
+    /// use xynok_ecs::world::World;
+    /// #[xynok_ecs::component]
+    /// struct Hp(u32);
+    /// let mut w = World::default();
+    /// w.create(Hp(1));
+    /// for _ in w.create_query::<&Hp>()
+    /// {}
+    /// w.create(Hp(2));
+    /// for _ in w.create_query::<&Hp>()
+    /// {}
+    /// ```
+    ///
+    /// Keeping a query around while the world changes does not compile:
+    ///
+    /// ```compile_fail
+    /// use xynok_ecs::world::World;
+    /// #[xynok_ecs::component]
+    /// struct Hp(u32);
+    /// let mut w = World::default();
+    /// let query = w.create_query::<&Hp>();
+    /// w.create(Hp(1));
+    /// for _ in query {}
+    /// ```
     #[track_caller]
-    pub fn create_query<'a, T: TQueryParam + 'static>(&mut self) -> Query<'a, T>
+    pub fn create_query<'a, T: TQueryParam + 'static>(&'a mut self) -> Query<'a, T>
     {
         match Query::new(self)
         {
@@ -373,7 +402,7 @@ impl World
     {
         &mut self.component_counter
     }
-    pub(crate) fn get_or_create_query_src_access<'a, T: TQueryParam + 'static>(&mut self) -> Result<QuerySpecAccessor<'a>, XynokEcsError>
+    pub(crate) fn get_or_create_query_src_access<'a, T: TQueryParam + 'static>(&'a mut self) -> Result<QuerySpecAccessor<'a>, XynokEcsError>
     {
         let current_global_arch_version = self.global_archetype_version.current_val();
 
@@ -411,11 +440,14 @@ impl World
             query_spec.version = current_global_arch_version;
         }
 
+        // every mutation is done, so the exclusive borrow can turn into the shared one the
+        // accessor keeps for `'a`
+        let this: &'a World = self;
         Ok(QuerySpecAccessor {
             query_idx:       query_idx,
-            queries:         unsafe { &*(&self.query_counter as *const QuerySpecs) },
-            archetypes:      unsafe { &*(&self.archetypes as *const ArchetypeSpecs) },
-            component_specs: unsafe { &*(&self.component_counter as *const ComponentSpecs) },
+            queries:         &this.query_counter,
+            archetypes:      &this.archetypes,
+            component_specs: &this.component_counter,
         })
     }
 }

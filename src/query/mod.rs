@@ -1,5 +1,5 @@
 use crate::apis::identifies::XynokEcsError;
-use crate::apis::internal_traits::TQueryParam;
+use crate::apis::internal_traits::{TQueryParam, TReadOnlyQueryParam};
 use crate::apis::traits::TArchetype;
 use crate::query::query_iter::QueryIter;
 use crate::world::query_spec::QuerySpecAccessor;
@@ -13,26 +13,58 @@ mod src_access;
 mod tuple;
 mod variant;
 
+/// A `Query` is `Copy` only when it is read-only:
+///
+/// ```
+/// use xynok_ecs::query::Query;
+/// fn needs_copy<T: Copy>() {}
+/// #[xynok_ecs::component]
+/// struct Hp(u32);
+/// #[xynok_ecs::component]
+/// struct Mana(u32);
+/// needs_copy::<Query<'static, &Hp>>();
+/// needs_copy::<Query<'static, (&Hp, &Mana)>>();
+/// ```
+///
+/// Any `&mut` in the query makes it non-copyable:
+///
+/// ```compile_fail
+/// use xynok_ecs::query::Query;
+/// fn needs_copy<T: Copy>() {}
+/// #[xynok_ecs::component]
+/// struct Hp(u32);
+/// needs_copy::<Query<'static, &mut Hp>>();
+/// ```
+///
+/// ```compile_fail
+/// use xynok_ecs::query::Query;
+/// fn needs_copy<T: Copy>() {}
+/// #[xynok_ecs::component]
+/// struct Hp(u32);
+/// #[xynok_ecs::component]
+/// struct Mana(u32);
+/// needs_copy::<Query<'static, (&Hp, &mut Mana)>>();
+/// ```
 pub struct Query<'a, T: TQueryParam + 'static>
 {
     accessor: QuerySpecAccessor<'a>,
     phantom:  PhantomData<T>,
 }
 
-// Not derived: `#[derive(Clone, Copy)]` would add a spurious `T: Clone + Copy` bound, which
-// breaks queries like `Query<&mut Hp>` even though neither field actually depends on it
-impl<'a, T: TQueryParam + 'static> Clone for Query<'a, T>
+// Only read-only queries may be copied. Every copy starts its own iterator from row 0, so a
+// copyable `Query<&mut Hp>` would hand out two `&mut Hp` for the same entity.
+impl<'a, T: TReadOnlyQueryParam + 'static> Clone for Query<'a, T>
 {
     fn clone(&self) -> Self
     {
         *self
     }
 }
-impl<'a, T: TQueryParam + 'static> Copy for Query<'a, T> {}
+impl<'a, T: TReadOnlyQueryParam + 'static> Copy for Query<'a, T> {}
 
 impl<'a, T: TQueryParam + 'static> Query<'a, T>
 {
-    pub(crate) fn new(world: &mut World) -> Result<Self, XynokEcsError>
+    pub(crate) fn new(world: &'a mut World) -> Result<Self, XynokEcsError>
     {
         let accessor = world.get_or_create_query_src_access::<T>()?;
         Ok(Self {

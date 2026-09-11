@@ -26,10 +26,10 @@ fn register_many_archetypes(w: &mut World)
     w.register_archetype::<(Hp, Mana, Marker)>();
 }
 
-/// entities exist BEFORE the query is built, so `QuerySpec.archetypes` is non-empty from the
-/// start. Only the *address* of that Vec is under test here, not its freshness.
+/// A query is a short lived value, so each read builds a fresh one. After the query registry has
+/// rehashed and new archetypes holding `Hp` appeared, a fresh query must still find every row.
 #[test]
-fn t_vec_addr_survives_query_counter_rehash()
+fn t_fresh_query_reads_correctly_after_query_counter_rehash()
 {
     let mut w = World::default();
     let expected: u32 = (0..10u32)
@@ -38,8 +38,8 @@ fn t_vec_addr_survives_query_counter_rehash()
         })
         .sum();
 
-    let query = w.create_query::<&Hp>();
-    assert_eq!(query.into_iter().map(|hp| hp.0).sum::<u32>(), expected, "sanity");
+    let sum: u32 = w.create_query::<&Hp>().into_iter().map(|hp| hp.0).sum();
+    assert_eq!(sum, expected, "sanity");
 
     // force the query_counter map well past several growth boundaries
     let _ = w.create_query::<&Mana>();
@@ -57,10 +57,11 @@ fn t_vec_addr_survives_query_counter_rehash()
 
     w.create((Hp(1), Mana(2)));
     w.create((Pos { x: 1f32, y: 1f32 }, Mana(2)));
+    // `(Hp(1), Mana(2))` lives in a new archetype, and a fresh query has to pick it up
     assert_eq!(
-        query.into_iter().map(|hp| hp.0).sum::<u32>(),
-        expected,
-        "the Vec behind the accessor moved during rehash"
+        w.create_query::<&Hp>().into_iter().map(|hp| hp.0).sum::<u32>(),
+        expected + 1,
+        "a fresh query missed rows after the registry rehashed"
     );
 }
 
@@ -110,13 +111,13 @@ fn t_query_reads_correctly_after_new_archetypes()
         })
         .sum();
 
-    let query = w.create_query::<&Hp>();
-    assert_eq!(query.into_iter().map(|hp| hp.0).sum::<u32>(), expected, "sanity");
+    let sum: u32 = w.create_query::<&Hp>().into_iter().map(|hp| hp.0).sum();
+    assert_eq!(sum, expected, "sanity");
 
     register_many_archetypes(&mut w);
 
     assert_eq!(
-        query.into_iter().map(|hp| hp.0).sum::<u32>(),
+        w.create_query::<&Hp>().into_iter().map(|hp| hp.0).sum::<u32>(),
         expected,
         "query read through a relocated ArchetypeSpec"
     );

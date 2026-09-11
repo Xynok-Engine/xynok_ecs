@@ -1524,18 +1524,18 @@ source = "git+https://github.com/Xynok-Engine/xynok_concurrency.git#6ac3d6d72bfd
 dependencies = [
  "loom",
  "paste",
- "xynok_std 0.1.19",
+ "xynok_std",
 ]
 
 [[package]]
 name = "xynok_ecs"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "thiserror",
  "xynok_concurrency",
  "xynok_ecs",
  "xynok_ecs_proc_macro",
- "xynok_std 0.1.19",
+ "xynok_std",
 ]
 
 [[package]]
@@ -1548,7 +1548,7 @@ dependencies = [
  "serde",
  "serde_json",
  "xynok_ecs",
- "xynok_std 0.1.17",
+ "xynok_std",
 ]
 
 [[package]]
@@ -1562,19 +1562,6 @@ dependencies = [
 
 [[package]]
 name = "xynok_std"
-version = "0.1.17"
-source = "git+https://github.com/Xynok-Engine/xynok_std.git?tag=v0.1.17#7d4f09a229c1fe4661692896b7112af8c8c9d27d"
-dependencies = [
- "log",
- "paste",
- "serde",
- "thiserror",
- "toml",
- "xynok_std_proc_macro 0.0.1 (git+https://github.com/Xynok-Engine/xynok_std.git?tag=v0.1.17)",
-]
-
-[[package]]
-name = "xynok_std"
 version = "0.1.19"
 source = "git+https://github.com/Xynok-Engine/xynok_std.git#c8416c99756f63621a213bb87aa9a4b04b77e702"
 dependencies = [
@@ -1583,17 +1570,7 @@ dependencies = [
  "serde",
  "thiserror",
  "toml",
- "xynok_std_proc_macro 0.0.1 (git+https://github.com/Xynok-Engine/xynok_std.git)",
-]
-
-[[package]]
-name = "xynok_std_proc_macro"
-version = "0.0.1"
-source = "git+https://github.com/Xynok-Engine/xynok_std.git?tag=v0.1.17#7d4f09a229c1fe4661692896b7112af8c8c9d27d"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 3.0.3",
+ "xynok_std_proc_macro",
 ]
 
 [[package]]
