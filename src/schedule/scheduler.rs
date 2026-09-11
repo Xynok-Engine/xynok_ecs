@@ -179,7 +179,7 @@ mod test
     use xynok_ecs_proc_macro::component;
     use xynok_std::unsafe_ptr::HeapPtr;
 
-    #[component]
+    #[component(EnableAble)]
     struct Hp(u64);
     #[component]
     struct Mana(u64);

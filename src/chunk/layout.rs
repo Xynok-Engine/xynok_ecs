@@ -146,7 +146,7 @@ mod test
     use std::collections::HashMap;
 
     use super::*;
-    use crate::apis::identifies::StorageLocation;
+    use crate::apis::identifies::{StateDetection, StorageLocation};
     use crate::apis::params::ComponentSpec;
 
     macro_rules! declare_component {
@@ -157,6 +157,8 @@ mod test
                 type StorageType = Self;
 
                 const STORAGE_LOCATION: StorageLocation = StorageLocation::Chunk;
+
+                const STATE_DETECTION: StateDetection = StateDetection::None;
             }
         };
     }

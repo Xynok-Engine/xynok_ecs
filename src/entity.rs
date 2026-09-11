@@ -1,7 +1,5 @@
-use crate::apis::{
-    identifies::{StorageLocation, XynokEcsError},
-    traits::TComponent,
-};
+use crate::apis::identifies::{StateDetection, StorageLocation, XynokEcsError};
+use crate::apis::traits::TComponent;
 
 /// Stores an Index and Version, packed into a u64
 /// Layout: bits 0..40 = idx (up to ~1 trillion slots), bits 40..64 = version (~16 million reuses per slot)
@@ -17,6 +15,8 @@ impl TComponent for Entity
     type QueryType = Self;
 
     const STORAGE_LOCATION: StorageLocation = StorageLocation::Chunk;
+
+    const STATE_DETECTION: crate::apis::identifies::StateDetection = StateDetection::None;
 }
 
 impl Entity

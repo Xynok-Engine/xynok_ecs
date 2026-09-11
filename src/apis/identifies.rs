@@ -1,12 +1,21 @@
 use std::alloc::LayoutError;
 use std::fmt::Debug;
-
 use thiserror::Error;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum StorageLocation
 {
     Chunk,
     Archetype,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum StateDetection
+{
+    None,
+    EnableAble,
+    ChangeAble,
+    EnableAbleAndChangeAble,
 }
 
 #[derive(Error, Debug)]

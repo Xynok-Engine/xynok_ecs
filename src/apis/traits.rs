@@ -1,6 +1,6 @@
 use std::any::TypeId;
 
-use crate::apis::identifies::{StorageLocation, XynokEcsError};
+use crate::apis::identifies::{StateDetection, StorageLocation, XynokEcsError};
 use crate::apis::ComponentDescriptor;
 use crate::chunk::layout::ChunkLayout;
 use crate::chunk::Chunk;
@@ -10,7 +10,10 @@ pub trait TComponent: Sized
     type QueryType: TComponent + 'static;
     type StorageType: TComponent + 'static;
     const STORAGE_LOCATION: StorageLocation;
+    const STATE_DETECTION: StateDetection;
 }
+pub trait TEnableAble {}
+pub trait TChangeAble {}
 
 pub trait TComponentDescriptor
 {
