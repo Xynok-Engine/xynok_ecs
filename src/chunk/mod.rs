@@ -89,14 +89,7 @@ pub(crate) unsafe fn move_state_within(chunk_ptr: *mut u8, state: &StateOffset, 
 /// component, so in practice they agree, but a state the destination does not carry simply has
 /// nowhere to go.
 #[inline]
-pub(crate) unsafe fn copy_state_across(
-    src_ptr: *const u8,
-    src_state: &StateOffset,
-    src_row: usize,
-    dst_ptr: *mut u8,
-    dst_state: &StateOffset,
-    dst_row: usize,
-)
+pub(crate) unsafe fn copy_state_across(src_ptr: *const u8, src_state: &StateOffset, src_row: usize, dst_ptr: *mut u8, dst_state: &StateOffset, dst_row: usize)
 {
     unsafe {
         if let (Some(src_offset), Some(dst_offset)) = (src_state.enable_offset, dst_state.enable_offset)
@@ -126,6 +119,11 @@ impl Chunk
     pub fn new(layout: &ChunkLayout) -> Self
     {
         let ptr = unsafe { std::alloc::alloc(layout.alloc_layout) };
+        // Panic if we fail to allocate additional memory
+        if ptr.is_null()
+        {
+            std::alloc::handle_alloc_error(layout.alloc_layout);
+        }
         unsafe {
             std::ptr::write_bytes(ptr, 0u8, layout.header.size);
         }
@@ -277,14 +275,7 @@ impl Chunk
                 // the component travels with the entity, so its state has to travel too: a
                 // disabled component must stay disabled after an `add_component`, and its
                 // added/changed ticks must keep pointing at the run that actually touched it
-                copy_state_across(
-                    src_ptr,
-                    &src_col_des.state_offset,
-                    params.from,
-                    dst_ptr,
-                    &dst_col_des.state_offset,
-                    params.to,
-                );
+                copy_state_across(src_ptr, &src_col_des.state_offset, params.from, dst_ptr, &dst_col_des.state_offset, params.to);
 
                 if !is_last
                 {
@@ -473,12 +464,8 @@ impl Chunk
             }
         }
 
-        let alloc_layout = layout.alloc_layout;
-        if alloc_layout.size() != 0
-        {
-            unsafe {
-                std::alloc::dealloc(self.ptr, alloc_layout);
-            }
+        unsafe {
+            std::alloc::dealloc(self.ptr, layout.alloc_layout);
         }
         self.len = 0;
     }
