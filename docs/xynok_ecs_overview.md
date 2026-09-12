@@ -289,6 +289,9 @@ Runnable versions: [`examples/query_state.rs`](../examples/query_state.rs) and
 
 ### System and Scheduler
 
+> [!IMPORTANT]
+> Just to be clear, the scheduler is currently a demo. You should implement your own if you want the looper to support more complex behaviors or to manage the system lifecycle more effectively.
+
 `DefaultScheduler` takes ownership of the world and runs systems grouped into sessions:
 `Start`, `PreUpdate`, `Update`, `LateUpdate`, `PreFixedUpdate`, `FixedUpdate`,
 `LateFixedUpdate`, `AppQuit`. You decide when each session runs.
@@ -338,7 +341,6 @@ pool and runs inline.
 Runnable versions: [`examples/single_thread.rs`](../examples/single_thread.rs) and
 [`examples/multi_thread.rs`](../examples/multi_thread.rs).
 
-Just to be clear, the scheduler is currently a demo. You should implement your own if you want the looper to support more complex behaviors or to manage the system lifecycle more effectively.
 
 If you do write your own, the two hooks you need are on `World`: `capture_current_tick()` gives
 you a baseline to store per system, and `create_query_since(baseline)` builds a query against
