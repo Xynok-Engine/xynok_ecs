@@ -57,6 +57,14 @@ impl EntitySpec
         self.has_value = false;
     }
 
+    /// Only for the `test-util` hook that drives a slot to the end of its version range
+    /// without spending 2^24 create/destroy rounds to get there
+    #[cfg(any(test, feature = "test-util"))]
+    pub fn force_version(&mut self, version: usize)
+    {
+        self.version = version;
+    }
+
     #[track_caller]
     pub fn update_idx_in_chunk(&mut self, from: usize, to: usize)
     {

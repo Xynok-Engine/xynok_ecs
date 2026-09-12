@@ -43,13 +43,29 @@ impl Entity
 }
 impl Entity
 {
+    /// # Errors
+    /// `version` past [`Self::MAX_VERSION`] is refused rather than clamped. Clamping is what
+    /// makes a recycled slot hand back a handle identical to the one it just retired: every
+    /// stale copy of that handle would start passing [`World::exists`] again and address
+    /// whoever lives in the slot now. The world avoids ever asking for that by retiring a slot
+    /// once its version runs out, see `World::erase_entity`.
+    ///
+    /// The lower end is still clamped up to [`Self::INITIALIZE_VERSION`], which is not the same
+    /// kind of mistake: version `0` belongs to [`Self::NULL`], so a live handle simply starts
+    /// at `1`.
+    ///
+    /// [`World::exists`]: crate::world::World::exists
     pub fn new(idx: usize, version: usize) -> Result<Self, XynokEcsError>
     {
         if idx > Self::MAX_IDX
         {
             return Err(XynokEcsError::EntityAmountOverflow(Self::MAX_IDX));
         }
-        let version = version.clamp(Self::INITIALIZE_VERSION, Self::MAX_VERSION);
+        if version > Self::MAX_VERSION
+        {
+            return Err(XynokEcsError::EntityVersionOverflow(idx, Self::MAX_VERSION));
+        }
+        let version = version.max(Self::INITIALIZE_VERSION);
         let packed = (idx as u64 & Self::IDX_MASK) | ((version as u64 & Self::VERSION_MASK) << Self::IDX_BITS);
         Ok(Self(packed))
     }
@@ -87,23 +103,38 @@ impl std::fmt::Display for Entity
 #[cfg(test)]
 mod test
 {
+    use crate::apis::identifies::XynokEcsError;
     use crate::entity::Entity;
 
-    fn new_e(v: usize) -> Entity
-    {
-        Entity::new(2, v).unwrap()
-    }
+    /// A version past the 24 bits on offer is refused, not folded back onto `MAX_VERSION`.
+    /// Folding it is what used to let a recycled slot reissue a handle it had already given
+    /// out once.
     #[test]
-    fn version_overflow()
+    fn version_past_the_maximum_is_refused()
     {
-        let e = new_e((u32::MAX - 1) as usize);
-        println!("INITIALIZE_VERSION: {}", Entity::INITIALIZE_VERSION);
-        println!("MAX_VERSION: {}", Entity::MAX_VERSION);
-        println!("ver: {}", e.version());
-        debug_assert!(e.version() == Entity::MAX_VERSION);
-        let e = new_e(u32::MAX as usize);
-        println!("ver: {}", e.version());
-        debug_assert!(e.version() == Entity::MAX_VERSION);
+        assert!(Entity::new(2, Entity::MAX_VERSION).is_ok(), "the maximum itself is still a valid version");
+
+        for version in [Entity::MAX_VERSION + 1, (u32::MAX - 1) as usize, u32::MAX as usize]
+        {
+            match Entity::new(2, version)
+            {
+                Err(XynokEcsError::EntityVersionOverflow(idx, max)) =>
+                {
+                    assert_eq!((idx, max), (2, Entity::MAX_VERSION));
+                }
+                Err(e) => panic!("wrong error for version {version}: {e}"),
+                Ok(e) => panic!("version {version} must not silently become {}", e.version()),
+            }
+        }
+    }
+
+    /// The low end is a different story: `0` is `NULL`'s, so a live handle starts at `1`
+    #[test]
+    fn version_below_the_minimum_is_lifted_to_one()
+    {
+        let e = Entity::new(2, 0).unwrap();
+        assert_eq!(e.version(), Entity::INITIALIZE_VERSION);
+        assert_ne!(e, Entity::NULL);
     }
 
     #[test]

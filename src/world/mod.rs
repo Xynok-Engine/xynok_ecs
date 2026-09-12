@@ -43,6 +43,10 @@ pub struct World
     archetype_counter:        HashMap<TypeId, usize>,
     entities:                 Vec<EntitySpec>,
     free_entities:            Queue<usize>,
+    // Slots that ran out of versions and will never be handed out again, see `erase_entity`.
+    // Kept as a plain count because nothing can be done with them, it is only here so the
+    // leak is observable rather than silent.
+    retired_entity_slots:     usize,
     temp_alloc:               WorldTempAllocation,
     global_archetype_version: SafeCounter,
     // atomic because a parallel system group calls `advance_tick` from multiple threads at once
@@ -65,6 +69,7 @@ impl Default for World
             component_set_counter:    HashMap::new(),
             query_counter:            QuerySpecs::new(),
             free_entities:            Queue::new(),
+            retired_entity_slots:     0,
             temp_alloc:               WorldTempAllocation::new(),
             global_archetype_version: SafeCounter::new(1, usize::MAX - 1),
             // starts at 1, not 0: `0` is the sentinel both change-detection storage (never
@@ -436,6 +441,20 @@ impl World
             Err(e) => panic!("{}", e),
         }
     }
+
+    /// How many entity slots have used up all of their versions and been taken out of
+    /// circulation for good (see `erase_entity`).
+    ///
+    /// Each one costs an `EntitySpec` that will never be reused, and reaching even one means a
+    /// single slot has been recycled 2^24 times. A number that keeps climbing is worth looking
+    /// at: it usually means a handful of slots are being churned in a tight create/destroy
+    /// loop, and pooling the entities would serve better than respawning them.
+    #[inline]
+    pub fn retired_entity_slot_count(&self) -> usize
+    {
+        self.retired_entity_slots
+    }
+
     /// The tick as of the last call to [`advance_tick`](Self::advance_tick), i.e. the one every
     /// write from now until the next `advance_tick` will be stamped with. Change-detection
     /// storage (`added`/`changed`) starts zeroed, so `0` permanently means "never touched" and
@@ -583,13 +602,31 @@ impl World
         let entity_spec = unsafe { self.entities.get_unchecked_mut(e.idx()) };
         *entity_spec = EntitySpec::new(arch_id, indices.chunk_idx, indices.idx_in_chunk, e.version());
     }
+    /// Marks the slot empty, and decides whether it may ever be handed out again.
+    ///
+    /// A handle is `(idx, version)`, and the version is the only thing telling this incarnation
+    /// of the slot apart from the next one. `new_entity` hands out `version + 1`, so a slot
+    /// sitting at [`Entity::MAX_VERSION`] has nothing left to distinguish itself with: reusing
+    /// it would reissue a handle identical to the one just destroyed, and every stale copy of
+    /// that handle would start passing `exists` again and address the new entity.
+    ///
+    /// So the slot is retired instead: left in `entities` but never enqueued, and `create`
+    /// takes a fresh slot at the end of the vector. The cost is one `EntitySpec` leaked per
+    /// retired slot, after 2^24 reuses *of that one slot*. That is the trade: a bounded leak
+    /// nobody can observe going wrong, rather than an unbounded correctness hole.
     fn erase_entity(&mut self, e: Entity)
     {
-        self.free_entities.enqueue(e.idx());
-        unsafe {
+        let version = unsafe {
             let e_spec = self.entities.get_unchecked_mut(e.idx());
             e_spec.errase();
+            e_spec.version()
         };
+
+        match version < Entity::MAX_VERSION
+        {
+            true => self.free_entities.enqueue(e.idx()),
+            false => self.retired_entity_slots += 1,
+        }
     }
     #[track_caller]
     fn retain_archetype_component_id_of_to(&self, arch_id: usize, component_set: &mut Vec<usize>)
@@ -645,6 +682,13 @@ impl World
         if let Some(free_idx) = self.free_entities.dequeue()
         {
             let old_slot = unsafe { self.entities.get_unchecked_mut(free_idx) };
+            // `erase_entity` only enqueues a slot with a version left to spend, so the `+ 1`
+            // cannot run past `MAX_VERSION` here and `Entity::new` has nothing to refuse
+            debug_assert!(
+                old_slot.version() < Entity::MAX_VERSION,
+                "slot {free_idx} was recycled at version {} but should have been retired",
+                old_slot.version()
+            );
             return Entity::new(free_idx, old_slot.version() + 1);
         };
         let e = Entity::new(self.entities.len(), Entity::INITIALIZE_VERSION)?;

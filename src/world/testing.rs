@@ -1,4 +1,5 @@
-//! Read-only introspection into `World`, `Archetype` and `Chunk` internals.
+//! Read-only introspection into `World`, `Archetype` and `Chunk` internals, plus the one
+//! mutating hook (`force_entity_version`) a test cannot reach any other way.
 //!
 //! Integration tests under `tests/` only see this crate's normal public API, which is not
 //! enough to check storage invariants like row-swap mapping or chunk reuse. This module is the
@@ -30,6 +31,21 @@ pub fn entity_location(w: &World, e: Entity) -> EntityLocation
         version:      spec.version(),
         has_value:    spec.has_value(),
     }
+}
+
+/// Rewrites the version stored in a live entity's slot, and hands back the handle that now
+/// matches it.
+///
+/// The one thing in here that writes. A slot only runs out of versions after 2^24 rounds of
+/// create/destroy, which no test can afford to actually perform, so this drops it at the edge
+/// of that range directly. Nothing outside `tests/` has any business calling it.
+#[track_caller]
+pub fn force_entity_version(w: &mut World, e: Entity, version: usize) -> Entity
+{
+    let spec = &mut w.entities[e.idx()];
+    assert!(spec.has_value(), "{e} is not live, there is no version to rewrite");
+    spec.force_version(version);
+    Entity::new(e.idx(), version).expect("the caller picked the version, it must be representable")
 }
 
 /// Number of distinct archetypes the world has created so far.

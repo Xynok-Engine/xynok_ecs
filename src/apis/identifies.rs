@@ -24,6 +24,9 @@ pub enum XynokEcsError
     #[error("Exceeded the maximum number of entities: {0}")]
     EntityAmountOverflow(usize),
 
+    #[error("Entity slot {0} has used up all {1} of its versions")]
+    EntityVersionOverflow(usize, usize),
+
     #[error("Archetype's component total size exceeds 16kB")]
     ArchetypeIsTooLarge,
 

@@ -145,3 +145,68 @@ fn t_destroy_every_entity_back_to_front()
         assert_entity_mapping_is_consistent(&w, &entities[..i]);
     }
 }
+
+/// The slot ABA: a handle is `(idx, version)`, and `Entity::new` used to clamp the version
+/// instead of refusing it. The 2^24-th reuse of a slot therefore reissued the exact handle it
+/// had just retired, and every stale copy of that handle went back to passing `exists` while
+/// addressing whoever lives in the slot now.
+#[test]
+fn a_slot_out_of_versions_is_retired_instead_of_reissuing_a_handle()
+{
+    let mut w = World::default();
+    let e = w.create(Hp(1));
+
+    // pretend this slot has been through every version it will ever get
+    let exhausted = testing::force_entity_version(&mut w, e, Entity::MAX_VERSION);
+    assert!(w.exists(exhausted));
+    assert_eq!(w.retired_entity_slot_count(), 0, "nothing is retired while the slot is still live");
+
+    w.destroy(exhausted);
+    assert_eq!(w.retired_entity_slot_count(), 1, "a slot with no version left must not go back into circulation");
+
+    let next = w.create(Hp(2));
+    assert_ne!(next, exhausted, "the retired handle must never be handed out a second time");
+    assert_ne!(next.idx(), exhausted.idx(), "the retired slot must not be reused at all");
+    assert!(!w.exists(exhausted), "the stale handle must stay dead");
+    assert!(w.exists(next));
+}
+
+/// The ordinary case has to keep working exactly as before: a slot with versions left is
+/// recycled, and the handle it gives back is distinguishable from the previous one.
+#[test]
+fn a_slot_with_versions_left_is_still_recycled()
+{
+    let mut w = World::default();
+    let first = w.create(Hp(1));
+    w.destroy(first);
+
+    let second = w.create(Hp(2));
+    assert_eq!(second.idx(), first.idx(), "a healthy slot is reused");
+    assert_eq!(second.version(), first.version() + 1, "and its version moves on");
+    assert!(!w.exists(first), "the old handle is dead");
+    assert!(w.exists(second));
+    assert_eq!(w.retired_entity_slot_count(), 0);
+}
+
+/// One slot running out must not drag the rest of the table down with it.
+#[test]
+fn retiring_one_slot_leaves_the_others_recyclable()
+{
+    let mut w = World::default();
+    let a = w.create(Hp(1));
+    let b = w.create(Hp(2));
+
+    let a_exhausted = testing::force_entity_version(&mut w, a, Entity::MAX_VERSION);
+    w.destroy(a_exhausted);
+    w.destroy(b);
+
+    let reused = w.create(Hp(3));
+    assert_eq!(reused.idx(), b.idx(), "b's slot still had versions to spend");
+    assert_eq!(w.retired_entity_slot_count(), 1, "only a's slot was retired");
+
+    let fresh = w.create(Hp(4));
+    assert!(
+        fresh.idx() != a.idx() && fresh.idx() != b.idx(),
+        "with the free list empty the next entity takes a brand new slot"
+    );
+}
