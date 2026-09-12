@@ -33,7 +33,7 @@ fn main()
 
     println!("\n---------------- query &mut Hp: mutate every Hp in place through the iterator");
     let hp_mut_query = world.create_query::<&mut Hp>();
-    for hp in hp_mut_query
+    for mut hp in hp_mut_query
     {
         hp.0 += 1;
     }
@@ -45,7 +45,7 @@ fn main()
 
     println!("\n---------------- query (&mut Hp, &Mana): combine a write and a read in one pass");
     let combined_query = world.create_query::<(&mut Hp, &Mana)>();
-    for (hp, mana) in combined_query
+    for (mut hp, mana) in combined_query
     {
         hp.0 += mana.0;
     }

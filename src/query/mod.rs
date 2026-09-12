@@ -2,11 +2,9 @@ use crate::apis::identifies::XynokEcsError;
 use crate::apis::internal_traits::{TQueryParam, TReadOnlyQueryParam};
 use crate::apis::traits::TArchetype;
 use crate::query::query_iter::QueryIter;
-use crate::world::World;
 use crate::world::query_spec::QuerySpecAccessor;
+use crate::world::World;
 use std::marker::PhantomData;
-
-pub mod query_iter;
 
 pub(crate) mod access_scope;
 pub(crate) mod src_access;
@@ -15,6 +13,10 @@ pub(crate) mod src_access_changed;
 pub(crate) mod src_access_added;
 mod tuple;
 mod variant;
+
+pub mod query_iter;
+pub mod filter;
+pub mod mut_ref;
 
 /// A `Query` is `Copy` only when it is read-only:
 ///
@@ -92,4 +94,81 @@ impl<'a, T: TQueryParam + 'static> IntoIterator for Query<'a, T>
 impl<'a, T: TQueryParam + 'static> Query<'a, T>
 {
     pub fn with_shared_component_filter<TFilter: TArchetype>() {}
+}
+
+#[cfg(test)]
+mod test
+{
+    use crate::apis::internal_traits::TQueryParam;
+    use crate::query::filter::{Added, Changed, Disabled, Enabled};
+    use crate::{component, world::World};
+
+    #[component(EnableAble, ChangeAble)]
+    #[derive(Default)]
+    struct Hp(#[allow(dead_code)] u32);
+
+    #[component(EnableAble, ChangeAble)]
+    #[derive(Default)]
+    struct Mana(#[allow(dead_code)] u32);
+
+    /// The world keys its query registry (and with it the access scope the scheduler reads) by
+    /// `TYPE_ID`, so two queries that touch a component differently must never share one.
+    #[test]
+    fn every_query_shape_gets_its_own_type_id()
+    {
+        let ids = [
+            <&Hp as TQueryParam>::TYPE_ID,
+            <&mut Hp as TQueryParam>::TYPE_ID,
+            <&Mana as TQueryParam>::TYPE_ID,
+            <Added<&Hp> as TQueryParam>::TYPE_ID,
+            <Added<&mut Hp> as TQueryParam>::TYPE_ID,
+            <Changed<&Hp> as TQueryParam>::TYPE_ID,
+            <Enabled<&Hp> as TQueryParam>::TYPE_ID,
+            <Disabled<&Hp> as TQueryParam>::TYPE_ID,
+            <(&Hp, &Mana) as TQueryParam>::TYPE_ID,
+            <(&Hp, &mut Mana) as TQueryParam>::TYPE_ID,
+            <(&mut Hp, &Mana) as TQueryParam>::TYPE_ID,
+            <(Changed<&Hp>, &Mana) as TQueryParam>::TYPE_ID,
+        ];
+
+        for (i, a) in ids.iter().enumerate()
+        {
+            for (j, b) in ids.iter().enumerate()
+            {
+                if i != j
+                {
+                    assert_ne!(a, b, "query shapes {i} and {j} collide on one TYPE_ID and would share a QuerySpec");
+                }
+            }
+        }
+    }
+
+    /// The same shape asked for twice must land on the same registry slot, otherwise every
+    /// `create_query` call would rebuild the archetype list from scratch.
+    #[test]
+    fn the_same_query_shape_keeps_one_type_id()
+    {
+        assert_eq!(<&Hp as TQueryParam>::TYPE_ID, <&Hp as TQueryParam>::TYPE_ID);
+        assert_eq!(<Changed<&Hp> as TQueryParam>::TYPE_ID, <Changed<&Hp> as TQueryParam>::TYPE_ID);
+    }
+
+    /// Registering the read query first must not leave the write query with a read-only scope:
+    /// the scheduler would then happily run it next to other readers of the same component.
+    #[test]
+    fn a_write_query_does_not_inherit_a_read_querys_scope()
+    {
+        let mut w = World::default();
+        w.create(Hp(1));
+
+        w.create_query::<&Hp>();
+        w.create_query::<&mut Hp>();
+
+        assert_eq!(w.registered_query_is_read_only::<&Hp>(), Some(true), "`&Hp` only reads");
+        assert_eq!(w.registered_query_is_read_only::<&mut Hp>(), Some(false), "`&mut Hp` writes");
+        assert_eq!(
+            w.registered_query_is_read_only::<Changed<&mut Hp>>(),
+            None,
+            "a shape nobody asked for must not be answered by someone else's spec"
+        );
+    }
 }

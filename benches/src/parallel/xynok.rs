@@ -37,7 +37,7 @@ pub fn build_world(entity_count: usize) -> World
 
 fn integrate(query: Query<(&mut Position, &Velocity)>)
 {
-    for (position, velocity) in query
+    for (mut position, velocity) in query
     {
         position.x += velocity.x;
         position.y += velocity.y;
@@ -46,7 +46,7 @@ fn integrate(query: Query<(&mut Position, &Velocity)>)
 
 fn tick_poison(query: Query<(&mut Health, &Poison)>)
 {
-    for (health, poison) in query
+    for (mut health, poison) in query
     {
         health.value -= poison.value;
     }
@@ -54,7 +54,7 @@ fn tick_poison(query: Query<(&mut Health, &Poison)>)
 
 fn regen_mana(query: Query<(&mut Mana, &Regen)>)
 {
-    for (mana, regen) in query
+    for (mut mana, regen) in query
     {
         mana.value = (mana.value + regen.value).min(50.0);
     }
@@ -62,7 +62,7 @@ fn regen_mana(query: Query<(&mut Mana, &Regen)>)
 
 fn drain_stamina(query: Query<(&mut Stamina, &Drain)>)
 {
-    for (stamina, drain) in query
+    for (mut stamina, drain) in query
     {
         stamina.value -= drain.value;
     }

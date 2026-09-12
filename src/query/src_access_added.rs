@@ -2,10 +2,11 @@ use std::any::TypeId;
 use std::marker::PhantomData;
 
 use crate::apis::constants::ChangedTick;
-use crate::apis::internal_traits::TQuerySrcAccess;
+use crate::apis::internal_traits::{TQueryColumn, TQuerySrcAccess};
 use crate::apis::traits::TComponent;
 use crate::archetype::Archetype;
-use crate::chunk::{read_changed_tick, write_changed_tick};
+use crate::chunk::read_changed_tick;
+use crate::query::mut_ref::WriteStamp;
 use crate::world::arch_spec::ArchetypeSpecs;
 use crate::world::query_spec::QuerySpecAccessor;
 
@@ -15,9 +16,6 @@ pub struct SrcAccessAdded<'a>
     arch_indices:         &'a [usize],
     total_arch:           usize,
     current_arch_idx:     usize,
-    // the current archetype and its column/added offsets, resolved once when we step onto
-    // that archetype (not once per chunk): every chunk of one archetype shares the same
-    // `ChunkLayout`, so the offsets are archetype-level constants, not per-chunk ones
     current_arch:         Option<&'a Archetype>,
     current_chunk_count:  usize,
     current_offset:       usize,
@@ -27,6 +25,12 @@ pub struct SrcAccessAdded<'a>
     current_chunk_len:    usize,
     current_col_ptr:      *const u8,
     current_added_ptr:    *mut u8,
+    // `Added` filters on the added region but a `&mut` row still records its write in the
+    // changed region, so both are resolved per chunk
+    current_changed_offset: Option<usize>,
+    current_changed_ptr:  *mut u8,
+    last_run_tick:        ChangedTick,
+    this_run_tick:        ChangedTick,
     _lifetime:            PhantomData<&'a ()>,
 }
 impl<'a> TQuerySrcAccess<'a> for SrcAccessAdded<'a>
@@ -48,15 +52,22 @@ impl<'a> TQuerySrcAccess<'a> for SrcAccessAdded<'a>
             current_chunk_len:    0,
             current_col_ptr:      std::ptr::null(),
             current_added_ptr:    std::ptr::null_mut(),
+            current_changed_offset: None,
+            current_changed_ptr:  std::ptr::null_mut(),
+            last_run_tick:        accessor.last_run_tick,
+            this_run_tick:        accessor.this_run_tick,
             _lifetime:            PhantomData,
         }
     }
 }
 impl<'a> SrcAccessAdded<'a>
 {
+    /// `Q` is `&Component` or `&mut Component` (anything implementing `TQueryColumn`): the read
+    /// vs. write choice only affects how the row is handed out (`Q::read_from`), not whether it
+    /// passes the added-tick filter, so one generic method covers both
     #[inline]
     #[track_caller]
-    pub(crate) fn next<T: TComponent + 'static>(&mut self) -> Option<&'a T>
+    pub(crate) fn next<Q: TQueryColumn>(&mut self) -> Option<Q::QueryItem<'a>>
     {
         loop
         {
@@ -64,29 +75,18 @@ impl<'a> SrcAccessAdded<'a>
             if row < self.current_chunk_len
             {
                 self.current_row_idx = row + 1;
-                return Some(unsafe { &*(self.current_col_ptr as *const T).add(row) });
+                if !crate::utils::is_newer_than(self.added_tick_at(row), self.last_run_tick, self.this_run_tick)
+                {
+                    continue;
+                }
+                let stamp = WriteStamp {
+                    changed_ptr: self.current_changed_ptr,
+                    tick:        self.this_run_tick,
+                };
+                return Some(unsafe { Q::read_from(self.current_col_ptr as *mut u8, row, stamp) });
             }
 
-            if !self.advance_to_next_chunk::<T>()
-            {
-                return None;
-            }
-        }
-    }
-    #[inline]
-    #[track_caller]
-    pub(crate) fn next_mut<T: TComponent + 'static>(&mut self) -> Option<&'a mut T>
-    {
-        loop
-        {
-            let row = self.current_row_idx;
-            if row < self.current_chunk_len
-            {
-                self.current_row_idx = row + 1;
-                return Some(unsafe { &mut *(self.current_col_ptr as *mut T).add(row) });
-            }
-
-            if !self.advance_to_next_chunk::<T>()
+            if !self.advance_to_next_chunk::<Q::Component>()
             {
                 return None;
             }
@@ -111,6 +111,11 @@ impl<'a> SrcAccessAdded<'a>
 
                 self.current_col_ptr = unsafe { chunk.ptr().add(self.current_offset) };
                 self.current_added_ptr = unsafe { chunk.ptr().add(self.current_added_offset) };
+                self.current_changed_ptr = match self.current_changed_offset
+                {
+                    Some(offset) => unsafe { chunk.ptr().add(offset) },
+                    None => std::ptr::null_mut(),
+                };
                 self.current_chunk_len = chunk.len();
                 self.current_row_idx = 0;
                 return true;
@@ -138,30 +143,24 @@ impl<'a> SrcAccessAdded<'a>
                     std::any::type_name::<T::StorageType>()
                 ),
             };
-            let added_offset = col_des.state_offset.added_offset.unwrap_or_else(|| {
-                panic!(
-                    "component `{}` does not support added state detection",
-                    std::any::type_name::<T::StorageType>()
-                )
-            });
+            let added_offset = col_des
+                .state_offset
+                .added_offset
+                .unwrap_or_else(|| panic!("component `{}` does not support added state detection", std::any::type_name::<T::StorageType>()));
 
             self.current_offset = col_des.offset;
             self.current_added_offset = added_offset;
+            self.current_changed_offset = col_des.state_offset.changed_offset;
             self.current_arch = Some(&arch_spec.arch);
             self.current_chunk_count = arch_spec.arch.chunk_count();
             self.current_chunk_idx = 0;
         }
     }
 
-    /// Reads the added tick of the row just handed out by `next`/`next_mut`
+    /// Reads the added tick of the row just handed out by `next`
     #[inline]
     pub(crate) fn added_tick_at(&self, row: usize) -> ChangedTick
     {
         unsafe { read_changed_tick(self.current_added_ptr, row) }
-    }
-    #[inline]
-    pub(crate) fn set_added_tick_at(&mut self, row: usize, tick: ChangedTick)
-    {
-        unsafe { write_changed_tick(self.current_added_ptr, row, tick) }
     }
 }

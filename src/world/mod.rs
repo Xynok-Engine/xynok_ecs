@@ -64,7 +64,12 @@ impl Default for World
             free_entities:            Queue::new(),
             temp_alloc:               WorldTempAllocation::new(),
             global_archetype_version: SafeCounter::new(1, usize::MAX - 1),
-            tick:                     AtomicChangedTick::new(0),
+            // starts at 1, not 0: `0` is the sentinel both change-detection storage (never
+            // touched) and a system's `last_run_tick` (never run) default to. If the world's
+            // first-ever write also stamped tick `0`, `is_newer_than(0, last_run=0, this_run=1)`
+            // would compare it as "not newer" (equal ages), so anything spawned before the very
+            // first system run would be invisible to that system's first `Added`/`Changed` check
+            tick: AtomicChangedTick::new(1),
         }
     }
 }
@@ -401,9 +406,44 @@ impl World
     #[track_caller]
     pub fn create_query<'a, T: TQueryParam + 'static>(&'a mut self) -> Query<'a, T>
     {
-        // not run through a system, so there is no "last run" to compare against; `0` is the
-        // same value change-detection storage starts zeroed to, so nothing looks pre-changed
-        match Query::new(self, 0)
+        // Nothing ran this query before, so `0` ("never") is the only honest baseline. For a
+        // plain `&Hp` that changes nothing, but it does mean `Added`/`Changed` here report
+        // every row ever touched rather than only recent ones. To ask for a narrower window,
+        // take a `current_tick` snapshot and use `create_query_since`.
+        self.create_query_since(0)
+    }
+
+    /// Same as [`create_query`](Self::create_query), but with an explicit baseline for the
+    /// `Added` / `Changed` filters: only rows stamped *after* `last_run_tick` are yielded.
+    ///
+    /// Inside a schedule this is what the scheduler does for you, handing each system the tick
+    /// of its own previous run. Outside one, the world's tick only moves when you move it, so
+    /// a round looks like this:
+    ///
+    /// ```
+    /// use xynok_ecs::query::filter::Changed;
+    /// use xynok_ecs::world::World;
+    /// #[xynok_ecs::component(ChangeAble)]
+    /// #[derive(Debug)]
+    /// struct Hp(u32);
+    ///
+    /// let mut w = World::default();
+    /// let a = w.create(Hp(1));
+    /// w.create(Hp(2));
+    ///
+    /// // everything written so far is now "old news"
+    /// let seen_up_to = w.current_tick();
+    /// w.advance_tick();
+    ///
+    /// w.merge_component(a, Hp(99));
+    ///
+    /// let changed: Vec<u32> = w.create_query_since::<Changed<&Hp>>(seen_up_to).into_iter().map(|hp| hp.0).collect();
+    /// assert_eq!(changed, vec![99]);
+    /// ```
+    #[track_caller]
+    pub fn create_query_since<'a, T: TQueryParam + 'static>(&'a mut self, last_run_tick: ChangedTick) -> Query<'a, T>
+    {
+        match Query::new(self, last_run_tick)
         {
             Ok(r) => r,
             Err(e) => panic!("{}", e),
@@ -418,11 +458,15 @@ impl World
         &mut self.component_counter
     }
 
-    /// The tick as of the last call to [`advance_tick`](Self::advance_tick). Change-detection
+    /// The tick as of the last call to [`advance_tick`](Self::advance_tick), i.e. the one every
+    /// write from now until the next `advance_tick` will be stamped with. Change-detection
     /// storage (`added`/`changed`) starts zeroed, so `0` permanently means "never touched" and
     /// is never handed out by `advance_tick`.
+    ///
+    /// Snapshot this before a batch of writes to get a baseline for
+    /// [`create_query_since`](Self::create_query_since).
     #[inline]
-    pub(crate) fn current_tick(&self) -> ChangedTick
+    pub fn current_tick(&self) -> ChangedTick
     {
         self.tick.load(Ordering::Relaxed)
     }
@@ -432,10 +476,24 @@ impl World
     /// `change_tick` at: every write within one system run is stamped with that one tick, and
     /// two different systems always see two different ticks even if they run back to back - even
     /// when they run concurrently in the same parallel group, since this is an atomic increment
+    ///
+    /// Driving a world by hand rather than through a schedule, this is how you close one round
+    /// of change detection and open the next. Without it every ad-hoc write shares one tick and
+    /// `Changed` can only ever answer "was this ever written", not "was it written since".
     #[inline]
-    pub(crate) fn advance_tick(&self) -> ChangedTick
+    pub fn advance_tick(&self) -> ChangedTick
     {
         self.tick.fetch_add(1, Ordering::Relaxed) + 1
+    }
+
+    /// Whether the `QuerySpec` registered for `T` writes anything, i.e. what the scheduler would
+    /// see when it decides who may run beside this query. Only needed by the unit test that
+    /// guards `TQueryParam::Shape` against two query shapes sharing one spec.
+    #[cfg(test)]
+    pub(crate) fn registered_query_is_read_only<T: TQueryParam + 'static>(&self) -> Option<bool>
+    {
+        let idx = self.query_counter.index_of(&T::TYPE_ID)?;
+        self.query_counter.value_at(idx).map(|spec| spec.access_scope.is_read_only())
     }
 
     pub(crate) fn get_or_create_query_src_access<'a, T: TQueryParam + 'static>(
@@ -481,6 +539,7 @@ impl World
 
         // every mutation is done, so the exclusive borrow can turn into the shared one the
         // accessor keeps for `'a`
+        let this_run_tick = self.current_tick();
         let this: &'a World = self;
         Ok(QuerySpecAccessor {
             query_idx:       query_idx,
@@ -488,6 +547,7 @@ impl World
             archetypes:      &this.archetypes,
             component_specs: &this.component_counter,
             last_run_tick:   last_run_tick,
+            this_run_tick:   this_run_tick,
         })
     }
 }

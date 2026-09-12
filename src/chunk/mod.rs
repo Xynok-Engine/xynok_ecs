@@ -50,6 +50,70 @@ pub(crate) unsafe fn write_changed_tick(region_ptr: *mut u8, row: usize, tick: C
     unsafe { *(region_ptr as *mut ChangedTick).add(row) = tick };
 }
 
+/// Moves one row's state (enable bit, added tick, changed tick) from `from` to `to` inside the
+/// same chunk.
+///
+/// A row's state lives in its own region, not next to the component value, so the byte copy
+/// that moves the last row into a freed slot leaves the state behind. Without this the row that
+/// got swapped down inherits the state of whoever used to sit there: a disabled component comes
+/// back enabled, an old `changed` tick suddenly looks fresh.
+///
+/// The source row is left untouched. It is either about to be dropped (`swap_remove_at`) or
+/// about to be overwritten by a fresh `write_at`, which re-seeds every state it owns.
+#[inline]
+pub(crate) unsafe fn move_state_within(chunk_ptr: *mut u8, state: &StateOffset, from: usize, to: usize)
+{
+    unsafe {
+        if let Some(offset) = state.enable_offset
+        {
+            let region = chunk_ptr.add(offset);
+            write_bit(region, to, read_bit(region, from));
+        }
+        if let Some(offset) = state.added_offset
+        {
+            let region = chunk_ptr.add(offset);
+            write_changed_tick(region, to, read_changed_tick(region, from));
+        }
+        if let Some(offset) = state.changed_offset
+        {
+            let region = chunk_ptr.add(offset);
+            write_changed_tick(region, to, read_changed_tick(region, from));
+        }
+    }
+}
+
+/// Copies one row's state from a chunk into another chunk's row, used when an entity migrates
+/// to a different archetype and takes its components along.
+///
+/// Only the state kinds *both* layouts track are copied. The two layouts describe the same
+/// component, so in practice they agree, but a state the destination does not carry simply has
+/// nowhere to go.
+#[inline]
+pub(crate) unsafe fn copy_state_across(
+    src_ptr: *const u8,
+    src_state: &StateOffset,
+    src_row: usize,
+    dst_ptr: *mut u8,
+    dst_state: &StateOffset,
+    dst_row: usize,
+)
+{
+    unsafe {
+        if let (Some(src_offset), Some(dst_offset)) = (src_state.enable_offset, dst_state.enable_offset)
+        {
+            write_bit(dst_ptr.add(dst_offset), dst_row, read_bit(src_ptr.add(src_offset), src_row));
+        }
+        if let (Some(src_offset), Some(dst_offset)) = (src_state.added_offset, dst_state.added_offset)
+        {
+            write_changed_tick(dst_ptr.add(dst_offset), dst_row, read_changed_tick(src_ptr.add(src_offset), src_row));
+        }
+        if let (Some(src_offset), Some(dst_offset)) = (src_state.changed_offset, dst_state.changed_offset)
+        {
+            write_changed_tick(dst_ptr.add(dst_offset), dst_row, read_changed_tick(src_ptr.add(src_offset), src_row));
+        }
+    }
+}
+
 pub struct Chunk
 {
     ptr:     *mut u8,
@@ -170,6 +234,8 @@ impl Chunk
     {
         let last = params.src_chunk.len() - 1;
         let is_last = params.from == last;
+        let src_ptr = params.src_chunk.ptr();
+        let dst_ptr = self.ptr();
         unsafe {
             for (k, src_col_des) in params.src_layout.component_col_descriptors.iter()
             {
@@ -186,6 +252,7 @@ impl Chunk
                     if !is_last
                     {
                         std::ptr::copy_nonoverlapping(src_last_val, src_slot, item_size);
+                        move_state_within(src_ptr, &src_col_des.state_offset, last, params.from);
                     }
                     continue;
                 }
@@ -199,17 +266,30 @@ impl Chunk
                         if !is_last
                         {
                             std::ptr::copy_nonoverlapping(src_last_val, src_slot, item_size);
+                            move_state_within(src_ptr, &src_col_des.state_offset, last, params.from);
                         }
                         continue;
                     }
                 };
 
-                let dst_slot = self.ptr().add(dst_col_des.offset).add(params.to * item_size);
+                let dst_slot = dst_ptr.add(dst_col_des.offset).add(params.to * item_size);
                 std::ptr::copy_nonoverlapping(src_slot, dst_slot, item_size);
+                // the component travels with the entity, so its state has to travel too: a
+                // disabled component must stay disabled after an `add_component`, and its
+                // added/changed ticks must keep pointing at the run that actually touched it
+                copy_state_across(
+                    src_ptr,
+                    &src_col_des.state_offset,
+                    params.from,
+                    dst_ptr,
+                    &dst_col_des.state_offset,
+                    params.to,
+                );
 
                 if !is_last
                 {
                     std::ptr::copy_nonoverlapping(src_last_val, src_slot, item_size);
+                    move_state_within(src_ptr, &src_col_des.state_offset, last, params.from);
                 }
             }
             let src_e = params.src_chunk.get_entity_uncheck_mut(params.src_layout, params.from);
@@ -251,18 +331,20 @@ impl Chunk
 
         let last = self.len - 1;
         let is_last = idx == last;
+        let chunk_ptr = self.ptr;
         unsafe {
             for (k, des) in layout.component_col_descriptors.iter()
             {
                 let spec = component_specs.get(k).unwrap();
                 let item_size = spec.descriptor.byte_size;
-                let target_slot = self.ptr.add(des.offset).add(idx * item_size);
+                let target_slot = chunk_ptr.add(des.offset).add(idx * item_size);
                 (spec.descriptor.fn_drop)(target_slot);
 
                 if !is_last
                 {
-                    let last_val = self.ptr.add(des.offset).add(last * item_size);
+                    let last_val = chunk_ptr.add(des.offset).add(last * item_size);
                     std::ptr::copy_nonoverlapping(last_val, target_slot, item_size);
+                    move_state_within(chunk_ptr, &des.state_offset, last, idx);
                 }
             }
             let src_e = self.get_entity_uncheck_mut(layout, idx);
@@ -320,7 +402,13 @@ impl Chunk
     }
     /// Drop the old value and assign the new one. The component already existed in this row, so
     /// only `changed` moves; `enable`/`added` are untouched (see `write_at` for a fresh insert)
-    pub(crate) unsafe fn replace_at<T: TComponent + 'static>(&mut self, layout: &ChunkLayout, row: usize, value: T, tick: ChangedTick) -> Result<(), XynokEcsError>
+    pub(crate) unsafe fn replace_at<T: TComponent + 'static>(
+        &mut self,
+        layout: &ChunkLayout,
+        row: usize,
+        value: T,
+        tick: ChangedTick,
+    ) -> Result<(), XynokEcsError>
     {
         let col_ptr = self.components_ptr::<T>(layout)?;
         unsafe {
@@ -336,7 +424,13 @@ impl Chunk
     /// Writes directly to memory without dropping the old value. Typically used when the memory
     /// has just been initialized, i.e. this component is appearing in this row for the first
     /// time: `enable` is seeded to `T::ENABLE_VALUE` and `added`/`changed` both start at `tick`
-    pub(crate) unsafe fn write_at<T: TComponent + 'static>(&mut self, layout: &ChunkLayout, row: usize, value: T, tick: ChangedTick) -> Result<(), XynokEcsError>
+    pub(crate) unsafe fn write_at<T: TComponent + 'static>(
+        &mut self,
+        layout: &ChunkLayout,
+        row: usize,
+        value: T,
+        tick: ChangedTick,
+    ) -> Result<(), XynokEcsError>
     {
         let col_ptr = self.components_ptr::<T>(layout)?;
         unsafe {
@@ -430,19 +524,9 @@ impl Chunk
     // (mirrors how `SrcAccess` caches `current_col_ptr` once per chunk instead of
     // hitting `component_col_descriptors` on every row). No HashMap lookup, no Result.
     #[inline]
-    pub(crate) unsafe fn get_bit_unchecked(&self, region_offset: usize, row: usize) -> bool
-    {
-        unsafe { read_bit(self.ptr.add(region_offset), row) }
-    }
-    #[inline]
     pub(crate) unsafe fn set_bit_unchecked(&mut self, region_offset: usize, row: usize, value: bool)
     {
         unsafe { write_bit(self.ptr.add(region_offset), row, value) }
-    }
-    #[inline]
-    pub(crate) unsafe fn get_changed_tick_unchecked(&self, region_offset: usize, row: usize) -> ChangedTick
-    {
-        unsafe { read_changed_tick(self.ptr.add(region_offset), row) }
     }
     #[inline]
     pub(crate) unsafe fn set_changed_tick_unchecked(&mut self, region_offset: usize, row: usize, tick: ChangedTick)
@@ -451,16 +535,9 @@ impl Chunk
     }
 
     // ---- checked path: does the `component_col_descriptors` lookup every call, meant for
-    // one-off access outside a query's hot loop. Both delegate to the `_unchecked` fns above.
-    #[inline]
-    pub(crate) fn get_enable_bit<T: TComponent + 'static>(&self, layout: &ChunkLayout, row: usize) -> Result<bool, XynokEcsError>
-    {
-        let offset = self
-            .state_offset::<T>(layout)?
-            .enable_offset
-            .ok_or(XynokEcsError::ComponentStateNotAvailable(std::any::type_name::<T::StorageType>(), "enable"))?;
-        Ok(unsafe { self.get_bit_unchecked(offset, row) })
-    }
+    // one-off writes outside a query's hot loop. All of them delegate to the `_unchecked` fns
+    // above. There is no matching read here: queries read state through the `read_bit` /
+    // `read_changed_tick` free fns, which take an already-resolved region pointer.
     #[inline]
     pub(crate) fn set_enable_bit<T: TComponent + 'static>(&mut self, layout: &ChunkLayout, row: usize, value: bool) -> Result<(), XynokEcsError>
     {
@@ -473,15 +550,6 @@ impl Chunk
     }
 
     #[inline]
-    pub(crate) fn get_added_tick<T: TComponent + 'static>(&self, layout: &ChunkLayout, row: usize) -> Result<ChangedTick, XynokEcsError>
-    {
-        let offset = self
-            .state_offset::<T>(layout)?
-            .added_offset
-            .ok_or(XynokEcsError::ComponentStateNotAvailable(std::any::type_name::<T::StorageType>(), "added"))?;
-        Ok(unsafe { self.get_changed_tick_unchecked(offset, row) })
-    }
-    #[inline]
     pub(crate) fn set_added_tick<T: TComponent + 'static>(&mut self, layout: &ChunkLayout, row: usize, tick: ChangedTick) -> Result<(), XynokEcsError>
     {
         let offset = self
@@ -492,15 +560,6 @@ impl Chunk
         Ok(())
     }
 
-    #[inline]
-    pub(crate) fn get_changed_tick<T: TComponent + 'static>(&self, layout: &ChunkLayout, row: usize) -> Result<ChangedTick, XynokEcsError>
-    {
-        let offset = self
-            .state_offset::<T>(layout)?
-            .changed_offset
-            .ok_or(XynokEcsError::ComponentStateNotAvailable(std::any::type_name::<T::StorageType>(), "changed"))?;
-        Ok(unsafe { self.get_changed_tick_unchecked(offset, row) })
-    }
     #[inline]
     pub(crate) fn set_changed_tick<T: TComponent + 'static>(&mut self, layout: &ChunkLayout, row: usize, tick: ChangedTick) -> Result<(), XynokEcsError>
     {

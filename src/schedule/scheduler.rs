@@ -317,14 +317,14 @@ mod test
     {
         fn add_hp(query: Query<&mut Hp>)
         {
-            for hp in query
+            for mut hp in query
             {
                 hp.0 += 1;
             }
         }
         fn add_mana(query: Query<&mut Mana>)
         {
-            for mana in query
+            for mut mana in query
             {
                 mana.0 += 2;
             }

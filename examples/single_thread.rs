@@ -32,7 +32,7 @@ fn announce_start()
 /// One `&mut` parameter: the only writer of `Mana` in this session
 fn regen_mana(query: Query<&mut Mana>)
 {
-    for mana in query
+    for mut mana in query
     {
         mana.0 = (mana.0 + 5).min(50);
     }
@@ -43,7 +43,7 @@ fn regen_mana(query: Query<&mut Mana>)
 /// A second `Query<&Hp>` beside `&mut Hp` would panic at the `add_system` call site.
 fn tick_poison(damaged: Query<(&mut Hp, &Poison)>, healthy: Query<&Name>)
 {
-    for (hp, poison) in damaged
+    for (mut hp, poison) in damaged
     {
         hp.0 -= poison.0;
     }

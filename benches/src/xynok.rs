@@ -54,7 +54,7 @@ impl QueryWorkload for Query1
 
     fn run_query_once(storage: &mut World, _query: &mut Self::PreparedQuery)
     {
-        for position in storage.create_query::<&mut Position>()
+        for mut position in storage.create_query::<&mut Position>()
         {
             position.x += 1.0;
             position.y += 1.0;
@@ -82,7 +82,7 @@ impl QueryWorkload for Query2
 
     fn run_query_once(storage: &mut World, _query: &mut Self::PreparedQuery)
     {
-        for (position, velocity) in storage.create_query::<(&mut Position, &Velocity)>()
+        for (mut position, velocity) in storage.create_query::<(&mut Position, &Velocity)>()
         {
             position.x += velocity.x;
             position.y += velocity.y;
@@ -110,7 +110,7 @@ impl QueryWorkload for Query3
 
     fn run_query_once(storage: &mut World, _query: &mut Self::PreparedQuery)
     {
-        for (position, velocity, health) in storage.create_query::<(&mut Position, &Velocity, &mut Health)>()
+        for (mut position, velocity, mut health) in storage.create_query::<(&mut Position, &Velocity, &mut Health)>()
         {
             position.x += velocity.x;
             position.y += velocity.y;

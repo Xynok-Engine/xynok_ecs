@@ -81,7 +81,7 @@ fn t_query_mut_allows_writing_through_the_iterator()
     w.create(Hp(2));
 
     let query = w.create_query::<&mut Hp>();
-    for hp in query
+    for mut hp in query
     {
         hp.0 *= 10;
     }
@@ -99,7 +99,7 @@ fn t_query_mut_and_read_can_combine_in_one_tuple()
     w.add_component(e, Mana(5));
 
     let query = w.create_query::<(&mut Hp, &Mana)>();
-    for (hp, mana) in query
+    for (mut hp, mana) in query
     {
         hp.0 += mana.0;
     }

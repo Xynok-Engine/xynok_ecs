@@ -119,3 +119,44 @@ pub fn read_component<C: TComponent + Copy + 'static>(w: &World, e: Entity) -> C
         .get_component::<C>(&arch_spec.layout, spec.idx_in_chunk())
         .expect("component must be present in the entity's archetype")
 }
+
+/// A row's change-detection and enable state, read straight out of the chunk region it lives in.
+///
+/// The query filters (`Added`/`Changed`/`Enabled`/`Disabled`) compare these against a system's
+/// own last-run tick, which makes them a coarse instrument for asserting that the state itself
+/// moved correctly when a row got swapped or migrated. These helpers look at the raw values
+/// instead, so a test can say "this row's changed tick is exactly the one it had before".
+pub struct ComponentState
+{
+    pub enabled:      Option<bool>,
+    pub added_tick:   Option<crate::apis::constants::ChangedTick>,
+    pub changed_tick: Option<crate::apis::constants::ChangedTick>,
+}
+
+#[track_caller]
+pub fn component_state<C: TComponent + 'static>(w: &World, e: Entity) -> ComponentState
+{
+    let spec = &w.entities[e.idx()];
+    let arch_spec = w.archetypes.get(&spec.arch_id()).expect("archetype must exist");
+    let col_des = arch_spec
+        .layout
+        .component_col_descriptors
+        .get(&std::any::TypeId::of::<C::StorageType>())
+        .expect("component must be present in the entity's archetype");
+
+    let chunk_ptr = arch_spec.arch.chunk_at(spec.chunk_idx()).ptr();
+    let row = spec.idx_in_chunk();
+    unsafe {
+        ComponentState {
+            enabled:      col_des.state_offset.enable_offset.map(|o| crate::chunk::read_bit(chunk_ptr.add(o), row)),
+            added_tick:   col_des
+                .state_offset
+                .added_offset
+                .map(|o| crate::chunk::read_changed_tick(chunk_ptr.add(o), row)),
+            changed_tick: col_des
+                .state_offset
+                .changed_offset
+                .map(|o| crate::chunk::read_changed_tick(chunk_ptr.add(o), row)),
+        }
+    }
+}

@@ -12,9 +12,17 @@ pub trait TComponent: Sized
     const STORAGE_LOCATION: StorageLocation;
     const STATE_DETECTION: StateDetection;
 
-    /// This value is used when a component implements [`TEnableAble`] for two purposes:
-    /// - When initializing this component, the enable state is set to this value.
-    /// - When querying this component, the query is valid if this value matches the enable state.
+    /// The enable state this component starts out with, used only when the component is
+    /// [`TEnableAble`]. It is read exactly once per row, when the component is first written
+    /// into that row (see `Chunk::write_at`); after that the bit lives in the chunk and only
+    /// changes when someone flips it.
+    ///
+    /// You rarely set this by hand. The usual way is the `Enable<T>` / `Disable<T>` wrappers,
+    /// which override it so `world.create(Disable::new(Hp(10)))` spawns with `Hp` already off.
+    ///
+    /// This value has nothing to do with filtering at query time. Picking rows by enable state
+    /// is what `Enabled<Q>` and `Disabled<Q>` are for, and they read the bit in the chunk, not
+    /// this constant.
     const ENABLE_VALUE: bool = true;
 }
 pub trait TEnableAble {}

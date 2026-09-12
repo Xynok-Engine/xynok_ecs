@@ -1,5 +1,6 @@
 use std::any::TypeId;
 
+use crate::apis::constants::ChangedTick;
 use crate::apis::params::{ComponentSpec, ComponentSpecs};
 use crate::apis::traits::{TComponent, TComponentDescriptor};
 use crate::query::access_scope::AccessScope;
@@ -40,6 +41,24 @@ pub(crate) fn build_archetype_which_contains(archetypes: &ArchetypeSpecs, dst: &
 pub const fn align_up(offset: usize, align: usize) -> usize
 {
     (offset + align - 1) & !(align - 1)
+}
+
+/// Is `component_tick` newer than `last_run_tick`, given the world is currently at `this_run_tick`?
+///
+/// A plain `component_tick > last_run_tick` breaks the moment the global tick counter wraps
+/// past `u32::MAX` back to `0`: a tick from just before the wrap would look "older" than one
+/// from just after it, even though it is actually more recent. Comparing *ages relative to
+/// `this_run_tick`* instead of raw values sidesteps that: `wrapping_sub` measures "how many
+/// ticks ago" each timestamp was, and that distance is correct across a wraparound as long as
+/// neither age exceeds `u32::MAX` (i.e. `this_run_tick` hasn't lapped `last_run_tick` more than
+/// once, which would require ~4 billion system runs without this query running) - same
+/// approach as Bevy's `Tick::is_newer_than`.
+#[inline]
+pub(crate) fn is_newer_than(component_tick: ChangedTick, last_run_tick: ChangedTick, this_run_tick: ChangedTick) -> bool
+{
+    let ticks_since_component = this_run_tick.wrapping_sub(component_tick);
+    let ticks_since_last_run = this_run_tick.wrapping_sub(last_run_tick);
+    ticks_since_component < ticks_since_last_run
 }
 #[cfg(test)]
 mod test

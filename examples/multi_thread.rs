@@ -82,7 +82,7 @@ fn survey_spread(query: Query<&Position>)
 fn integrate(query: Query<(&mut Position, &Velocity)>)
 {
     busy();
-    for (position, velocity) in query
+    for (mut position, velocity) in query
     {
         position.0 += velocity.0;
     }
@@ -92,7 +92,7 @@ fn integrate(query: Query<(&mut Position, &Velocity)>)
 fn tick_poison(query: Query<(&mut Hp, &Poison)>)
 {
     busy();
-    for (hp, poison) in query
+    for (mut hp, poison) in query
     {
         hp.0 -= poison.0;
     }
@@ -102,7 +102,7 @@ fn tick_poison(query: Query<(&mut Hp, &Poison)>)
 fn regen_mana(query: Query<(&mut Mana, &Regen)>)
 {
     busy();
-    for (mana, regen) in query
+    for (mut mana, regen) in query
     {
         mana.0 = (mana.0 + regen.0).min(50);
     }
@@ -113,7 +113,7 @@ fn regen_mana(query: Query<(&mut Mana, &Regen)>)
 /// exists for, see the commented call in `main`.
 fn drain_mana(query: Query<&mut Mana>)
 {
-    for mana in query
+    for mut mana in query
     {
         mana.0 -= 1;
     }
