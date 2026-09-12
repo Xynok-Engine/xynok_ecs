@@ -3,6 +3,7 @@ use crate::apis::traits::{TComponent, TEnableAble};
 macro_rules! define_enable {
     ($name:ident, $val:expr) => {
         /// Use this wrapper to initialize a component with enable value = `$name`
+        #[repr(transparent)]
         pub struct $name<T: TComponent + TEnableAble + 'static>
         {
             pub val: T,
