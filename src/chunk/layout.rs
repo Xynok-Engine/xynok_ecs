@@ -2,8 +2,8 @@ use std::alloc::Layout;
 use std::any::TypeId;
 use std::collections::HashMap;
 
-use crate::apis::constants::{BITS_PER_BYTE, CHUNK_SIZE_IN_BYTE, CPU_WORD};
-use crate::apis::identifies::XynokEcsError;
+use crate::apis::constants::{BITS_PER_BYTE, CHANGED_TICK_BYTE_SIZE, CHUNK_SIZE_IN_BYTE, CPU_WORD};
+use crate::apis::identifies::{StateDetection, XynokEcsError};
 use crate::apis::params::ComponentSpecs;
 use crate::apis::traits::TComponentDescriptor;
 use crate::apis::ComponentDescriptor;
@@ -52,31 +52,75 @@ fn compute_layout(params: &mut ChunkLayoutParams) -> Result<ChunkLayout, XynokEc
 {
     build_component_bit_set(params.component_bit_set_temp, params.components, params.component_specs)?;
 
-    // Each entity costs its handle in the header plus one slot in every component column
-    let bytes_per_entity = params
-        .components
-        .iter()
-        .fold(Entity::COMPONENT_DESCRIPTOR.byte_size, |acc, des| acc.saturating_add(des.byte_size));
+    let mut upper_bound = estimate_max_entities(params.components);
 
-    // arch.len() represents the number of components. We use this count to store the
-    // enabled/disabled state of each component as a single bit
-    let bits_per_entity = bytes_per_entity.saturating_mul(BITS_PER_BYTE).saturating_add(params.components.len());
+    // The estimate ignores padding, so it can only be too generous, never too small. That makes
+    // it a valid upper bound for the search below.
+    let mut best: Option<ChunkLayout> = None;
+    let mut low = 1usize;
 
-    let mut max_entities = (CHUNK_SIZE_IN_BYTE * BITS_PER_BYTE) / bits_per_entity;
-
-    loop
+    while low <= upper_bound
     {
-        if max_entities == 0
+        let mid = low + (upper_bound - low) / 2;
+        // `try_layout` is monotonic: every part of the layout grows with the row count, so once
+        // a size fits, every smaller size fits too. Binary search is therefore valid, and it
+        // replaces the old `max_entities -= 1` walk that could burn hundreds of rounds of
+        // HashMap rebuilding per archetype.
+        match try_layout(mid, params)
         {
-            return Err(XynokEcsError::ArchetypeIsTooLarge);
+            Ok(layout) =>
+            {
+                best = Some(layout);
+                low = mid + 1;
+            }
+            // Only "does not fit" narrows the range. Anything else is a real problem with the
+            // archetype itself and would say the same at every row count, so it goes straight out.
+            Err(XynokEcsError::ArchetypeIsTooLarge) =>
+            {
+                upper_bound = mid - 1;
+            }
+            Err(e) => return Err(e),
         }
-
-        if let Ok(valid_layout) = try_layout(max_entities, params)
-        {
-            return Ok(valid_layout);
-        }
-        max_entities -= 1;
     }
+
+    match best
+    {
+        Some(layout) => Ok(layout),
+        None => Err(XynokEcsError::ArchetypeIsTooLarge),
+    }
+}
+/// Upper bound on how many rows a chunk can hold, counting everything that costs bytes per row.
+///
+/// The old version only counted the component payloads plus one enable bit each, which left out
+/// the `added` and `changed` ticks entirely. For a change-tracked archetype that is 8 bytes per
+/// row per component missing, so the starting guess came out several hundred rows too high and
+/// the search had to walk all the way down.
+fn estimate_max_entities(components: &[ComponentDescriptor]) -> usize
+{
+    // Each entity costs its handle in the header plus one slot in every component column
+    let mut bits_per_entity = Entity::COMPONENT_DESCRIPTOR.byte_size.saturating_mul(BITS_PER_BYTE);
+
+    for des in components
+    {
+        bits_per_entity = bits_per_entity.saturating_add(des.byte_size.saturating_mul(BITS_PER_BYTE));
+
+        // Enable state is a single bit per entity, change tracking is two ticks (`added` and
+        // `changed`). Both live in the header, both scale with the row count.
+        if matches!(des.state_detection, StateDetection::EnableAble | StateDetection::EnableAbleAndChangeAble)
+        {
+            bits_per_entity = bits_per_entity.saturating_add(1);
+        }
+        if matches!(des.state_detection, StateDetection::ChangeAble | StateDetection::EnableAbleAndChangeAble)
+        {
+            bits_per_entity = bits_per_entity.saturating_add(CHANGED_TICK_BYTE_SIZE.saturating_mul(2).saturating_mul(BITS_PER_BYTE));
+        }
+    }
+
+    if bits_per_entity == 0
+    {
+        return 0;
+    }
+    (CHUNK_SIZE_IN_BYTE * BITS_PER_BYTE) / bits_per_entity
 }
 /// Builds the archetype's component bit set, and rejects a component named twice on the way.
 ///
@@ -213,6 +257,19 @@ mod test
     struct Aligned32(#[allow(unused)] u64);
     declare_component!(Aligned32);
 
+    /// Change-tracked component: costs two ticks per row in the header on top of its payload.
+    struct Tracked(#[allow(unused)] u32);
+    impl crate::apis::traits::TComponent for Tracked
+    {
+        type QueryType = Self;
+        type StorageType = Self;
+        type MutPolicy = crate::query::mut_ref::NoTracking;
+
+        const STORAGE_LOCATION: StorageLocation = StorageLocation::Chunk;
+
+        const STATE_DETECTION: StateDetection = StateDetection::ChangeAble;
+    }
+
     fn specs_of(descriptors: &[ComponentDescriptor]) -> ComponentSpecs
     {
         let mut specs = ComponentSpecs::new();
@@ -240,6 +297,33 @@ mod test
     fn layout_of(descriptors: &[ComponentDescriptor]) -> Result<ChunkLayout, XynokEcsError>
     {
         layout_with(descriptors, &specs_of(descriptors))
+    }
+
+
+    /// The row-count estimate feeds a binary search, so it has to be an upper bound (otherwise
+    /// the search silently settles for a smaller chunk) and it has to be tight (otherwise the
+    /// search wastes rounds getting back down). Change-tracked components are the case the old
+    /// estimate got wrong: it counted the payload but not the `added`/`changed` ticks.
+    #[test]
+    fn estimate_is_a_tight_upper_bound()
+    {
+        let sets: [&[ComponentDescriptor]; 3] = [
+            &[Tracked::COMPONENT_DESCRIPTOR],
+            &[Hp::COMPONENT_DESCRIPTOR, Mana::COMPONENT_DESCRIPTOR],
+            &[Tracked::COMPONENT_DESCRIPTOR, Hp::COMPONENT_DESCRIPTOR, Pos::COMPONENT_DESCRIPTOR],
+        ];
+
+        for descriptors in sets
+        {
+            let estimate = estimate_max_entities(descriptors);
+            let actual = layout_of(descriptors).expect("layout must be constructible").max_len;
+
+            assert!(estimate >= actual, "estimate {estimate} is below the real capacity {actual}, the search would undershoot");
+            assert!(
+                estimate - actual <= actual / 20,
+                "estimate {estimate} is more than 5% above the real capacity {actual}, the search pays for the slack"
+            );
+        }
     }
 
     #[test]
