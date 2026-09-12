@@ -12,27 +12,15 @@ pub trait TQuerySrcAccess<'a>
 {
     fn new(accessor: &QuerySpecAccessor<'a>) -> Self;
 }
-/// Markers that give a query shape a name the type system can carry around. They exist only to
-/// be fed to `TypeId::of`, never to be constructed.
-pub mod shape
-{
-    pub struct Ref;
-    pub struct RefMut;
-    pub struct Added;
-    pub struct Changed;
-    pub struct Enabled;
-    pub struct Disabled;
-}
-
 pub trait TQueryParam
 {
     type QueryItem<'a>;
     type SrcAccess<'a>: TQuerySrcAccess<'a>;
 
-    /// A `'static` stand-in for this query's exact shape, built out of [`shape`] markers and the
-    /// components' storage types: `&Hp` is `(shape::Ref, Hp)`, `&mut Hp` is `(shape::RefMut, Hp)`,
-    /// `Changed<&Hp>` is `(shape::Changed, (shape::Ref, Hp))`, and a tuple nests its elements'
-    /// shapes.
+    /// A `'static` stand-in for this query's exact shape: `&Hp` is `&'static Hp`, `&mut Hp` is
+    /// `&'static mut Hp`, `Changed<&Hp>` is `Changed<&'static Hp>`, and a tuple nests its
+    /// elements' shapes. Lifetimes are pinned to `'static` only so the type can reach
+    /// `TypeId::of`, they carry no meaning here.
     ///
     /// The world keys its query registry by `TYPE_ID`, and a `QuerySpec` carries the access
     /// scope the scheduler reads to decide what may run in parallel. Naming a shape only by the

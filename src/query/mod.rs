@@ -100,8 +100,9 @@ impl<'a, T: TQueryParam + 'static> Query<'a, T>
 mod test
 {
     use crate::apis::internal_traits::TQueryParam;
+    use crate::component;
     use crate::query::filter::{Added, Changed, Disabled, Enabled};
-    use crate::{component, world::World};
+    use crate::world::World;
 
     #[component(EnableAble, ChangeAble)]
     #[derive(Default)]
@@ -140,6 +141,50 @@ mod test
                     assert_ne!(a, b, "query shapes {i} and {j} collide on one TYPE_ID and would share a QuerySpec");
                 }
             }
+        }
+    }
+
+    /// `Shape` also shows up in panic messages and debugger output, so it should read like the
+    /// query you wrote. Run with `--nocapture` to see it.
+    #[test]
+    fn shape_reads_like_the_query_it_came_from()
+    {
+        fn shape_of<Q: TQueryParam>() -> String
+        {
+            // strip module paths so `xynok_ecs::query::mod::test::Hp` reads as `Hp`
+            let full = std::any::type_name::<Q::Shape>();
+            let mut out = String::new();
+            let mut segment = String::new();
+            for ch in full.chars()
+            {
+                if ch.is_alphanumeric() || ch == '_' || ch == ':'
+                {
+                    segment.push(ch);
+                }
+                else
+                {
+                    out.push_str(segment.rsplit("::").next().unwrap_or(&segment));
+                    out.push(ch);
+                    segment.clear();
+                }
+            }
+            out.push_str(segment.rsplit("::").next().unwrap_or(&segment));
+            out
+        }
+
+        let cases = [
+            (shape_of::<&Hp>(), "&Hp"),
+            (shape_of::<&mut Hp>(), "&mut Hp"),
+            (shape_of::<Added<&Hp>>(), "Added<&Hp>"),
+            (shape_of::<Changed<&mut Hp>>(), "Changed<&mut Hp>"),
+            (shape_of::<Disabled<&Hp>>(), "Disabled<&Hp>"),
+            (shape_of::<(Added<&Hp>, Enabled<&mut Mana>)>(), "(Added<&Hp>, Enabled<&mut Mana>)"),
+        ];
+
+        for (got, want) in &cases
+        {
+            println!("{got}");
+            assert_eq!(got, want);
         }
     }
 

@@ -2,7 +2,7 @@ use std::marker::PhantomData;
 
 use crate::apis::constants::ChangedTick;
 use crate::apis::identifies::XynokEcsError;
-use crate::apis::internal_traits::{shape, TQueryColumn, TQueryParam, TQueryParamFiltered, TReadOnlyQueryParam};
+use crate::apis::internal_traits::{TQueryColumn, TQueryParam, TQueryParamFiltered, TReadOnlyQueryParam};
 use crate::apis::params::ComponentSpecs;
 use crate::apis::traits::{TChangeAble, TEnableAble};
 use crate::chunk::column::ColumnDescriptor;
@@ -19,7 +19,6 @@ macro_rules! define_filter
     (
         $(#[$meta:meta])*
         $name:ident,
-        shape: $shape:ty,
         component_bound: $component_bound:path,
         src_access: $src_access:ty,
         state_offset: $offset_field:ident,
@@ -27,9 +26,10 @@ macro_rules! define_filter
     ) =>
     {
         $(#[$meta])*
-        pub struct $name<Q: TQueryColumn>(PhantomData<Q>)
-        where
-            Q::Component: $component_bound;
+        /// `Q` is unbounded on purpose: besides the real query param, this also gets
+        /// instantiated with [`TQueryParam::Shape`] types, which are plain markers and implement
+        /// nothing. The real bounds live on the impls below.
+        pub struct $name<Q>(PhantomData<fn() -> Q>);
 
         impl<Q: TQueryColumn> TQueryParam for $name<Q>
         where
@@ -39,7 +39,7 @@ macro_rules! define_filter
             type SrcAccess<'a> = $src_access;
             // the wrapped `Q` keeps its own shape, so `Changed<&Hp>` and `Changed<&mut Hp>` stay
             // apart just like `&Hp` and `&mut Hp` do
-            type Shape = ($shape, Q::Shape);
+            type Shape = $name<Q::Shape>;
 
             fn access_scope(component_specs: &mut ComponentSpecs) -> Result<AccessScope, XynokEcsError>
             {
@@ -87,7 +87,6 @@ macro_rules! define_filter
 
 define_filter!(
     Added,
-    shape: shape::Added,
     component_bound: TChangeAble,
     src_access: SrcAccessAdded<'a>,
     state_offset: added_offset,
@@ -97,7 +96,6 @@ define_filter!(
 
 define_filter!(
     Changed,
-    shape: shape::Changed,
     component_bound: TChangeAble,
     src_access: SrcAccessChanged<'a>,
     state_offset: changed_offset,
@@ -107,7 +105,6 @@ define_filter!(
 
 define_filter!(
     Enabled,
-    shape: shape::Enabled,
     component_bound: TEnableAble,
     src_access: SrcAccessEnable<'a, true>,
     state_offset: enable_offset,
@@ -116,9 +113,11 @@ define_filter!(
 
 define_filter!(
     Disabled,
-    shape: shape::Disabled,
     component_bound: TEnableAble,
     src_access: SrcAccessEnable<'a, false>,
     state_offset: enable_offset,
     accepts: |state_ptr, row, _last_run_tick, _this_run_tick| !unsafe { read_bit(state_ptr, row) }
 );
+
+//pub struct Without<T: TComponent + 'static>(PhantomData<T>);
+

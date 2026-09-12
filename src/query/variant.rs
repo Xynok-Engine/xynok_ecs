@@ -1,6 +1,6 @@
 use crate::apis::constants::ChangedTick;
 use crate::apis::identifies::XynokEcsError;
-use crate::apis::internal_traits::{shape, TQueryColumn, TQueryParam, TQueryParamFiltered, TReadOnlyQueryParam};
+use crate::apis::internal_traits::{TQueryColumn, TQueryParam, TQueryParamFiltered, TReadOnlyQueryParam};
 use crate::apis::params::ComponentSpecs;
 use crate::apis::traits::TComponent;
 use crate::chunk::column::ColumnDescriptor;
@@ -14,7 +14,7 @@ impl<T: TComponent + 'static> TQueryParam for &T
     type QueryItem<'a> = &'a T;
 
     type SrcAccess<'a> = SrcAccess<'a>;
-    type Shape = (shape::Ref, T::StorageType);
+    type Shape = &'static T::StorageType;
 
     fn access_scope(component_specs: &mut ComponentSpecs) -> Result<AccessScope, XynokEcsError>
     {
@@ -41,7 +41,7 @@ impl<T: TComponent + 'static> TQueryParam for &mut T
     type QueryItem<'a> = MutItem<'a, T>;
 
     type SrcAccess<'a> = SrcAccess<'a>;
-    type Shape = (shape::RefMut, T::StorageType);
+    type Shape = &'static mut T::StorageType;
 
     fn access_scope(component_specs: &mut ComponentSpecs) -> Result<AccessScope, XynokEcsError>
     {
