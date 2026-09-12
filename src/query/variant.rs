@@ -5,7 +5,7 @@ use crate::apis::params::ComponentSpecs;
 use crate::apis::traits::TComponent;
 use crate::chunk::column::ColumnDescriptor;
 use crate::query::access_scope::AccessScope;
-use crate::query::mut_ref::{Mut, WriteStamp};
+use crate::query::mut_ref::{TMutPolicy, WriteStamp};
 use crate::query::src_access::SrcAccess;
 use crate::utils::component_id_for;
 
@@ -32,9 +32,13 @@ impl<T: TComponent + 'static> TQueryParam for &T
 // SAFETY: `&T` only hands out `&'a T`, nothing can be written through it
 unsafe impl<T: TComponent + 'static> TReadOnlyQueryParam for &T {}
 
+/// One row of a `&mut T` query: `Mut<'a, T>` when `T` is `ChangeAble`, a plain `&'a mut T`
+/// otherwise. See [`TMutPolicy`].
+pub type MutItem<'a, T> = <<T as TComponent>::MutPolicy as TMutPolicy>::Item<'a, T>;
+
 impl<T: TComponent + 'static> TQueryParam for &mut T
 {
-    type QueryItem<'a> = Mut<'a, T>;
+    type QueryItem<'a> = MutItem<'a, T>;
 
     type SrcAccess<'a> = SrcAccess<'a>;
     type Shape = (shape::RefMut, T::StorageType);
@@ -66,9 +70,9 @@ impl<T: TComponent + 'static> TQueryColumn for &mut T
 {
     type Component = T;
 
-    unsafe fn read_from<'a>(col_ptr: *mut u8, row: usize, stamp: WriteStamp) -> Mut<'a, T>
+    unsafe fn read_from<'a>(col_ptr: *mut u8, row: usize, stamp: WriteStamp) -> MutItem<'a, T>
     {
-        unsafe { Mut::new(&mut *(col_ptr as *mut T).add(row), stamp, row) }
+        unsafe { T::MutPolicy::make((col_ptr as *mut T).add(row), stamp, row) }
     }
 }
 

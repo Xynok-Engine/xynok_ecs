@@ -1,14 +1,24 @@
 use std::any::TypeId;
 
-use crate::apis::identifies::{StateDetection, StorageLocation, XynokEcsError};
 use crate::apis::ComponentDescriptor;
-use crate::chunk::layout::ChunkLayout;
+use crate::apis::identifies::{StateDetection, StorageLocation, XynokEcsError};
 use crate::chunk::Chunk;
+use crate::chunk::layout::ChunkLayout;
+use crate::query::mut_ref::TMutPolicy;
 
 pub trait TComponent: Sized
 {
     type QueryType: TComponent + 'static;
     type StorageType: TComponent + 'static;
+
+    /// Picks what a `&mut Self` query hands out for one row: `TrackChanges` (a `Mut<Self>` that
+    /// stamps the changed tick on write) for a `ChangeAble` component, `NoTracking` (a plain
+    /// `&mut Self`) for everything else.
+    ///
+    /// The `#[component(...)]` macro fills this in from the flags you wrote, so you only think
+    /// about it when hand-writing a `TComponent` impl, where `NoTracking` is the answer unless
+    /// you also implement [`TChangeAble`].
+    type MutPolicy: TMutPolicy;
     const STORAGE_LOCATION: StorageLocation;
     const STATE_DETECTION: StateDetection;
 
@@ -62,7 +72,3 @@ pub trait TArchetype: Sized
     fn replace_at(layout: &ChunkLayout, chunk: &mut Chunk, row: usize, val: Self, tick: crate::apis::constants::ChangedTick) -> Result<(), XynokEcsError>;
     fn take_from(layout: &ChunkLayout, chunk: &mut Chunk, idx: usize) -> Result<Self, XynokEcsError>;
 }
-
-pub trait TEnablableComponent {}
-pub trait TAddedAbleComponent {}
-pub trait TChangedAbleComponent {}

@@ -14,6 +14,8 @@ impl TComponent for Entity
 
     type QueryType = Self;
 
+    type MutPolicy = crate::query::mut_ref::NoTracking;
+
     const STORAGE_LOCATION: StorageLocation = StorageLocation::Chunk;
 
     const STATE_DETECTION: crate::apis::identifies::StateDetection = StateDetection::None;

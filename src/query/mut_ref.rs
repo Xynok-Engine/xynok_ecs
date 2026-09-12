@@ -12,8 +12,11 @@ use crate::chunk::write_changed_tick;
 pub struct WriteStamp
 {
     /// Start of this column's `changed` region in the current chunk, or null when the component
-    /// does not track changes at all (not `ChangeAble`, or the archetype predates the column).
-    /// A null here simply means a write has nowhere to record itself.
+    /// does not track changes at all. A `Mut` only ever exists for a `ChangeAble` component, and
+    /// every chunk holding such a column carries its `changed` region (see `ChunkHeader::new`),
+    /// so by the time a stamp reaches a `Mut` this pointer is non-null. The null case is just the
+    /// resting value carried by read-only items and by an access struct that has not reached its
+    /// first chunk yet.
     pub changed_ptr: *mut u8,
     /// The tick a write should be stamped with, i.e. the world's tick as of this query
     pub tick:        ChangedTick,
@@ -29,7 +32,9 @@ impl WriteStamp
     };
 }
 
-/// What a `&mut T` query hands out for one row.
+/// What a `&mut T` query hands out for one row, when `T` is a `ChangeAble` component. A
+/// component without change detection skips this entirely and gets the `&mut T` itself, see
+/// [`TMutPolicy`].
 ///
 /// It behaves like `&mut T` through `Deref`/`DerefMut`, so `hp.0 = 5` and `let v = hp.0` read
 /// exactly as they did before. The difference is that only the `DerefMut` side stamps the row's
@@ -47,8 +52,9 @@ pub struct Mut<'a, T>
 impl<'a, T> Mut<'a, T>
 {
     /// # Safety
-    /// `stamp.changed_ptr` must either be null or point at the start of the `changed` region of
-    /// the very column `value` was read out of, in a chunk where `row` is a live row.
+    /// `stamp.changed_ptr` must point at the start of the `changed` region of the very column
+    /// `value` was read out of, in a chunk where `row` is a live row. Null is not allowed:
+    /// writing through the result dereferences it unconditionally.
     #[inline]
     pub(crate) unsafe fn new(value: &'a mut T, stamp: WriteStamp, row: usize) -> Self
     {
@@ -72,10 +78,10 @@ impl<'a, T> Mut<'a, T>
     #[inline]
     pub fn mark_changed(this: &mut Self)
     {
-        if !this.stamp.changed_ptr.is_null()
-        {
-            unsafe { write_changed_tick(this.stamp.changed_ptr, this.row, this.stamp.tick) };
-        }
+        // No null check: `Mut` is only handed out for a `ChangeAble` component, and such a
+        // column always has its `changed` region in the chunk. See `Mut::new`'s safety contract.
+        debug_assert!(!this.stamp.changed_ptr.is_null(), "a `Mut` was built on a column with no `changed` region");
+        unsafe { write_changed_tick(this.stamp.changed_ptr, this.row, this.stamp.tick) };
     }
 }
 
@@ -133,5 +139,52 @@ impl<'a, T: PartialEq> PartialEq<T> for Mut<'a, T>
     fn eq(&self, other: &T) -> bool
     {
         self.value == other
+    }
+}
+
+/// How a `&mut T` query hands out one row, picked by the component itself through
+/// [`TComponent::MutPolicy`](crate::apis::traits::TComponent::MutPolicy).
+///
+/// The point is that a component which never asked for change detection should not pay for it.
+/// A `ChangeAble` component goes through [`TrackChanges`] and gets a [`Mut<T>`]; everything else
+/// goes through [`NoTracking`] and gets a plain `&mut T`, with the stamp thrown away at compile
+/// time instead of checked at runtime.
+pub trait TMutPolicy
+{
+    /// What one row looks like to the caller
+    type Item<'a, T: 'a>;
+
+    /// # Safety
+    /// `ptr` must point at a live `T` at `row` of the current chunk, and `stamp` must satisfy
+    /// [`Mut::new`]'s contract whenever this policy actually builds a [`Mut`].
+    unsafe fn make<'a, T: 'a>(ptr: *mut T, stamp: WriteStamp, row: usize) -> Self::Item<'a, T>;
+}
+
+/// Policy for a `ChangeAble` component: hand out a [`Mut`], which stamps the row on write
+pub struct TrackChanges;
+
+/// Policy for everything else: hand out the `&mut T` the caller asked for, nothing wrapped
+/// around it
+pub struct NoTracking;
+
+impl TMutPolicy for TrackChanges
+{
+    type Item<'a, T: 'a> = Mut<'a, T>;
+
+    #[inline]
+    unsafe fn make<'a, T: 'a>(ptr: *mut T, stamp: WriteStamp, row: usize) -> Mut<'a, T>
+    {
+        unsafe { Mut::new(&mut *ptr, stamp, row) }
+    }
+}
+
+impl TMutPolicy for NoTracking
+{
+    type Item<'a, T: 'a> = &'a mut T;
+
+    #[inline]
+    unsafe fn make<'a, T: 'a>(ptr: *mut T, _stamp: WriteStamp, _row: usize) -> &'a mut T
+    {
+        unsafe { &mut *ptr }
     }
 }

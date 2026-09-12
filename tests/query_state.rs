@@ -332,3 +332,21 @@ fn t_added_only_fires_for_the_round_the_row_was_inserted_in()
     let added: Vec<u32> = w.create_query_since::<Added<&Hp>>(after_spawn).into_iter().map(|hp| hp.0).collect();
     assert_eq!(added, vec![3], "only {b:?} was inserted this round");
 }
+
+#[test]
+fn t_query_mut_of_a_changeable_component_hands_out_a_stamping_wrapper()
+{
+    let mut w = World::default();
+    w.create(Hp(1));
+
+    let query = w.create_query::<&mut Hp>();
+    for hp in query
+    {
+        // The counterpart of `t_query_mut_of_an_untracked_component_hands_out_a_plain_ref`:
+        // `Hp` is `ChangeAble` here, so the row arrives as a `Mut` that can stamp the write.
+        let mut hp: Mut<Hp> = hp;
+        hp.0 = 9;
+    }
+
+    assert_eq!(w.create_query::<&Hp>().into_iter().map(|hp| hp.0).collect::<Vec<_>>(), vec![9]);
+}

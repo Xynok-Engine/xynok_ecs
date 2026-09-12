@@ -160,6 +160,7 @@ mod test
             {
                 type QueryType = Self;
                 type StorageType = Self;
+                type MutPolicy = crate::query::mut_ref::NoTracking;
 
                 const STORAGE_LOCATION: StorageLocation = StorageLocation::Chunk;
 

@@ -81,7 +81,7 @@ fn t_query_mut_allows_writing_through_the_iterator()
     w.create(Hp(2));
 
     let query = w.create_query::<&mut Hp>();
-    for mut hp in query
+    for hp in query
     {
         hp.0 *= 10;
     }
@@ -99,7 +99,7 @@ fn t_query_mut_and_read_can_combine_in_one_tuple()
     w.add_component(e, Mana(5));
 
     let query = w.create_query::<(&mut Hp, &Mana)>();
-    for (mut hp, mana) in query
+    for (hp, mana) in query
     {
         hp.0 += mana.0;
     }
@@ -117,4 +117,24 @@ fn t_query_conflicting_access_on_the_same_component_is_rejected()
     let mut w = World::default();
     w.create(Hp(1));
     let _ = w.create_query::<(&Hp, &mut Hp)>();
+}
+
+#[test]
+fn t_query_mut_of_an_untracked_component_hands_out_a_plain_ref()
+{
+    let mut w = World::default();
+    w.create(Hp(1));
+
+    let query = w.create_query::<&mut Hp>();
+    for hp in query
+    {
+        // `Hp` never asked for change detection, so a `&mut` query owes it nothing: the item is
+        // the `&mut Hp` itself, with no stamp riding along. This annotation is the whole test,
+        // it stops compiling the moment the row comes back wrapped.
+        let hp: &mut Hp = hp;
+        hp.0 = 9;
+    }
+
+    let read_back = w.create_query::<&Hp>();
+    assert_eq!(read_back.into_iter().map(|hp| hp.0).collect::<Vec<_>>(), vec![9]);
 }

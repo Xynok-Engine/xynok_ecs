@@ -5,30 +5,31 @@ use crate::apis::constants::ChangedTick;
 use crate::apis::internal_traits::TQuerySrcAccess;
 use crate::apis::traits::TComponent;
 use crate::archetype::Archetype;
-use crate::query::mut_ref::{Mut, WriteStamp};
+use crate::query::mut_ref::{TMutPolicy, WriteStamp};
+use crate::query::variant::MutItem;
 use crate::world::arch_spec::ArchetypeSpecs;
 use crate::world::query_spec::QuerySpecAccessor;
 
 pub struct SrcAccess<'a>
 {
-    archetypes:          &'a ArchetypeSpecs,
-    arch_indices:        &'a [usize],
-    total_arch:          usize,
-    current_arch_idx:    usize,
-    current_arch:        Option<&'a Archetype>,
-    current_chunk_count: usize,
-    current_offset:      usize,
-    current_chunk_idx:   usize,
-    current_row_idx:     usize,
-    current_chunk_len:   usize,
-    current_col_ptr:     *const u8,
+    archetypes:             &'a ArchetypeSpecs,
+    arch_indices:           &'a [usize],
+    total_arch:             usize,
+    current_arch_idx:       usize,
+    current_arch:           Option<&'a Archetype>,
+    current_chunk_count:    usize,
+    current_offset:         usize,
+    current_chunk_idx:      usize,
+    current_row_idx:        usize,
+    current_chunk_len:      usize,
+    current_col_ptr:        *const u8,
     // resolved alongside `current_col_ptr` so `next_mut` can hand each row a `WriteStamp`
     // without touching the column descriptor again; stays null while the component tracks no
     // changes, and a `Mut` holding a null stamp simply records nothing
     current_changed_offset: Option<usize>,
-    current_stamp:       WriteStamp,
-    this_run_tick:       ChangedTick,
-    _lifetime:           PhantomData<&'a ()>,
+    current_stamp:          WriteStamp,
+    this_run_tick:          ChangedTick,
+    _lifetime:              PhantomData<&'a ()>,
 }
 impl<'a> TQuerySrcAccess<'a> for SrcAccess<'a>
 {
@@ -36,21 +37,21 @@ impl<'a> TQuerySrcAccess<'a> for SrcAccess<'a>
     {
         let arch_indices = accessor.arch_indices();
         Self {
-            archetypes:          accessor.archetypes,
-            arch_indices:        arch_indices,
-            total_arch:          arch_indices.len(),
-            current_arch_idx:    0,
-            current_arch:        None,
-            current_chunk_count: 0,
-            current_offset:      0,
-            current_chunk_idx:   0,
-            current_row_idx:     0,
-            current_chunk_len:   0,
-            current_col_ptr:     std::ptr::null(),
+            archetypes:             accessor.archetypes,
+            arch_indices:           arch_indices,
+            total_arch:             arch_indices.len(),
+            current_arch_idx:       0,
+            current_arch:           None,
+            current_chunk_count:    0,
+            current_offset:         0,
+            current_chunk_idx:      0,
+            current_row_idx:        0,
+            current_chunk_len:      0,
+            current_col_ptr:        std::ptr::null(),
             current_changed_offset: None,
-            current_stamp:       WriteStamp::NONE,
-            this_run_tick:       accessor.this_run_tick,
-            _lifetime:           PhantomData,
+            current_stamp:          WriteStamp::NONE,
+            this_run_tick:          accessor.this_run_tick,
+            _lifetime:              PhantomData,
         }
     }
 }
@@ -77,7 +78,7 @@ impl<'a> SrcAccess<'a>
     }
     #[inline]
     #[track_caller]
-    pub(crate) fn next_mut<T: TComponent + 'static>(&mut self) -> Option<Mut<'a, T>>
+    pub(crate) fn next_mut<T: TComponent + 'static>(&mut self) -> Option<MutItem<'a, T>>
     {
         loop
         {
@@ -85,7 +86,10 @@ impl<'a> SrcAccess<'a>
             if row < self.current_chunk_len
             {
                 self.current_row_idx = row + 1;
-                return Some(unsafe { Mut::new(&mut *(self.current_col_ptr as *mut T).add(row), self.current_stamp, row) });
+                unsafe {
+                    let dst = (self.current_col_ptr as *mut T).add(row);
+                    return Some(T::MutPolicy::make(dst, self.current_stamp, row));
+                }
             }
 
             if !self.advance_to_next_chunk::<T>()
@@ -117,7 +121,8 @@ impl<'a> SrcAccess<'a>
                 self.current_stamp = WriteStamp {
                     changed_ptr: match self.current_changed_offset
                     {
-                        Some(offset) => unsafe { chunk.ptr().add(offset) },
+                        Some(offset) =>
+                        unsafe { chunk.ptr().add(offset) },
                         None => std::ptr::null_mut(),
                     },
                     tick:        self.this_run_tick,

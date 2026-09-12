@@ -64,6 +64,17 @@ pub fn component(args: TokenStream, input: TokenStream) -> TokenStream
     {
         quote! {}
     };
+    // a `ChangeAble` component hands out `Mut<Self>` from a `&mut` query so writes stamp the
+    // changed tick; everything else hands out a plain `&mut Self` and pays nothing
+    let mut_policy = if changeable
+    {
+        quote! { xynok_ecs::query::mut_ref::TrackChanges }
+    }
+    else
+    {
+        quote! { xynok_ecs::query::mut_ref::NoTracking }
+    };
+
     let expanded = quote! {
         #input
 
@@ -71,6 +82,7 @@ pub fn component(args: TokenStream, input: TokenStream) -> TokenStream
         {
             type QueryType = Self;
             type StorageType = Self;
+            type MutPolicy = #mut_policy;
             const STORAGE_LOCATION: xynok_ecs::apis::identifies::StorageLocation = #location;
             const STATE_DETECTION: xynok_ecs::apis::identifies::StateDetection = #state_detection;
         }
