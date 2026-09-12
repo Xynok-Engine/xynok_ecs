@@ -69,6 +69,15 @@ pub trait TQueryParamFiltered: TQueryParam
 {
     type Component: TComponent + 'static;
 
+    /// Whether this element only selects archetypes and reads no column at all.
+    ///
+    /// `true` only for markers like [`Without`](crate::query::filter::Without), which do all of
+    /// their work in [`TQueryParam::access_scope`] and never touch a row. The tuple iterator
+    /// resolves one column pointer per element, and for those markers the column is guaranteed
+    /// *not* to be there, so it has to skip them instead of looking the descriptor up. Being a
+    /// const, the skipped branch disappears at compile time.
+    const IS_IGNORE_FILTER: bool = false;
+
     /// The offset (within a chunk) of the state region this element needs to check `accepts`,
     /// resolved from the archetype's column descriptor for `Component`. `None` for a plain
     /// column: it has no state to check, so `accepts` never dereferences its `state_ptr`.

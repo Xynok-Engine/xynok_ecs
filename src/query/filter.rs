@@ -2,9 +2,9 @@ use std::marker::PhantomData;
 
 use crate::apis::constants::ChangedTick;
 use crate::apis::identifies::XynokEcsError;
-use crate::apis::internal_traits::{TQueryColumn, TQueryParam, TQueryParamFiltered, TReadOnlyQueryParam};
+use crate::apis::internal_traits::{TQueryColumn, TQueryParam, TQueryParamFiltered, TQuerySrcAccess, TReadOnlyQueryParam};
 use crate::apis::params::ComponentSpecs;
-use crate::apis::traits::{TChangeAble, TEnableAble};
+use crate::apis::traits::{TChangeAble, TComponent, TEnableAble};
 use crate::chunk::column::ColumnDescriptor;
 use crate::chunk::{read_bit, read_changed_tick};
 use crate::query::access_scope::AccessScope;
@@ -12,7 +12,8 @@ use crate::query::mut_ref::WriteStamp;
 use crate::query::src_access_added::SrcAccessAdded;
 use crate::query::src_access_changed::SrcAccessChanged;
 use crate::query::src_access_enable::SrcAccessEnable;
-use crate::utils::is_newer_than;
+use crate::utils::{component_id_for, is_newer_than};
+use crate::world::query_spec::QuerySpecAccessor;
 
 macro_rules! define_filter
 {
@@ -119,5 +120,86 @@ define_filter!(
     accepts: |state_ptr, row, _last_run_tick, _this_run_tick| !unsafe { read_bit(state_ptr, row) }
 );
 
-//pub struct Without<T: TComponent + 'static>(PhantomData<T>);
+/// Keeps only the rows whose archetype does *not* carry `T`.
+///
+/// Unlike the filters above it takes the component itself, not `&T` or `&mut T`. It never reads
+/// anything: the component it names is exactly the one the matched archetypes are guaranteed to
+/// lack, so there is nothing to hand out. Its whole job is one bit in
+/// [`AccessScope::exclude`], and `belong_to` then drops those archetypes before iteration even
+/// starts. That also means it costs nothing per row.
+///
+/// It only makes sense as one element of a tuple, next to the columns you do want:
+///
+/// ```
+/// # use xynok_ecs::query::Query;
+/// # use xynok_ecs::query::filter::Without;
+/// # #[xynok_ecs::component]
+/// # struct Hp(u32);
+/// # #[xynok_ecs::component]
+/// # struct Frozen(u32);
+/// fn thaw(q: Query<(&Hp, Without<Frozen>)>)
+/// {
+///     for (hp, _) in q
+///     {
+///         let _ = hp;
+///     }
+/// }
+/// ```
+///
+/// Used on its own, `Query<Without<Frozen>>` names no column to walk, so it yields nothing.
+pub struct Without<T: TComponent + 'static>(PhantomData<fn() -> T>);
 
+/// The source access of a query that selects rows but names no column to read, i.e.
+/// [`Without`] standing alone. It has nothing to walk, so it is empty from the start.
+pub struct SrcAccessEmpty;
+
+impl<'a> TQuerySrcAccess<'a> for SrcAccessEmpty
+{
+    fn new(_accessor: &QuerySpecAccessor<'a>) -> Self
+    {
+        Self
+    }
+}
+
+impl<T: TComponent + 'static> TQueryParam for Without<T>
+{
+    type QueryItem<'a> = ();
+    type SrcAccess<'a> = SrcAccessEmpty;
+    type Shape = Without<T::StorageType>;
+
+    fn access_scope(component_specs: &mut ComponentSpecs) -> Result<AccessScope, XynokEcsError>
+    {
+        let mut scope = AccessScope::default();
+        scope.exclude.insert(component_id_for::<T>(component_specs));
+        Ok(scope)
+    }
+
+    fn next<'a>(_src_access: &mut Self::SrcAccess<'a>) -> Option<Self::QueryItem<'a>>
+    {
+        None
+    }
+}
+
+// SAFETY: `Without<T>` hands out `()`, there is nothing to write through
+unsafe impl<T: TComponent + 'static> TReadOnlyQueryParam for Without<T> {}
+
+impl<T: TComponent + 'static> TQueryParamFiltered for Without<T>
+{
+    // never looked up, `IS_IGNORE_FILTER` keeps the tuple iterator away from it
+    type Component = T;
+
+    const IS_IGNORE_FILTER: bool = true;
+
+    fn state_offset(_col_des: &ColumnDescriptor) -> Option<usize>
+    {
+        None
+    }
+
+    unsafe fn accepts(_state_ptr: *mut u8, _row: usize, _last_run_tick: ChangedTick, _this_run_tick: ChangedTick) -> bool
+    {
+        // the archetype was already dropped by `exclude`, every row that gets here passes
+        true
+    }
+
+    unsafe fn read_from<'a>(_col_ptr: *mut u8, _row: usize, _stamp: WriteStamp) -> Self::QueryItem<'a> {}
+}

@@ -12,7 +12,7 @@ use xynok_ecs::wrapper::{Disable, Enable};
 #[component(EnableAble)]
 #[derive(Debug, Default)]
 struct Hp(i32);
-#[component]
+#[component(ChangeAble)]
 #[derive(Debug, Default)]
 struct Mana(i32);
 
@@ -45,7 +45,7 @@ fn main()
     // `Disabled<&mut Hp>` still filters on the enable bit, but hands out a mutable reference -
     // useful for e.g. reviving a disabled entity's stats before re-enabling it elsewhere.
     println!("\n---------------- Query<Disabled<&mut Hp>>: heal every disabled Hp in place");
-    for mut hp in world.create_query::<Disabled<&mut Hp>>()
+    for hp in world.create_query::<Disabled<&mut Hp>>()
     {
         hp.0 = 50;
     }

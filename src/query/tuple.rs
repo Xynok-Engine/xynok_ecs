@@ -122,27 +122,34 @@ macro_rules! impl_tuple_query_param {
 
                     let chunk_ptr = chunk.ptr();
                     $(
-                        // every archetype in `self.archetypes` was pre-filtered (see
-                        // `build_archetype_which_contains`) to carry all of the tuple's columns
-                        let col_des = match arch_spec.layout.component_col_descriptors.get(&TypeId::of::<<<$q as TQueryParamFiltered>::Component as TComponent>::StorageType>())
+                        // a marker element (`IS_IGNORE_FILTER`) leaves all three pointers null:
+                        // its component is the one the archetype is guaranteed *not* to carry, so
+                        // there is no descriptor to look up. The branch is const, it costs nothing
+                        // at runtime.
+                        if !<$q as TQueryParamFiltered>::IS_IGNORE_FILTER
                         {
-                            Some(col_des) => col_des,
-                            None => panic!(
-                                "archetype does not carry a column for component `{}` even though it was pre-filtered to contain it",
-                                std::any::type_name::<<<$q as TQueryParamFiltered>::Component as TComponent>::StorageType>()
-                            ),
-                        };
-                        self.$ptr = unsafe { chunk_ptr.add(col_des.offset) };
-                        self.$state_ptr = match $q::state_offset(col_des)
-                        {
-                            Some(state_offset) => unsafe { chunk_ptr.add(state_offset) },
-                            None => std::ptr::null_mut(),
-                        };
-                        self.$changed_ptr = match col_des.state_offset.changed_offset
-                        {
-                            Some(changed_offset) => unsafe { chunk_ptr.add(changed_offset) },
-                            None => std::ptr::null_mut(),
-                        };
+                            // every archetype in `self.archetypes` was pre-filtered (see
+                            // `build_archetype_which_contains`) to carry all of the tuple's columns
+                            let col_des = match arch_spec.layout.component_col_descriptors.get(&TypeId::of::<<<$q as TQueryParamFiltered>::Component as TComponent>::StorageType>())
+                            {
+                                Some(col_des) => col_des,
+                                None => panic!(
+                                    "archetype does not carry a column for component `{}` even though it was pre-filtered to contain it",
+                                    std::any::type_name::<<<$q as TQueryParamFiltered>::Component as TComponent>::StorageType>()
+                                ),
+                            };
+                            self.$ptr = unsafe { chunk_ptr.add(col_des.offset) };
+                            self.$state_ptr = match $q::state_offset(col_des)
+                            {
+                                Some(state_offset) => unsafe { chunk_ptr.add(state_offset) },
+                                None => std::ptr::null_mut(),
+                            };
+                            self.$changed_ptr = match col_des.state_offset.changed_offset
+                            {
+                                Some(changed_offset) => unsafe { chunk_ptr.add(changed_offset) },
+                                None => std::ptr::null_mut(),
+                            };
+                        }
                     )+
                     self.current_chunk_len = chunk.len();
                     self.current_row_idx = 0;

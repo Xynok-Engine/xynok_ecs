@@ -4,6 +4,7 @@ mod common;
 use std::collections::HashSet;
 
 use common::*;
+use xynok_ecs::query::filter::Without;
 use xynok_ecs::world::World;
 
 #[test]
@@ -137,4 +138,64 @@ fn t_query_mut_of_an_untracked_component_hands_out_a_plain_ref()
 
     let read_back = w.create_query::<&Hp>();
     assert_eq!(read_back.into_iter().map(|hp| hp.0).collect::<Vec<_>>(), vec![9]);
+}
+
+// ------------------------------------------------------------------------------------------------
+// Without
+// ------------------------------------------------------------------------------------------------
+
+#[test]
+fn t_without_drops_entities_carrying_the_excluded_component()
+{
+    let mut w = World::default();
+    let with_mana = w.create(Hp(1));
+    w.add_component(with_mana, Mana(10));
+    w.create(Hp(2)); // Hp only
+
+    let query = w.create_query::<(&Hp, Without<Mana>)>();
+    let seen: Vec<u32> = query.into_iter().map(|(hp, ())| hp.0).collect();
+
+    assert_eq!(seen, vec![2], "the entity carrying Mana must not show up");
+}
+
+#[test]
+fn t_without_an_unused_component_keeps_everything()
+{
+    let mut w = World::default();
+    w.create(Hp(1));
+    w.create(Hp(2));
+
+    let query = w.create_query::<(&Hp, Without<Mana>)>();
+    let mut seen: Vec<u32> = query.into_iter().map(|(hp, ())| hp.0).collect();
+    seen.sort();
+
+    assert_eq!(seen, vec![1, 2]);
+}
+
+#[test]
+fn t_without_still_lets_the_other_elements_write()
+{
+    let mut w = World::default();
+    let with_mana = w.create(Hp(1));
+    w.add_component(with_mana, Mana(10));
+    w.create(Hp(2));
+
+    for (hp, ()) in w.create_query::<(&mut Hp, Without<Mana>)>()
+    {
+        hp.0 += 100;
+    }
+
+    let mut seen: Vec<u32> = w.create_query::<&Hp>().into_iter().map(|hp| hp.0).collect();
+    seen.sort();
+    assert_eq!(seen, vec![1, 102], "only the Mana-less row may be touched");
+}
+
+/// `Without` names no column to walk, so on its own there is nothing to iterate.
+#[test]
+fn t_without_alone_yields_nothing()
+{
+    let mut w = World::default();
+    w.create(Hp(1));
+
+    assert_eq!(w.create_query::<Without<Mana>>().into_iter().count(), 0);
 }

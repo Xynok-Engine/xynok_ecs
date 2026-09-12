@@ -101,7 +101,7 @@ mod test
 {
     use crate::apis::internal_traits::TQueryParam;
     use crate::component;
-    use crate::query::filter::{Added, Changed, Disabled, Enabled};
+    use crate::query::filter::{Added, Changed, Disabled, Enabled, Without};
     use crate::world::World;
 
     #[component(EnableAble, ChangeAble)]
@@ -130,6 +130,8 @@ mod test
             <(&Hp, &mut Mana) as TQueryParam>::TYPE_ID,
             <(&mut Hp, &Mana) as TQueryParam>::TYPE_ID,
             <(Changed<&Hp>, &Mana) as TQueryParam>::TYPE_ID,
+            <(&Hp, Without<Mana>) as TQueryParam>::TYPE_ID,
+            <(&Hp, Without<Hp>) as TQueryParam>::TYPE_ID,
         ];
 
         for (i, a) in ids.iter().enumerate()
@@ -179,6 +181,7 @@ mod test
             (shape_of::<Changed<&mut Hp>>(), "Changed<&mut Hp>"),
             (shape_of::<Disabled<&Hp>>(), "Disabled<&Hp>"),
             (shape_of::<(Added<&Hp>, Enabled<&mut Mana>)>(), "(Added<&Hp>, Enabled<&mut Mana>)"),
+            (shape_of::<(&Hp, Without<Mana>)>(), "(&Hp, Without<Mana>)"),
         ];
 
         for (got, want) in &cases
