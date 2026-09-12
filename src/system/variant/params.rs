@@ -30,7 +30,7 @@ macro_rules! mutiple_param_system {
             }
             fn prepare(&self, world: HeapMut<World>) -> Result<(), XynokEcsError>
             {
-                $(let _= $name::init(world, self.last_run_tick)?;)*
+                $($name::prepare(world, self.last_run_tick)?;)*
                 Ok(())
             }
             fn run(&mut self, world: HeapMut<World>)-> Result<(), XynokEcsError>

@@ -72,6 +72,11 @@ pub trait TSystemParam: Sized
     /// from `World` without racing.
     fn init(world: HeapMut<World>, last_run_tick: ChangedTick) -> Result<Self, XynokEcsError>;
 
+    /// Does whatever this parameter needs an exclusive `&mut World` for, so that a later `init`
+    /// only ever reads. The scheduler calls this on its own thread before a parallel group
+    /// starts, which is what keeps the jobs from aliasing the world.
+    fn prepare(world: HeapMut<World>, last_run_tick: ChangedTick) -> Result<(), XynokEcsError>;
+
     /// Adds what this parameter accesses to `dst`, which rejects it if it conflicts with a
     /// parameter already registered. A parameter that touches no component storage adds
     /// nothing rather than an empty [`AccessScope`].

@@ -20,4 +20,9 @@ impl TSystemParam for ()
     {
         Ok(())
     }
+
+    fn prepare(_world: HeapMut<World>, _last_run_tick: ChangedTick) -> Result<(), XynokEcsError>
+    {
+        Ok(())
+    }
 }

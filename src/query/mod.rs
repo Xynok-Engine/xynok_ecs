@@ -89,6 +89,20 @@ impl<'a, T: TQueryParam + 'static> Query<'a, T>
             phantom:  PhantomData,
         })
     }
+
+    /// The read-only build, for a world whose spec for `T` is already registered and up to date
+    /// (see [`World::prepare_query_src_access`]). Returns `None` otherwise, and the caller then
+    /// falls back to [`Query::new`].
+    ///
+    /// This is what a job inside a parallel group uses: it never needs `&mut World`, so several
+    /// jobs building their queries at once stay sound.
+    pub(crate) fn new_prepared(world: &'a World, last_run_tick: crate::apis::constants::ChangedTick) -> Option<Self>
+    {
+        Some(Self {
+            accessor: world.query_src_access::<T>(last_run_tick)?,
+            phantom:  PhantomData,
+        })
+    }
 }
 
 impl<'a, T: TQueryParam + 'static> IntoIterator for Query<'a, T>

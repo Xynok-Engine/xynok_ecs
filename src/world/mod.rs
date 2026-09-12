@@ -540,10 +540,13 @@ impl World
         self.query_counter.value_at(idx).map(|spec| spec.access_scope.is_read_only())
     }
 
-    pub(crate) fn get_or_create_query_src_access<'a, T: TQueryParam + 'static>(
-        &'a mut self,
-        last_run_tick: ChangedTick,
-    ) -> Result<QuerySpecAccessor<'a>, XynokEcsError>
+    /// Registers the `QuerySpec` for `T` and refreshes its archetype list if the world has
+    /// changed shape since.
+    ///
+    /// This is the only part that needs `&mut World`, so it runs only where a single thread is
+    /// guaranteed: the scheduler's `prepare` pass, or the first touch on a single-threaded world.
+    /// Once it has run, building an accessor needs nothing but `&World`.
+    pub(crate) fn prepare_query_src_access<T: TQueryParam + 'static>(&mut self) -> Result<usize, XynokEcsError>
     {
         let current_global_arch_version = self.global_archetype_version.current_val();
 
@@ -581,18 +584,48 @@ impl World
             query_spec.version = current_global_arch_version;
         }
 
+        Ok(query_idx)
+    }
+
+    /// The read-only fast path. Returns `None` when `T` has not been registered yet, or when its
+    /// spec is stale against `global_archetype_version`, which means the caller has to go back
+    /// through [`World::prepare_query_src_access`].
+    ///
+    /// Taking `&self` is the point: every job in a parallel group may call this at the same time,
+    /// instead of each one conjuring its own `&mut World` and aliasing the others.
+    pub(crate) fn query_src_access<'a, T: TQueryParam + 'static>(&'a self, last_run_tick: ChangedTick) -> Option<QuerySpecAccessor<'a>>
+    {
+        let query_idx = self.query_counter.index_of(&T::TYPE_ID)?;
+        if self.query_counter.value_at(query_idx)?.version != self.global_archetype_version.current_val()
+        {
+            return None;
+        }
+
+        Some(QuerySpecAccessor {
+            query_idx:       query_idx,
+            queries:         &self.query_counter,
+            archetypes:      &self.archetypes,
+            component_specs: &self.component_counter,
+            last_run_tick:   last_run_tick,
+            this_run_tick:   self.current_tick(),
+        })
+    }
+
+    pub(crate) fn get_or_create_query_src_access<'a, T: TQueryParam + 'static>(
+        &'a mut self,
+        last_run_tick: ChangedTick,
+    ) -> Result<QuerySpecAccessor<'a>, XynokEcsError>
+    {
+        self.prepare_query_src_access::<T>()?;
+
         // every mutation is done, so the exclusive borrow can turn into the shared one the
         // accessor keeps for `'a`
-        let this_run_tick = self.current_tick();
         let this: &'a World = self;
-        Ok(QuerySpecAccessor {
-            query_idx:       query_idx,
-            queries:         &this.query_counter,
-            archetypes:      &this.archetypes,
-            component_specs: &this.component_counter,
-            last_run_tick:   last_run_tick,
-            this_run_tick:   this_run_tick,
-        })
+        match this.query_src_access::<T>(last_run_tick)
+        {
+            Some(r) => Ok(r),
+            None => panic!("query spec for {} vanished right after it was prepared", std::any::type_name::<T>()),
+        }
     }
 }
 impl World
