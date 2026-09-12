@@ -59,3 +59,37 @@ fn t_unrelated_archetypes_do_not_share_rows()
     assert_eq!(testing::read_component::<Hp>(&w, a), Hp(1));
     assert_eq!(testing::read_component::<Mana>(&w, b), Mana(2));
 }
+
+
+/// `world.create((Hp(1), Hp(2)))` used to die on an `unwrap()` deep inside `ChunkLayout`, with a
+/// message that named neither the archetype nor the component. A chunk keeps one column per
+/// component, so the second value would land on top of the first without dropping it.
+#[test]
+#[should_panic(expected = "more than once")]
+fn an_archetype_naming_one_component_twice_is_rejected()
+{
+    let mut w = World::default();
+    w.create((Hp(1), Hp(2)));
+}
+
+/// The same archetype through `register_archetype`, which never builds a row: the check has to
+/// sit where the archetype is registered, not where an entity is written.
+#[test]
+#[should_panic(expected = "more than once")]
+fn registering_a_duplicated_archetype_is_rejected()
+{
+    let mut w = World::default();
+    w.register_archetype::<(Hp, Mana, Hp)>();
+}
+
+/// The duplicate collapses onto the component set of a plain `Hp` archetype, so it can reuse
+/// that archetype and never reach `ChunkLayout` at all. This is the case the layout-level check
+/// on its own cannot see.
+#[test]
+#[should_panic(expected = "more than once")]
+fn a_duplicate_that_reuses_an_existing_archetype_is_still_rejected()
+{
+    let mut w = World::default();
+    w.create(Hp(1));
+    w.create((Hp(2), Hp(3)));
+}

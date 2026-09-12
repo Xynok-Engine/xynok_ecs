@@ -51,6 +51,12 @@ pub enum XynokEcsError
     #[error("Duplicated component detected in this pair of Archetypes")]
     DuplicatedComponent,
 
+    #[error(
+        "Archetype declares component `{0}` more than once. A chunk keeps one column per component, \
+         so the second value would overwrite the first without dropping it. Name each component once."
+    )]
+    DuplicateComponentInArchetype(&'static str),
+
     #[error("Different Entity !")]
     EntityIsNotTheSame,
 

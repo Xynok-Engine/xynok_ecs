@@ -680,6 +680,13 @@ impl World
     #[track_caller]
     fn create_archetype_id<T: TArchetype + 'static>(&mut self) -> usize
     {
+        // Runs once per `T`, the first time the world sees it: from here on `archetype_counter`
+        // answers straight away, so the check costs nothing on the hot path.
+        if let Err(e) = check_no_duplicate_component::<T>()
+        {
+            panic!("Create Archetype `{}` Failed: {e}", std::any::type_name::<T>());
+        }
+
         let component_set = &mut self.temp_alloc.vec_usize;
         component_set.clear();
 
@@ -781,4 +788,27 @@ impl World
     {
         self.global_archetype_version.increase();
     }
+}
+
+/// Rejects an archetype that names the same component twice, e.g. `world.create((Hp(1), Hp(2)))`.
+///
+/// A chunk keeps exactly one column per component, so the second value would land on top of the
+/// first without dropping it: a silent leak, and only one of the two survives. Catching it here
+/// rather than in `ChunkLayout` matters because the duplicate is invisible by the time the layout
+/// is built: `normalize_set` has already collapsed the id list, so `(Hp, Hp)` looks exactly like
+/// `Hp` and may reuse that archetype without building a layout at all.
+///
+/// `T::COMPONENT_DESCRIPTORS` is a const slice of at most 16 entries, so the quadratic scan is
+/// cheaper than reaching for a set, and it runs once per `T` for the life of the world.
+fn check_no_duplicate_component<T: TArchetype>() -> Result<(), XynokEcsError>
+{
+    let descriptors = T::COMPONENT_DESCRIPTORS;
+    for (i, des) in descriptors.iter().enumerate()
+    {
+        if descriptors[..i].iter().any(|earlier| earlier.storage_type_id == des.storage_type_id)
+        {
+            return Err(XynokEcsError::DuplicateComponentInArchetype(des.name()));
+        }
+    }
+    Ok(())
 }

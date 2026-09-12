@@ -50,7 +50,7 @@ impl ChunkLayout
 }
 fn compute_layout(params: &mut ChunkLayoutParams) -> Result<ChunkLayout, XynokEcsError>
 {
-    build_component_but_set(params.component_bit_set_temp, params.components, params.component_specs)?;
+    build_component_bit_set(params.component_bit_set_temp, params.components, params.component_specs)?;
 
     // Each entity costs its handle in the header plus one slot in every component column
     let bytes_per_entity = params
@@ -78,14 +78,27 @@ fn compute_layout(params: &mut ChunkLayoutParams) -> Result<ChunkLayout, XynokEc
         max_entities -= 1;
     }
 }
-fn build_component_but_set(dst: &mut ComponentBitSet, src: &[ComponentDescriptor], component_specs: &ComponentSpecs) -> Result<(), XynokEcsError>
+/// Builds the archetype's component bit set, and rejects a component named twice on the way.
+///
+/// The bit set is the natural place for that check: a component already carrying its bit is
+/// exactly a duplicate, so it costs one `contains` per component and no extra storage. The
+/// world catches this earlier (see `check_no_duplicate_component`), this is the backstop for
+/// the layouts built by merging two archetypes.
+fn build_component_bit_set(dst: &mut ComponentBitSet, src: &[ComponentDescriptor], component_specs: &ComponentSpecs) -> Result<(), XynokEcsError>
 {
     dst.clear();
     for des in src
     {
         match component_specs.index_of(&des.storage_type_id)
         {
-            Some(component_id) => dst.insert(component_id),
+            Some(component_id) =>
+            {
+                if dst.contains(component_id)
+                {
+                    return Err(XynokEcsError::DuplicateComponentInArchetype(des.name()));
+                }
+                dst.insert(component_id)
+            }
             None => return Err(XynokEcsError::ComponentSpecIsNotRegistered),
         }
     }
@@ -109,7 +122,14 @@ fn try_layout(max_entities: usize, params: &mut ChunkLayoutParams) -> Result<Chu
         {
             return Err(XynokEcsError::ArchetypeIsTooLarge);
         }
-        let state_offset = params.state_offsets_temp.remove(&des.storage_type_id).unwrap();
+        // `Header::new` seeds one entry per component, and `compute_layout` has already
+        // rejected duplicates, so the only way this comes up empty is a component appearing
+        // twice. Reported rather than unwrapped: the panic it used to raise said nothing.
+        let state_offset = match params.state_offsets_temp.remove(&des.storage_type_id)
+        {
+            Some(r) => r,
+            None => return Err(XynokEcsError::DuplicateComponentInArchetype(des.name())),
+        };
 
         params
             .component_descriptors_temp
@@ -243,6 +263,23 @@ mod test
 
         let got: Vec<_> = layout.component_bit_set.iter().collect();
         assert_eq!(got, expected, "bit set must carry exactly the archetype's component ids");
+    }
+
+    /// A layout built by merging two archetypes must not end up with two columns for one
+    /// component. The world rejects this earlier, but the layout is the last line of defence:
+    /// the second column would silently overwrite the first without dropping it.
+    #[test]
+    fn duplicate_component_is_rejected()
+    {
+        let descriptors = [Hp::COMPONENT_DESCRIPTOR, Mana::COMPONENT_DESCRIPTOR, Hp::COMPONENT_DESCRIPTOR];
+        let result = layout_of(&descriptors);
+
+        match result
+        {
+            Err(XynokEcsError::DuplicateComponentInArchetype(name)) => assert!(name.ends_with("Hp"), "the message must name the offender, got `{name}`"),
+            Err(e) => panic!("wrong error: {e}"),
+            Ok(_) => panic!("an archetype naming `Hp` twice must not produce a layout"),
+        }
     }
 
     #[test]

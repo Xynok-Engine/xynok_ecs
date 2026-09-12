@@ -45,6 +45,7 @@ pub trait TComponentDescriptor
 impl<T: TComponent + 'static> TComponentDescriptor for T
 {
     const COMPONENT_DESCRIPTOR: ComponentDescriptor = ComponentDescriptor {
+        fn_name:          std::any::type_name::<T::StorageType>,
         storage_type_id:  std::any::TypeId::of::<T::StorageType>(),
         query_type_id:    std::any::TypeId::of::<T::QueryType>(),
         byte_size:        std::mem::size_of::<T::StorageType>(),
