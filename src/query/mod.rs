@@ -50,6 +50,18 @@ pub mod mut_ref;
 /// struct Mana(u32);
 /// needs_copy::<Query<'static, (&Hp, &mut Mana)>>();
 /// ```
+/// A query cannot outlive a change to the world it reads, since it borrows the world mutably
+/// for as long as it lives:
+///
+/// ```compile_fail
+/// use xynok_ecs::world::World;
+/// #[xynok_ecs::component]
+/// struct Hp(u32);
+/// let mut w = World::default();
+/// let query = w.create_query::<&Hp>();
+/// w.create(Hp(1));
+/// for _ in query {}
+/// ```
 pub struct Query<'a, T: TQueryParam + 'static>
 {
     accessor: QuerySpecAccessor<'a>,

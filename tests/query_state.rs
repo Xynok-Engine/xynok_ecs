@@ -144,9 +144,8 @@ fn t_change_detection_state_survives_a_migration()
     assert_eq!(after.enabled, before.enabled);
 }
 
-/// `Changed` from a plain `create_query` compares against tick `0`, so it reports every row ever
-/// written. That is the whole contract outside a system run, and it still has to hold after rows
-/// have been shuffled around.
+/// The first `create_query` on a world has no previous call to measure against, so its `Changed`
+/// reports every row written so far. That still has to hold after rows have been shuffled around.
 #[test]
 fn t_changed_filter_still_reports_written_rows_after_a_swap()
 {
@@ -170,8 +169,7 @@ fn t_iterating_a_mut_query_without_writing_does_not_mark_anything_changed()
 {
     let mut w = World::default();
     let a = w.create(Hp(1));
-    let seen_up_to = w.current_tick();
-    w.advance_tick();
+    let seen_up_to = w.capture_current_tick();
 
     let mut total = 0;
     for hp in w.create_query::<&mut Hp>()
@@ -196,8 +194,7 @@ fn t_writing_through_a_mut_query_marks_the_row_changed()
     w.create(Hp(1));
     w.create(Hp(2));
 
-    let seen_up_to = w.current_tick();
-    w.advance_tick();
+    let seen_up_to = w.capture_current_tick();
 
     for mut hp in w.create_query::<&mut Hp>()
     {
@@ -222,8 +219,7 @@ fn t_writing_through_a_filtered_mut_query_marks_the_row_changed()
     w.create(Hp(1));
     w.create(Disable::new(Hp(2)));
 
-    let seen_up_to = w.current_tick();
-    w.advance_tick();
+    let seen_up_to = w.capture_current_tick();
 
     for mut hp in w.create_query::<Disabled<&mut Hp>>()
     {
@@ -244,8 +240,7 @@ fn t_writing_through_a_tuple_marks_only_the_written_column()
     let mut w = World::default();
     let a = w.create((Hp(1), Mana(1)));
 
-    let seen_up_to = w.current_tick();
-    w.advance_tick();
+    let seen_up_to = w.capture_current_tick();
 
     for (mut hp, _mana) in w.create_query::<(&mut Hp, &mut Mana)>()
     {
@@ -271,8 +266,7 @@ fn t_bypass_change_detection_writes_without_stamping()
     let mut w = World::default();
     w.create(Hp(1));
 
-    let seen_up_to = w.current_tick();
-    w.advance_tick();
+    let seen_up_to = w.capture_current_tick();
 
     for mut hp in w.create_query::<&mut Hp>()
     {
@@ -292,7 +286,7 @@ fn t_bypass_change_detection_writes_without_stamping()
 // ------------------------------------------------------------------------------------------------
 
 #[test]
-fn t_advance_tick_closes_one_round_of_change_detection()
+fn t_capture_current_tick_closes_one_round_of_change_detection()
 {
     let mut w = World::default();
     let a = w.create(Hp(1));
@@ -301,8 +295,7 @@ fn t_advance_tick_closes_one_round_of_change_detection()
     let before_round_1 = 0;
     assert_eq!(w.create_query_since::<Changed<&Hp>>(before_round_1).into_iter().count(), 1);
 
-    let before_round_2 = w.current_tick();
-    w.advance_tick();
+    let before_round_2 = w.capture_current_tick();
     assert_eq!(
         w.create_query_since::<Changed<&Hp>>(before_round_2).into_iter().count(),
         0,
@@ -323,8 +316,7 @@ fn t_added_only_fires_for_the_round_the_row_was_inserted_in()
     let mut w = World::default();
     let a = w.create(Hp(1));
 
-    let after_spawn = w.current_tick();
-    w.advance_tick();
+    let after_spawn = w.capture_current_tick();
 
     w.merge_component(a, Hp(2)); // a write, not an insert
     let b = w.create(Hp(3)); // a real insert, this round
@@ -349,4 +341,21 @@ fn t_query_mut_of_a_changeable_component_hands_out_a_stamping_wrapper()
     }
 
     assert_eq!(w.create_query::<&Hp>().into_iter().map(|hp| hp.0).collect::<Vec<_>>(), vec![9]);
+}
+
+/// The example in `World::create_query`'s docs, kept runnable so it cannot quietly drift: each
+/// `create_query` measures `Changed` against the previous one, and the first call on a fresh
+/// world reports everything written so far.
+#[test]
+fn t_create_query_reports_changes_since_the_previous_create_query()
+{
+    let mut w = World::default();
+    let a = w.create(Hp(1));
+    w.create(Hp(2));
+
+    assert_eq!(changed_hp(&mut w), HashSet::from([1, 2]), "nobody has looked yet, so both rows are news");
+    assert_eq!(changed_hp(&mut w), HashSet::new(), "and now they are not");
+
+    w.merge_component(a, Hp(99));
+    assert_eq!(changed_hp(&mut w), HashSet::from([99]), "only the row written since the last look");
 }

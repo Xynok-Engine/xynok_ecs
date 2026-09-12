@@ -1,11 +1,11 @@
 # xynok_ecs
 [![discord invite link](https://img.shields.io/discord/1495504680711880714?logo=discord)](https://discord.gg/a2qzfrFzWT)
 
-## Introduction
+## Preface
 
 This repository contains a lightweight ECS library designed specifically for the Xynok engine. My goal is not to build a feature-rich, general-purpose ECS, but rather to provide a lean implementation that covers the essential requirements for my engine's architecture.
 
-## Core Functionality
+## Overview
 
 The library focuses on providing the fundamental building blocks necessary for entity and component management. Currently, it supports:
 
@@ -14,6 +14,9 @@ The library focuses on providing the fundamental building blocks necessary for e
 - Manual system scheduling
 
 Notably, this library lacks complex abstractions such as job graphs or automatic parallelization. All operations must be scheduled manually by the developer.
+
+## Docs
+- [details docs at here](docs/xynok_ecs_overview.md)
 
 ## Performance and Benchmarks
 
@@ -86,20 +89,4 @@ The report binary joins the two and writes `benches/output/results.json` plus
 `benches/output/report.html`, a self-contained page with the comparison table and charts. It exits
 non-zero if any scenario allocates in the timed loop or leaks, so it works as a CI check too.
 Criterion's own report lands at `target/criterion/report/index.html`.
-
-### Multi-threaded scheduling
-A second target, `benches/parallel.rs`, compares the two schedulers rather than the two query
-loops. One benchmark is one frame: a group of systems that provably never touch the same component,
-handed to `xynok_ecs`'s `add_system_parallel` on one side and to bevy's multi-threaded executor on
-the other. Both pools run 4 worker threads, group sizes are 2 and 4 systems, and the entity counts
-are the same 1k/10k/100k. The `std::Vec` baseline sits this one out, having no scheduler to compare.
-
-It gets its own half of the report, with one difference in what is measured. A frame runs on
-several threads at once, so its allocation figure comes from process-wide counters rather than
-per-thread ones, and unlike the query loop it is not expected to be zero: a scheduler that hands
-work to other threads has jobs, queues and wakeups to pay for. What the report shows is the
-per-frame figure, which is the difference between paying that cost once and paying it every frame.
-Those rows are reported but never fail the run.
-
-
 

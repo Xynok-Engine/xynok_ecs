@@ -49,6 +49,9 @@ pub struct World
     // (see `schedule::scheduler::run_system_group`); only uniqueness/monotonicity is required
     // between systems, not any particular ordering, so `Relaxed` is enough
     tick:                     AtomicChangedTick,
+    // the tick as of the previous `create_query` call, i.e. the baseline that call's successor
+    // measures `Added`/`Changed` against. `0` means "nobody has queried yet".
+    last_query_tick:          ChangedTick,
 }
 impl Default for World
 {
@@ -69,7 +72,8 @@ impl Default for World
             // first-ever write also stamped tick `0`, `is_newer_than(0, last_run=0, this_run=1)`
             // would compare it as "not newer" (equal ages), so anything spawned before the very
             // first system run would be invisible to that system's first `Added`/`Changed` check
-            tick: AtomicChangedTick::new(1),
+            tick:                     AtomicChangedTick::new(1),
+            last_query_tick:          0,
         }
     }
 }
@@ -374,51 +378,86 @@ impl World
         result.val
     }
 
-    /// Builds a query over the world's current state.
+    /// Builds a query over the current state of the world.
+    ///
+    /// The `Added` / `Changed` filters report what happened since the previous `create_query`
+    /// call on this world. The first call reports everything written so far, since nothing has
+    /// looked yet. The other filters (`Without`, `Enabled`, `Disabled`) read the current state
+    /// and have no notion of time.
     ///
     /// The query borrows the world mutably for as long as it lives, so treat it as a short lived
-    /// value: create it, iterate it, let it go.
+    /// value: create it, iterate it, let it go. Keeping one around while the world changes does
+    /// not compile, see [`Query`].
     ///
-    /// ```
-    /// use xynok_ecs::world::World;
-    /// #[xynok_ecs::component]
-    /// struct Hp(u32);
-    /// let mut w = World::default();
-    /// w.create(Hp(1));
-    /// for _ in w.create_query::<&Hp>()
-    /// {}
+    /// Example usages:
+    /// ```text
+    /// let a = w.create(Hp(1));
     /// w.create(Hp(2));
-    /// for _ in w.create_query::<&Hp>()
-    /// {}
-    /// ```
-    ///
-    /// Keeping a query around while the world changes does not compile:
-    ///
-    /// ```compile_fail
-    /// use xynok_ecs::world::World;
-    /// #[xynok_ecs::component]
-    /// struct Hp(u32);
-    /// let mut w = World::default();
-    /// let query = w.create_query::<&Hp>();
-    /// w.create(Hp(1));
-    /// for _ in query {}
+    /// w.create_query::<Changed<&Hp>>()  // 2 rows
+    /// w.create_query::<Changed<&Hp>>()  // empty
+    /// w.merge_component(a, Hp(99));
+    /// w.create_query::<Changed<&Hp>>()  // only 99
     /// ```
     #[track_caller]
     pub fn create_query<'a, T: TQueryParam + 'static>(&'a mut self) -> Query<'a, T>
     {
-        // Nothing ran this query before, so `0` ("never") is the only honest baseline. For a
-        // plain `&Hp` that changes nothing, but it does mean `Added`/`Changed` here report
-        // every row ever touched rather than only recent ones. To ask for a narrower window,
-        // take a `current_tick` snapshot and use `create_query_since`.
-        self.create_query_since(0)
+        // The baseline is the tick as it stood at the *previous* `create_query`, not at the
+        // previous advance: writes made between the two calls were stamped with the tick this
+        // method left behind last time, so using that tick itself as the baseline would filter
+        // them right back out (`is_newer_than` treats equal ticks as "not newer").
+        let last_query_tick = self.last_query_tick;
+        self.last_query_tick = self.current_tick();
+
+        // the round is closed by `create_query_since`, which every query goes through
+        self.create_query_since(last_query_tick)
     }
 
     /// Same as [`create_query`](Self::create_query), but with an explicit baseline for the
     /// `Added` / `Changed` filters: only rows stamped *after* `last_run_tick` are yielded.
+    /// Use it when you want to hold a window of your own instead of the one `create_query`
+    /// keeps for you, for example when driving a world by hand or writing your own scheduler.
     ///
-    /// Inside a schedule this is what the scheduler does for you, handing each system the tick
-    /// of its own previous run. Outside one, the world's tick only moves when you move it, so
-    /// a round looks like this:
+    /// Like `create_query`, this closes the current round of change detection on the way out,
+    /// so it moves the world's tick even though the name only talks about reading.
+    ///
+    /// Take the baseline with [`capture_current_tick`](Self::capture_current_tick), which hands
+    /// back exactly what this parameter wants.
+    #[track_caller]
+    pub fn create_query_since<'a, T: TQueryParam + 'static>(&'a mut self, last_run_tick: ChangedTick) -> Query<'a, T>
+    {
+        // Every query closes the current round of change detection, exactly like `create_query`:
+        // whatever gets written from here on is stamped with a tick of its own, so the next query
+        // can tell it apart from what this one is about to report.
+        self.advance_tick();
+
+        match Query::new(self, last_run_tick)
+        {
+            Ok(r) => r,
+            Err(e) => panic!("{}", e),
+        }
+    }
+    /// The tick as of the last call to [`advance_tick`](Self::advance_tick), i.e. the one every
+    /// write from now until the next `advance_tick` will be stamped with. Change-detection
+    /// storage (`added`/`changed`) starts zeroed, so `0` permanently means "never touched" and
+    /// is never handed out by `advance_tick`.
+    ///
+    /// This is *not* the baseline to hand to [`create_query_since`](Self::create_query_since):
+    /// the writes you are about to make carry this very tick, which counts as "not newer" and
+    /// filters them right back out. Use [`capture_current_tick`](Self::capture_current_tick) for that.
+    #[inline]
+    pub fn current_tick(&self) -> ChangedTick
+    {
+        self.tick.load(Ordering::Relaxed)
+    }
+
+    /// Captures the current tick as a "from here on" baseline for
+    /// [`create_query_since`](Self::create_query_since).
+    ///
+    /// This is the way to take a baseline. It returns the value the `Added` / `Changed` filters
+    /// actually want, and closes the current round on the way out, so everything written after
+    /// this call carries a tick of its own and gets reported. Pairing
+    /// [`current_tick`](Self::current_tick) with [`advance_tick`](Self::advance_tick) by hand
+    /// gives the same result, it is just easy to forget the second half.
     ///
     /// ```
     /// use xynok_ecs::query::filter::Changed;
@@ -431,44 +470,22 @@ impl World
     /// let a = w.create(Hp(1));
     /// w.create(Hp(2));
     ///
-    /// // everything written so far is now "old news"
-    /// let seen_up_to = w.current_tick();
-    /// w.advance_tick();
-    ///
+    /// let seen_up_to = w.capture_current_tick();
     /// w.merge_component(a, Hp(99));
     ///
-    /// let changed: Vec<u32> = w.create_query_since::<Changed<&Hp>>(seen_up_to).into_iter().map(|hp| hp.0).collect();
+    /// let changed: Vec<u32> = w
+    ///     .create_query_since::<Changed<&Hp>>(seen_up_to)
+    ///     .into_iter()
+    ///     .map(|hp| hp.0)
+    ///     .collect();
     /// assert_eq!(changed, vec![99]);
     /// ```
-    #[track_caller]
-    pub fn create_query_since<'a, T: TQueryParam + 'static>(&'a mut self, last_run_tick: ChangedTick) -> Query<'a, T>
-    {
-        match Query::new(self, last_run_tick)
-        {
-            Ok(r) => r,
-            Err(e) => panic!("{}", e),
-        }
-    }
-}
-
-impl World
-{
-    pub(crate) fn component_specs_mut(&mut self) -> &mut ComponentSpecs
-    {
-        &mut self.component_counter
-    }
-
-    /// The tick as of the last call to [`advance_tick`](Self::advance_tick), i.e. the one every
-    /// write from now until the next `advance_tick` will be stamped with. Change-detection
-    /// storage (`added`/`changed`) starts zeroed, so `0` permanently means "never touched" and
-    /// is never handed out by `advance_tick`.
-    ///
-    /// Snapshot this before a batch of writes to get a baseline for
-    /// [`create_query_since`](Self::create_query_since).
     #[inline]
-    pub fn current_tick(&self) -> ChangedTick
+    pub fn capture_current_tick(&mut self) -> ChangedTick
     {
-        self.tick.load(Ordering::Relaxed)
+        let captured = self.current_tick();
+        self.advance_tick();
+        captured
     }
 
     /// Moves the world's tick forward and returns the new value. Called once per system run
@@ -484,6 +501,14 @@ impl World
     pub fn advance_tick(&self) -> ChangedTick
     {
         self.tick.fetch_add(1, Ordering::Relaxed) + 1
+    }
+}
+
+impl World
+{
+    pub(crate) fn component_specs_mut(&mut self) -> &mut ComponentSpecs
+    {
+        &mut self.component_counter
     }
 
     /// Whether the `QuerySpec` registered for `T` writes anything, i.e. what the scheduler would
