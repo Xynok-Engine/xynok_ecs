@@ -1,6 +1,5 @@
 use crate::apis::identifies::XynokEcsError;
 use crate::apis::internal_traits::{TQueryParam, TReadOnlyQueryParam};
-use crate::apis::traits::TArchetype;
 use crate::query::query_iter::QueryIter;
 use crate::world::query_spec::QuerySpecAccessor;
 use crate::world::World;

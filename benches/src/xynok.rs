@@ -3,7 +3,7 @@
 use xynok_ecs::world::World;
 
 use crate::workload::{
-    ArchetypeLayout, Health, MarkerA, MarkerB, MarkerC, MarkerD, Position, QueryWorkload, Velocity, seed_health, seed_position, seed_velocity, split_counts,
+    seed_health, seed_position, seed_velocity, split_counts, ArchetypeLayout, Health, MarkerA, MarkerB, MarkerC, MarkerD, Position, QueryWorkload, Velocity,
 };
 
 /// Every entity always carries `(Position, Velocity, Health)`. `layout` only decides whether they
@@ -54,7 +54,7 @@ impl QueryWorkload for Query1
 
     fn run_query_once(storage: &mut World, _query: &mut Self::PreparedQuery)
     {
-        for mut position in storage.create_query::<&mut Position>()
+        for position in storage.create_query::<&mut Position>()
         {
             position.x += 1.0;
             position.y += 1.0;
@@ -82,7 +82,7 @@ impl QueryWorkload for Query2
 
     fn run_query_once(storage: &mut World, _query: &mut Self::PreparedQuery)
     {
-        for (mut position, velocity) in storage.create_query::<(&mut Position, &Velocity)>()
+        for (position, velocity) in storage.create_query::<(&mut Position, &Velocity)>()
         {
             position.x += velocity.x;
             position.y += velocity.y;
@@ -110,7 +110,7 @@ impl QueryWorkload for Query3
 
     fn run_query_once(storage: &mut World, _query: &mut Self::PreparedQuery)
     {
-        for (mut position, velocity, mut health) in storage.create_query::<(&mut Position, &Velocity, &mut Health)>()
+        for (position, velocity, health) in storage.create_query::<(&mut Position, &Velocity, &mut Health)>()
         {
             position.x += velocity.x;
             position.y += velocity.y;

@@ -11,8 +11,8 @@ use xynok_ecs::world::World;
 use xynok_std::unsafe_ptr::HeapPtr;
 
 use crate::parallel::{
-    Drain, Health, Mana, ParallelWorkload, Poison, Position, Regen, Stamina, SystemGroup, Velocity, seed_drain, seed_health, seed_mana, seed_poison,
-    seed_position, seed_regen, seed_stamina, seed_velocity,
+    seed_drain, seed_health, seed_mana, seed_poison, seed_position, seed_regen, seed_stamina, seed_velocity, Drain, Health, Mana, ParallelWorkload, Poison,
+    Position, Regen, Stamina, SystemGroup, Velocity,
 };
 
 /// Every entity carries all eight components, so every system in the group walks every entity.
@@ -37,7 +37,7 @@ pub fn build_world(entity_count: usize) -> World
 
 fn integrate(query: Query<(&mut Position, &Velocity)>)
 {
-    for (mut position, velocity) in query
+    for (position, velocity) in query
     {
         position.x += velocity.x;
         position.y += velocity.y;
@@ -46,7 +46,7 @@ fn integrate(query: Query<(&mut Position, &Velocity)>)
 
 fn tick_poison(query: Query<(&mut Health, &Poison)>)
 {
-    for (mut health, poison) in query
+    for (health, poison) in query
     {
         health.value -= poison.value;
     }
@@ -54,7 +54,7 @@ fn tick_poison(query: Query<(&mut Health, &Poison)>)
 
 fn regen_mana(query: Query<(&mut Mana, &Regen)>)
 {
-    for (mut mana, regen) in query
+    for (mana, regen) in query
     {
         mana.value = (mana.value + regen.value).min(50.0);
     }
@@ -62,7 +62,7 @@ fn regen_mana(query: Query<(&mut Mana, &Regen)>)
 
 fn drain_stamina(query: Query<(&mut Stamina, &Drain)>)
 {
-    for (mut stamina, drain) in query
+    for (stamina, drain) in query
     {
         stamina.value -= drain.value;
     }
