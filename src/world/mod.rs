@@ -822,11 +822,12 @@ impl World
             }
             None =>
             {
-                let arch_id = self.component_set_counter.len();
-                self.component_set_counter.insert(component_set.clone(), arch_id);
+                let component_set = std::mem::take(component_set);
+                let arch_spec = self.create_archetype::<T>();
+                let arch_id = self.register_archetype_spec(&component_set, arch_spec);
                 self.archetype_counter.insert(std::any::TypeId::of::<T>(), arch_id);
-                self.create_archetype::<T>(arch_id);
-                self.structure_changed();
+                // put back
+                self.temp_alloc.vec_usize = component_set;
                 arch_id
             }
         }
@@ -849,11 +850,7 @@ impl World
             Ok(r) => r,
             Err(e) => panic!("{}", e),
         };
-        let arch_id = self.component_set_counter.len();
-        self.component_set_counter.insert(component_set.to_vec(), arch_id);
-        self.archetypes.insert(arch_id, new_arch);
-        self.structure_changed();
-        arch_id
+        self.register_archetype_spec(component_set, new_arch)
     }
     fn create_archetype_id_from_set_of(&mut self, component_set: &[usize], a_arch_id: usize, b_arch_id: usize) -> usize
     {
@@ -873,14 +870,10 @@ impl World
             Ok(r) => r,
             Err(e) => panic!("{}", e),
         };
-        let arch_id = self.component_set_counter.len();
-        self.component_set_counter.insert(component_set.to_vec(), arch_id);
-        self.archetypes.insert(arch_id, new_arch);
-        self.structure_changed();
-        arch_id
+        self.register_archetype_spec(component_set, new_arch)
     }
     #[track_caller]
-    fn create_archetype<T: TArchetype + 'static>(&mut self, id: usize)
+    fn create_archetype<T: TArchetype + 'static>(&mut self) -> ArchetypeSpec
     {
         let params = ChunkLayoutParams {
             components:                 T::COMPONENT_DESCRIPTORS,
@@ -895,8 +888,20 @@ impl World
             Ok(r) => r,
             Err(e) => panic!("Create Archetype `{}` Failed: {e}", std::any::type_name::<T>()),
         };
-        let arch_spec = ArchetypeSpec::new(layout);
-        self.archetypes.insert(id, arch_spec);
+        ArchetypeSpec::new(layout)
+    }
+
+    /// The one place an `arch_id` is handed out: it is always the index the spec lands on inside
+    /// `archetypes`, so `build_archetype_which_contains` (which walks that registry by position)
+    /// and every `arch_id` stored elsewhere can never drift apart. `component_set_counter` is
+    /// only a lookup table on top of it, never a counter of its own.
+    fn register_archetype_spec(&mut self, component_set: &[usize], arch_spec: ArchetypeSpec) -> usize
+    {
+        let arch_id = self.archetypes.len();
+        self.archetypes.insert(arch_id, arch_spec);
+        self.component_set_counter.insert(component_set.to_vec(), arch_id);
+        self.structure_changed();
+        arch_id
     }
 
     /// The archetype an entity lands in when `T` is added to `key.src_arch_id`, leaving the edge
