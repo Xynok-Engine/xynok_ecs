@@ -69,6 +69,14 @@ pub trait TArchetype: Sized
     const QUERY_TYPE_IDS: &[TypeId];
     const STORAGE_TYPE_IDS: &[TypeId];
 
+    /// Checks that `layout` can host every component of `Self` before anything is written, so a
+    /// caller that has to move data around can find out up front whether the write that follows
+    /// will succeed. An `Ok` here means `write_at` and `replace_at` on the same layout cannot fail.
+    fn validate_writable(layout: &ChunkLayout) -> Result<(), XynokEcsError>;
+
+    /// The read-only counterpart of [`TArchetype::validate_writable`], for `take_from`.
+    fn validate_takeable(layout: &ChunkLayout) -> Result<(), XynokEcsError>;
+
     fn write_at(layout: &ChunkLayout, chunk: &mut Chunk, write_idx: usize, val: Self, tick: crate::apis::constants::ChangedTick) -> Result<(), XynokEcsError>;
     fn replace_at(layout: &ChunkLayout, chunk: &mut Chunk, row: usize, val: Self, tick: crate::apis::constants::ChangedTick) -> Result<(), XynokEcsError>;
     fn take_from(layout: &ChunkLayout, chunk: &mut Chunk, idx: usize) -> Result<Self, XynokEcsError>;

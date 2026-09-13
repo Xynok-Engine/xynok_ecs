@@ -39,6 +39,10 @@ impl Archetype
     /// Query-only wrappers (e.g. `Disabled<Hp>`, where `StorageType = Hp`) are therefore not writable.
     pub fn push<T: TArchetype + 'static>(&mut self, layout: &ChunkLayout, e: Entity, val: T, tick: ChangedTick) -> Result<EntityInChunkIndices, XynokEcsError>
     {
+        // ask first, write second: once this passes, the `write_at` below cannot fail partway and
+        // leave half of `T` in a row nobody will ever finish
+        T::validate_writable(layout)?;
+
         let free_chunk_idx = self.take_a_free_chunk_idx(layout);
 
         let chunk = unsafe { self.chunks.get_unchecked_mut(free_chunk_idx) };
@@ -84,6 +88,13 @@ impl Archetype
     pub fn take_and_write_from<T: TArchetype + 'static>(&mut self, params: ArchetypeTakeAndWriteComponentParams<T>)
         -> Result<ResultTakeAndWrite, XynokEcsError>
     {
+        // The only fallible step in this function is `T::write_at`, and it used to run *after* the
+        // row had already been moved out of the source chunk, with neither `len` updated yet: an
+        // error there left both chunks inconsistent (issue #29). Asking the layout up front moves
+        // the one thing that can fail in front of every mutation, so the failure path is now simply
+        // "nothing happened at all".
+        T::validate_writable(params.dst_layout)?;
+
         let free_chunk_idx = self.take_a_free_chunk_idx(params.dst_layout);
 
         let chunk = unsafe { self.chunks.get_unchecked_mut(free_chunk_idx) };
@@ -111,6 +122,8 @@ impl Archetype
                 }
             };
 
+            // unreachable failure: `validate_writable` above already resolved every column this
+            // touches, and nothing since then could have changed the layout
             T::write_at(params.dst_layout, chunk, idx_in_chunk, params.write_val, params.tick)?;
 
             chunk.increase_len();
@@ -144,6 +157,10 @@ impl Archetype
         tick: ChangedTick,
     ) -> Result<(), XynokEcsError>
     {
+        // a tuple `T` replaces its components one by one, dropping each old value as it goes; a
+        // failure halfway would leave the row holding a mix of new and stale components
+        T::validate_writable(layout)?;
+
         let chunk = unsafe { self.chunks.get_unchecked_mut(chunk_idx) };
         T::replace_at(layout, chunk, idx_in_chunk, val, tick)
     }
@@ -152,6 +169,12 @@ impl Archetype
         params: ArchetypeTakeAndRemoveComponentParams<T>,
     ) -> Result<ResultTakeAndRemove<T>, XynokEcsError>
     {
+        // `T::take_from` below reads each component of `T` out of the source row as a bitwise copy.
+        // If it failed partway, the components already read would be dropped by the early return
+        // while the source row still holds copies of them, and those get dropped a second time
+        // later. Resolving the columns first rules that out.
+        T::validate_takeable(params.src_layout)?;
+
         let free_chunk_idx = self.take_a_free_chunk_idx(params.dst_layout);
 
         let chunk = unsafe { self.chunks.get_unchecked_mut(free_chunk_idx) };

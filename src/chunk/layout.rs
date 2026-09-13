@@ -395,6 +395,47 @@ mod test
         );
     }
 
+    /// Issue #29: `take_and_write_from` asks the layout whether the write will succeed *before* it
+    /// moves the row, so the answer has to match what `write_at` would actually do.
+    #[test]
+    fn validate_writable_accepts_exactly_the_components_the_layout_hosts()
+    {
+        use crate::chunk::Chunk;
+
+        let layout = layout_of(&[Hp::COMPONENT_DESCRIPTOR, Tracked::COMPONENT_DESCRIPTOR]).expect("layout must be constructible");
+
+        Chunk::validate_writable::<Hp>(&layout).expect("Hp owns a column here");
+        Chunk::validate_writable::<Tracked>(&layout).expect("Tracked owns a column and its added/changed ticks");
+        Chunk::validate_takeable::<Hp>(&layout).expect("Hp owns a column here");
+
+        match Chunk::validate_writable::<Mana>(&layout)
+        {
+            Err(XynokEcsError::ChunkDoesNotContainComponent(_, storage)) => assert!(storage.ends_with("Mana"), "the message must name the missing component, got `{storage}`"),
+            Err(e) => panic!("wrong error: {e}"),
+            Ok(_) => panic!("Mana has no column in this layout"),
+        }
+        assert!(matches!(Chunk::validate_takeable::<Mana>(&layout), Err(XynokEcsError::ChunkDoesNotContainComponent(_, _))));
+    }
+
+    /// A tuple is written one component at a time, so the check has to cover all of them: a single
+    /// missing column is what would have made the write fail halfway through.
+    #[test]
+    fn validate_writable_rejects_a_tuple_when_any_component_is_missing()
+    {
+        use crate::apis::traits::TArchetype;
+
+        let layout = layout_of(&[Hp::COMPONENT_DESCRIPTOR]).expect("layout must be constructible");
+
+        <(Hp,) as TArchetype>::validate_writable(&layout).expect("Hp alone fits this layout");
+        assert!(
+            matches!(
+                <(Hp, Mana) as TArchetype>::validate_writable(&layout),
+                Err(XynokEcsError::ChunkDoesNotContainComponent(_, _))
+            ),
+            "the tuple must be rejected as a whole, Mana has no column here"
+        );
+    }
+
     #[test]
     fn column_offsets_respect_alignment()
     {

@@ -2,7 +2,7 @@ use crate::apis::constants::{ChangedTick, BITS_PER_BYTE};
 use crate::apis::identifies::{StateDetection, XynokEcsError};
 use crate::apis::params::{ChunkTakeComponentParams, SwappedRow};
 use crate::apis::traits::TComponent;
-use crate::chunk::column::StateOffset;
+use crate::chunk::column::{ColumnDescriptor, StateOffset};
 use crate::chunk::layout::ChunkLayout;
 use crate::chunk::migration::{ColumnInSrc, ComponentMigration};
 use crate::entity::Entity;
@@ -478,6 +478,59 @@ impl Chunk
         };
 
         Ok(unsafe { self.ptr.add(col_des.offset) })
+    }
+
+    /// Answers "would `write_at::<T>` find every column it needs in `layout`?" by doing exactly the
+    /// lookups `write_at` does, without touching a single byte of memory. Every way `write_at` can
+    /// fail depends only on `T` and the layout, never on the row or the chunk's contents, so an `Ok`
+    /// here means the matching `write_at` cannot fail.
+    ///
+    /// This is what lets `take_and_write_from` move a row only after it knows the write that follows
+    /// will go through: a write failing halfway used to leave the source row moved out with neither
+    /// chunk's `len` updated (issue #29).
+    pub(crate) fn validate_writable<T: TComponent + 'static>(layout: &ChunkLayout) -> Result<(), XynokEcsError>
+    {
+        let col_des = Self::validate_column_present::<T>(layout)?;
+
+        if matches!(T::STATE_DETECTION, StateDetection::EnableAble | StateDetection::EnableAbleAndChangeAble)
+        {
+            col_des
+                .state_offset
+                .enable_offset
+                .ok_or(XynokEcsError::ComponentStateNotAvailable(std::any::type_name::<T::StorageType>(), "enable"))?;
+        }
+        if matches!(T::STATE_DETECTION, StateDetection::ChangeAble | StateDetection::EnableAbleAndChangeAble)
+        {
+            col_des
+                .state_offset
+                .added_offset
+                .ok_or(XynokEcsError::ComponentStateNotAvailable(std::any::type_name::<T::StorageType>(), "added"))?;
+            col_des
+                .state_offset
+                .changed_offset
+                .ok_or(XynokEcsError::ComponentStateNotAvailable(std::any::type_name::<T::StorageType>(), "changed"))?;
+        }
+        Ok(())
+    }
+
+    /// The same idea as [`Chunk::validate_writable`], for the paths that only read a component out
+    /// of a row (`take_at`): those touch the column itself and none of its state regions.
+    pub(crate) fn validate_takeable<T: TComponent + 'static>(layout: &ChunkLayout) -> Result<(), XynokEcsError>
+    {
+        Self::validate_column_present::<T>(layout)?;
+        Ok(())
+    }
+
+    fn validate_column_present<'a, T: TComponent + 'static>(layout: &'a ChunkLayout) -> Result<&'a ColumnDescriptor, XynokEcsError>
+    {
+        match layout.component_col_descriptors.get(&std::any::TypeId::of::<T::StorageType>())
+        {
+            Some(des) => Ok(des),
+            None => Err(XynokEcsError::ChunkDoesNotContainComponent(
+                std::any::type_name::<T::QueryType>(),
+                std::any::type_name::<T::StorageType>(),
+            )),
+        }
     }
 
     #[inline]

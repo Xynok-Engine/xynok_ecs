@@ -1529,7 +1529,7 @@ dependencies = [
 
 [[package]]
 name = "xynok_ecs"
-version = "0.2.24"
+version = "0.2.25"
 dependencies = [
  "thiserror",
  "xynok_concurrency",

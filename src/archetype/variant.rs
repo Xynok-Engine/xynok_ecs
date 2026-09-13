@@ -13,6 +13,16 @@ impl<T: TComponent + 'static> TArchetype for T
     const QUERY_TYPE_IDS: &[std::any::TypeId] = &[TypeId::of::<T::QueryType>()];
     const STORAGE_TYPE_IDS: &[std::any::TypeId] = &[TypeId::of::<T::StorageType>()];
 
+    fn validate_writable(layout: &ChunkLayout) -> Result<(), XynokEcsError>
+    {
+        crate::chunk::Chunk::validate_writable::<T>(layout)
+    }
+
+    fn validate_takeable(layout: &ChunkLayout) -> Result<(), XynokEcsError>
+    {
+        crate::chunk::Chunk::validate_takeable::<T>(layout)
+    }
+
     fn write_at(layout: &ChunkLayout, chunk: &mut crate::chunk::Chunk, write_idx: usize, val: Self, tick: ChangedTick) -> Result<(), XynokEcsError>
     {
         unsafe { chunk.write_at::<T>(layout, write_idx, val, tick) }
@@ -40,6 +50,18 @@ macro_rules! tuple_arch {
             const COMPONENT_DESCRIPTORS: &[crate::apis::ComponentDescriptor] = &[$($component::COMPONENT_DESCRIPTOR,)*];
             const QUERY_TYPE_IDS: &[std::any::TypeId] = &[$(TypeId::of::<$component::QueryType>(),)*];
             const STORAGE_TYPE_IDS: &[std::any::TypeId] = &[$(TypeId::of::<$component::StorageType>(),)*];
+
+            fn validate_writable(layout: &ChunkLayout) -> Result<(), XynokEcsError>
+            {
+                $(crate::chunk::Chunk::validate_writable::<$component>(layout)?;)*
+                Ok(())
+            }
+
+            fn validate_takeable(layout: &ChunkLayout) -> Result<(), XynokEcsError>
+            {
+                $(crate::chunk::Chunk::validate_takeable::<$component>(layout)?;)*
+                Ok(())
+            }
 
             fn write_at(layout: &ChunkLayout, chunk: &mut crate::chunk::Chunk, write_idx: usize, val: Self, tick: ChangedTick) -> Result<(), XynokEcsError>
             {
