@@ -2,7 +2,8 @@
 mod common;
 
 use common::*;
-use xynok_ecs::{entity::Entity, world::testing, world::World};
+use xynok_ecs::entity::Entity;
+use xynok_ecs::world::{testing, World};
 
 #[test]
 fn t_create_returns_distinct_handles()
@@ -49,7 +50,7 @@ fn t_exists_tracks_the_entity_lifecycle()
 #[test]
 fn t_exists_rejects_an_unknown_handle()
 {
-    let mut w = World::default();
+    let w = World::default();
     assert!(!w.exists(Entity::new(999, 1).unwrap()), "an index past the entity table must not exist");
     assert!(!w.exists(Entity::NULL), "the null handle must never exist");
 }
@@ -111,7 +112,11 @@ fn t_destroy_middle_row_swaps_the_last_row_back()
         {
             continue;
         }
-        assert_eq!(testing::read_component::<Hp>(&w, e), Hp(i as u32), "{e} lost its value after an unrelated destroy");
+        assert_eq!(
+            testing::read_component::<Hp>(&w, e),
+            Hp(i as u32),
+            "{e} lost its value after an unrelated destroy"
+        );
     }
 }
 
@@ -162,7 +167,11 @@ fn a_slot_out_of_versions_is_retired_instead_of_reissuing_a_handle()
     assert_eq!(w.retired_entity_slot_count(), 0, "nothing is retired while the slot is still live");
 
     w.destroy(exhausted);
-    assert_eq!(w.retired_entity_slot_count(), 1, "a slot with no version left must not go back into circulation");
+    assert_eq!(
+        w.retired_entity_slot_count(),
+        1,
+        "a slot with no version left must not go back into circulation"
+    );
 
     let next = w.create(Hp(2));
     assert_ne!(next, exhausted, "the retired handle must never be handed out a second time");
