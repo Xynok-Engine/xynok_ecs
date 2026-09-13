@@ -175,7 +175,7 @@ impl Chunk
     }
 
     #[inline]
-    pub fn get_component<'a, C: TComponent + 'static>(&self, layout: &ChunkLayout, row: usize) -> Result<&'a C, XynokEcsError>
+    pub fn get_component<C: TComponent + 'static>(&self, layout: &ChunkLayout, row: usize) -> Result<&C, XynokEcsError>
     {
         if row >= self.len()
         {
@@ -185,7 +185,7 @@ impl Chunk
         Ok(unsafe { &*(base as *const C).add(row) })
     }
     #[inline]
-    pub fn get_component_mut<'a, C: TComponent + 'static>(&mut self, layout: &ChunkLayout, row: usize) -> Result<&'a mut C, XynokEcsError>
+    pub fn get_component_mut<C: TComponent + 'static>(&mut self, layout: &ChunkLayout, row: usize) -> Result<&mut C, XynokEcsError>
     {
         if row >= self.len()
         {
@@ -197,21 +197,21 @@ impl Chunk
 
     /// A slice `&[C]` of the component column `C` (inline) within the chunk, containing all rows
     #[inline]
-    pub fn get_components<'a, C: TComponent + 'static>(&self, layout: &ChunkLayout) -> Result<&'a [C], XynokEcsError>
+    pub fn get_components<C: TComponent + 'static>(&self, layout: &ChunkLayout) -> Result<&[C], XynokEcsError>
     {
         let base = self.components_ptr::<C>(layout)?;
         Ok(unsafe { std::slice::from_raw_parts(base as *const C, self.len()) })
     }
 
     #[inline]
-    pub fn get_components_mut<'a, C: TComponent + 'static>(&mut self, layout: &ChunkLayout) -> Result<&'a mut [C], XynokEcsError>
+    pub fn get_components_mut<C: TComponent + 'static>(&mut self, layout: &ChunkLayout) -> Result<&mut [C], XynokEcsError>
     {
         let base = self.components_ptr::<C>(layout)?;
         Ok(unsafe { std::slice::from_raw_parts_mut(base as *mut C, self.len()) })
     }
 
     #[inline]
-    pub fn get_entity<'a>(&self, layout: &ChunkLayout, row: usize) -> Result<&'a Entity, XynokEcsError>
+    pub fn get_entity(&self, layout: &ChunkLayout, row: usize) -> Result<&Entity, XynokEcsError>
     {
         if row >= self.len()
         {
@@ -220,25 +220,34 @@ impl Chunk
         Ok(unsafe { self.get_entity_uncheck(layout, row) })
     }
     #[inline]
-    pub fn get_entities<'a>(&self, layout: &ChunkLayout) -> Result<&'a [Entity], XynokEcsError>
+    pub fn get_entities(&self, layout: &ChunkLayout) -> Result<&[Entity], XynokEcsError>
     {
         unsafe {
             let entities_ptr = self.ptr.add(layout.header.entities_offset);
             Ok(std::slice::from_raw_parts(entities_ptr as *const Entity, self.len()))
         }
     }
-    pub fn get_entities_components<'a, C: TComponent + 'static>(&self, layout: &ChunkLayout) -> Result<(&'a [Entity], &'a [C]), XynokEcsError>
+    pub fn get_entities_components<C: TComponent + 'static>(&self, layout: &ChunkLayout) -> Result<(&[Entity], &[C]), XynokEcsError>
     {
         let entities = self.get_entities(layout)?;
         let components = self.get_components::<C>(layout)?;
         Ok((entities, components))
     }
 
-    pub fn get_entities_components_mut<'a, C: TComponent + 'static>(&mut self, layout: &ChunkLayout) -> Result<(&'a [Entity], &'a mut [C]), XynokEcsError>
+    pub fn get_entities_components_mut<C: TComponent + 'static>(&mut self, layout: &ChunkLayout) -> Result<(&[Entity], &mut [C]), XynokEcsError>
     {
-        let entities = self.get_entities(layout)?;
-        let components = self.get_components_mut::<C>(layout)?;
-        Ok((entities, components))
+        // Cột entity và cột component nằm ở hai vùng nhớ tách biệt trong chunk, nên mượn
+        // đồng thời một &[Entity] và một &mut [C] là an toàn. Borrow checker không tự thấy
+        // điều đó, nên ở đây đi qua raw pointer rồi dựng lại slice với lifetime của &mut self.
+        let len = self.len();
+        let entities_ptr = unsafe { self.ptr.add(layout.header.entities_offset) } as *const Entity;
+        let components_ptr = self.components_ptr::<C>(layout)? as *mut C;
+        unsafe {
+            Ok((
+                std::slice::from_raw_parts(entities_ptr, len),
+                std::slice::from_raw_parts_mut(components_ptr, len),
+            ))
+        }
     }
 }
 
@@ -282,14 +291,14 @@ impl Chunk
                     backfill_last_row(src_ptr, mig.src(), last, params.from);
                 }
             }
-            let src_e = params.src_chunk.get_entity_uncheck_mut(params.src_layout, params.from);
-            let dst_e = self.get_entity_uncheck_mut(params.dst_layout, params.to);
-            *dst_e = *src_e;
-            *src_e = match is_last
+            let moved_e = *params.src_chunk.get_entity_uncheck(params.src_layout, params.from);
+            let new_src_e = match is_last
             {
                 true => Entity::NULL,
                 false => *params.src_chunk.get_entity_uncheck(params.src_layout, last),
             };
+            *self.get_entity_uncheck_mut(params.dst_layout, params.to) = moved_e;
+            *params.src_chunk.get_entity_uncheck_mut(params.src_layout, params.from) = new_src_e;
         }
 
         if is_last
@@ -331,12 +340,12 @@ impl Chunk
                     move_state_within(chunk_ptr, &col.state_offset, last, idx);
                 }
             }
-            let src_e = self.get_entity_uncheck_mut(layout, idx);
-            *src_e = match is_last
+            let new_src_e = match is_last
             {
                 true => Entity::NULL,
                 false => *self.get_entity_uncheck(layout, last),
             };
+            *self.get_entity_uncheck_mut(layout, idx) = new_src_e;
         }
 
         if is_last
@@ -356,7 +365,7 @@ impl Chunk
 impl Chunk
 {
     #[inline]
-    pub(crate) unsafe fn get_entity_uncheck<'a>(&self, layout: &ChunkLayout, row: usize) -> &'a Entity
+    pub(crate) unsafe fn get_entity_uncheck(&self, layout: &ChunkLayout, row: usize) -> &Entity
     {
         unsafe {
             let entities_ptr = self.ptr.add(layout.header.entities_offset);
@@ -364,7 +373,7 @@ impl Chunk
         }
     }
     #[inline]
-    pub(crate) unsafe fn get_entity_uncheck_mut<'a>(&mut self, layout: &ChunkLayout, row: usize) -> &'a mut Entity
+    pub(crate) unsafe fn get_entity_uncheck_mut(&mut self, layout: &ChunkLayout, row: usize) -> &mut Entity
     {
         unsafe {
             let entities_ptr = self.ptr.add(layout.header.entities_offset);
@@ -521,7 +530,7 @@ impl Chunk
         Ok(())
     }
 
-    fn validate_column_present<'a, T: TComponent + 'static>(layout: &'a ChunkLayout) -> Result<&'a ColumnDescriptor, XynokEcsError>
+    fn validate_column_present<T: TComponent + 'static>(layout: &ChunkLayout) -> Result<&ColumnDescriptor, XynokEcsError>
     {
         match layout.component_col_descriptors.get(&std::any::TypeId::of::<T::StorageType>())
         {
