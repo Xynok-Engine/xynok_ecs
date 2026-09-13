@@ -1,13 +1,15 @@
 use crate::apis::constants::{ChangedTick, BITS_PER_BYTE};
 use crate::apis::identifies::{StateDetection, XynokEcsError};
-use crate::apis::params::{ChunkTakeComponentParams, ComponentSpecs, SwappedRow};
+use crate::apis::params::{ChunkTakeComponentParams, SwappedRow};
 use crate::apis::traits::TComponent;
 use crate::chunk::column::StateOffset;
 use crate::chunk::layout::ChunkLayout;
+use crate::chunk::migration::{ColumnInSrc, ComponentMigration};
 use crate::entity::Entity;
 
 pub(crate) mod layout;
 pub(crate) mod column;
+pub(crate) mod migration;
 
 mod header;
 
@@ -79,6 +81,22 @@ pub(crate) unsafe fn move_state_within(chunk_ptr: *mut u8, state: &StateOffset, 
             let region = chunk_ptr.add(offset);
             write_changed_tick(region, to, read_changed_tick(region, from));
         }
+    }
+}
+
+/// Moves the chunk's last row into the hole a row just left behind, value and state together.
+///
+/// Every migration case ends here: whether the component travelled with the entity, was dropped
+/// in place or simply abandoned, the slot it used to sit in still has to be filled so the column
+/// stays dense.
+#[inline]
+pub(crate) unsafe fn backfill_last_row(chunk_ptr: *mut u8, src: &ColumnInSrc, last: usize, to: usize)
+{
+    unsafe {
+        let target_slot = chunk_ptr.add(src.offset).add(to * src.byte_size);
+        let last_val = chunk_ptr.add(src.offset).add(last * src.byte_size);
+        std::ptr::copy_nonoverlapping(last_val, target_slot, src.byte_size);
+        move_state_within(chunk_ptr, &src.state_offset, last, to);
     }
 }
 
@@ -235,52 +253,33 @@ impl Chunk
         let src_ptr = params.src_chunk.ptr();
         let dst_ptr = self.ptr();
         unsafe {
-            for (k, src_col_des) in params.src_layout.component_col_descriptors.iter()
+            // All decisions regarding whether a component should move, drop in place, or be left behind were finalized during the planning phase.
+            // At this stage, we simply iterate over the slice. No hashing is required.
+            for mig in params.migration.components.iter()
             {
-                let spec = params.component_specs.get(k).unwrap();
-                let item_size = spec.descriptor.byte_size;
-                let src_slot = params.src_chunk.ptr().add(src_col_des.offset).add(params.from * item_size);
-                let src_last_val = params.src_chunk.ptr.add(src_col_des.offset).add(last * item_size);
-
-                // the caller (e.g. merge_component) is about to overwrite this column with a new value right
-                // after this call, so drop the old one in place instead of migrating it into dst
-                if params.overwritten_type_ids.contains(k)
+                match mig
                 {
-                    (spec.descriptor.fn_drop)(src_slot);
-                    if !is_last
+                    ComponentMigration::Move(m) =>
                     {
-                        std::ptr::copy_nonoverlapping(src_last_val, src_slot, item_size);
-                        move_state_within(src_ptr, &src_col_des.state_offset, last, params.from);
+                        let src_slot = src_ptr.add(m.src.offset).add(params.from * m.src.byte_size);
+                        let dst_slot = dst_ptr.add(m.dst_offset).add(params.to * m.src.byte_size);
+                        std::ptr::copy_nonoverlapping(src_slot, dst_slot, m.src.byte_size);
+                        // the component travels with the entity, so its state has to travel too: a
+                        // disabled component must stay disabled after an `add_component`, and its
+                        // added/changed ticks must keep pointing at the run that actually touched it
+                        copy_state_across(src_ptr, &m.src.state_offset, params.from, dst_ptr, &m.dst_state_offset, params.to);
                     }
-                    continue;
+                    // the caller (e.g. merge_component) is about to overwrite this column with a new value right
+                    // after this call, so drop the old one in place instead of migrating it into dst
+                    ComponentMigration::DropInPlace(d) => (d.fn_drop)(src_ptr.add(d.src.offset).add(params.from * d.src.byte_size)),
+                    // when removing a component, the dst often won't have all the components from the src
+                    ComponentMigration::Abandon(_) =>
+                    {}
                 }
-
-                // when removing a component, the dst often won't have all the components from the src
-                let dst_col_des = match params.dst_layout.component_col_descriptors.get(k)
-                {
-                    Some(r) => r,
-                    None =>
-                    {
-                        if !is_last
-                        {
-                            std::ptr::copy_nonoverlapping(src_last_val, src_slot, item_size);
-                            move_state_within(src_ptr, &src_col_des.state_offset, last, params.from);
-                        }
-                        continue;
-                    }
-                };
-
-                let dst_slot = dst_ptr.add(dst_col_des.offset).add(params.to * item_size);
-                std::ptr::copy_nonoverlapping(src_slot, dst_slot, item_size);
-                // the component travels with the entity, so its state has to travel too: a
-                // disabled component must stay disabled after an `add_component`, and its
-                // added/changed ticks must keep pointing at the run that actually touched it
-                copy_state_across(src_ptr, &src_col_des.state_offset, params.from, dst_ptr, &dst_col_des.state_offset, params.to);
 
                 if !is_last
                 {
-                    std::ptr::copy_nonoverlapping(src_last_val, src_slot, item_size);
-                    move_state_within(src_ptr, &src_col_des.state_offset, last, params.from);
+                    backfill_last_row(src_ptr, mig.src(), last, params.from);
                 }
             }
             let src_e = params.src_chunk.get_entity_uncheck_mut(params.src_layout, params.from);
@@ -308,12 +307,7 @@ impl Chunk
         };
         Ok(Some(swapped))
     }
-    pub(crate) unsafe fn swap_remove_at(
-        &mut self,
-        layout: &ChunkLayout,
-        component_specs: &ComponentSpecs,
-        idx: usize,
-    ) -> Result<Option<SwappedRow>, XynokEcsError>
+    pub(crate) unsafe fn swap_remove_at(&mut self, layout: &ChunkLayout, idx: usize) -> Result<Option<SwappedRow>, XynokEcsError>
     {
         if idx >= self.len()
         {
@@ -324,18 +318,17 @@ impl Chunk
         let is_last = idx == last;
         let chunk_ptr = self.ptr;
         unsafe {
-            for (k, des) in layout.component_col_descriptors.iter()
+            for col in layout.columns.iter()
             {
-                let spec = component_specs.get(k).unwrap();
-                let item_size = spec.descriptor.byte_size;
-                let target_slot = chunk_ptr.add(des.offset).add(idx * item_size);
-                (spec.descriptor.fn_drop)(target_slot);
+                let item_size = col.byte_size;
+                let target_slot = chunk_ptr.add(col.offset).add(idx * item_size);
+                (col.fn_drop)(target_slot);
 
                 if !is_last
                 {
-                    let last_val = chunk_ptr.add(des.offset).add(last * item_size);
+                    let last_val = chunk_ptr.add(col.offset).add(last * item_size);
                     std::ptr::copy_nonoverlapping(last_val, target_slot, item_size);
-                    move_state_within(chunk_ptr, &des.state_offset, last, idx);
+                    move_state_within(chunk_ptr, &col.state_offset, last, idx);
                 }
             }
             let src_e = self.get_entity_uncheck_mut(layout, idx);
@@ -448,19 +441,16 @@ impl Chunk
         }
     }
 
-    pub(crate) fn dispose(&mut self, layout: &ChunkLayout, component_specs: &ComponentSpecs)
+    pub(crate) fn dispose(&mut self, layout: &ChunkLayout)
     {
-        for (k, des) in layout.component_col_descriptors.iter()
+        for col in layout.columns.iter()
         {
-            if let Some(spec) = component_specs.get(k)
+            let mut counter = 0usize;
+            while counter < self.len()
             {
-                let mut counter = 0usize;
-                while counter < self.len()
-                {
-                    let slot = unsafe { self.ptr().add(des.offset).add(counter * spec.descriptor.byte_size) };
-                    (spec.descriptor.fn_drop)(slot);
-                    counter += 1;
-                }
+                let slot = unsafe { self.ptr().add(col.offset).add(counter * col.byte_size) };
+                (col.fn_drop)(slot);
+                counter += 1;
             }
         }
 

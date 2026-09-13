@@ -2,12 +2,12 @@ use std::alloc::Layout;
 use std::any::TypeId;
 use std::collections::HashMap;
 
+use crate::apis::ComponentDescriptor;
 use crate::apis::constants::{BITS_PER_BYTE, CHANGED_TICK_BYTE_SIZE, CHUNK_SIZE_IN_BYTE, CPU_WORD};
 use crate::apis::identifies::{StateDetection, XynokEcsError};
 use crate::apis::params::ComponentSpecs;
 use crate::apis::traits::TComponentDescriptor;
-use crate::apis::ComponentDescriptor;
-use crate::chunk::column::{ColumnDescriptor, StateOffset};
+use crate::chunk::column::{ColumnDescriptor, ColumnEntry, StateOffset};
 use crate::chunk::header::Header;
 use crate::collection::component_bit_set::ComponentBitSet;
 use crate::entity::Entity;
@@ -20,6 +20,10 @@ pub struct ChunkLayout
     pub alloc_layout:              Layout,
     pub component_bit_set:         ComponentBitSet,
     pub component_col_descriptors: HashMap<TypeId, ColumnDescriptor>,
+    /// The same columns as `component_col_descriptors`, but dense and already carrying
+    /// `byte_size` and `fn_drop`. The hot paths (`swap_remove_at`, `dispose`, building a
+    /// migration plan) walk this one and hash nothing. Ordered like the archetype's components.
+    pub columns:                   Vec<ColumnEntry>,
 }
 
 pub struct ChunkLayoutParams<'a>
@@ -28,6 +32,7 @@ pub struct ChunkLayoutParams<'a>
     pub component_specs:            &'a ComponentSpecs,
     pub state_offsets_temp:         &'a mut HashMap<TypeId, StateOffset>,
     pub component_descriptors_temp: &'a mut HashMap<TypeId, ColumnDescriptor>,
+    pub columns_temp:               &'a mut Vec<ColumnEntry>,
     pub component_bit_set_temp:     &'a mut ComponentBitSet,
 }
 
@@ -157,6 +162,7 @@ fn try_layout(max_entities: usize, params: &mut ChunkLayoutParams) -> Result<Chu
     // the archetype has no components (and thus no des.align to fold over)
     let mut max_align = CPU_WORD;
     params.component_descriptors_temp.clear();
+    params.columns_temp.clear();
 
     for des in params.components
     {
@@ -175,6 +181,13 @@ fn try_layout(max_entities: usize, params: &mut ChunkLayoutParams) -> Result<Chu
             None => return Err(XynokEcsError::DuplicateComponentInArchetype(des.name())),
         };
 
+        params.columns_temp.push(ColumnEntry {
+            storage_type_id: des.storage_type_id,
+            offset:          cursor,
+            byte_size:       des.byte_size,
+            state_offset:    state_offset.clone(),
+            fn_drop:         des.fn_drop,
+        });
         params
             .component_descriptors_temp
             .insert(des.storage_type_id, des.as_column_descriptor(cursor, state_offset));
@@ -203,6 +216,7 @@ fn try_layout(max_entities: usize, params: &mut ChunkLayoutParams) -> Result<Chu
     Ok(ChunkLayout {
         max_len:                   max_entities,
         component_col_descriptors: params.component_descriptors_temp.clone(),
+        columns:                   params.columns_temp.clone(),
         component_bit_set:         params.component_bit_set_temp.clone(),
         header:                    header,
         alloc_layout:              alloc_layout,
@@ -284,12 +298,14 @@ mod test
     {
         let mut temp = HashMap::new();
         let mut offset = HashMap::new();
+        let mut columns = Vec::new();
         let mut bit_set = ComponentBitSet::default();
         ChunkLayout::new(ChunkLayoutParams {
             components:                 descriptors,
             component_specs:            specs,
             state_offsets_temp:         &mut offset,
             component_descriptors_temp: &mut temp,
+            columns_temp:               &mut columns,
             component_bit_set_temp:     &mut bit_set,
         })
     }
@@ -298,7 +314,6 @@ mod test
     {
         layout_with(descriptors, &specs_of(descriptors))
     }
-
 
     /// The row-count estimate feeds a binary search, so it has to be an upper bound (otherwise
     /// the search silently settles for a smaller chunk) and it has to be tight (otherwise the
@@ -318,7 +333,10 @@ mod test
             let estimate = estimate_max_entities(descriptors);
             let actual = layout_of(descriptors).expect("layout must be constructible").max_len;
 
-            assert!(estimate >= actual, "estimate {estimate} is below the real capacity {actual}, the search would undershoot");
+            assert!(
+                estimate >= actual,
+                "estimate {estimate} is below the real capacity {actual}, the search would undershoot"
+            );
             assert!(
                 estimate - actual <= actual / 20,
                 "estimate {estimate} is more than 5% above the real capacity {actual}, the search pays for the slack"

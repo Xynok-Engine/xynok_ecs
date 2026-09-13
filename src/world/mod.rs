@@ -14,10 +14,11 @@ use crate::apis::params::{
 use crate::apis::safe_counter::SafeCounter;
 use crate::apis::traits::TArchetype;
 use crate::chunk::layout::{ChunkLayout, ChunkLayoutParams};
+use crate::chunk::migration::MigrationPlan;
 use crate::entity::Entity;
 use crate::query::Query;
 use crate::utils::normalize_set;
-use crate::world::arch_spec::{ArchetypeSpec, ArchetypeSpecs, PairArchetypeSpecParams};
+use crate::world::arch_spec::{ArchetypeEdge, ArchetypeEdgeKey, ArchetypeSpec, ArchetypeSpecs, PairArchetypeSpecParams};
 use crate::world::entity_spec::EntitySpec;
 use crate::world::query_spec::{QuerySpec, QuerySpecAccessor, QuerySpecs};
 use crate::world::temp_allocation::WorldTempAllocation;
@@ -41,6 +42,10 @@ pub struct World
     query_counter:            QuerySpecs,
     component_set_counter:    HashMap<Vec<usize>, usize>,
     archetype_counter:        HashMap<TypeId, usize>,
+    // Edge cache for structural changes, see `ArchetypeEdge`. `add_edges` serves both
+    // `add_component` and `merge_component`, since both land on the union of the two archetypes.
+    add_edges:                HashMap<ArchetypeEdgeKey, ArchetypeEdge>,
+    remove_edges:             HashMap<ArchetypeEdgeKey, ArchetypeEdge>,
     entities:                 Vec<EntitySpec>,
     free_entities:            Queue<usize>,
     // Slots that ran out of versions and will never be handed out again, see `erase_entity`.
@@ -67,6 +72,8 @@ impl Default for World
             component_counter:        ComponentSpecs::new(),
             archetype_counter:        HashMap::new(),
             component_set_counter:    HashMap::new(),
+            add_edges:                HashMap::new(),
+            remove_edges:             HashMap::new(),
             query_counter:            QuerySpecs::new(),
             free_entities:            Queue::new(),
             retired_entity_slots:     0,
@@ -88,7 +95,7 @@ impl Drop for World
     {
         for arch in self.archetypes.values_mut()
         {
-            arch.arch.dispose(&arch.layout, &self.component_counter);
+            arch.arch.dispose(&arch.layout);
         }
     }
 }
@@ -146,7 +153,7 @@ impl World
             (spec.arch_id(), spec.chunk_idx(), spec.idx_in_chunk())
         };
         let arch = self.archetypes.get_mut(&arch_id).unwrap();
-        match arch.arch.remove_at(&arch.layout, &self.component_counter, chunk_idx, idx_in_chunk)
+        match arch.arch.remove_at(&arch.layout, chunk_idx, idx_in_chunk)
         {
             Ok(r) =>
             {
@@ -170,10 +177,11 @@ impl World
             let e_spec = self.entities.get_unchecked(e.idx());
             (e_spec.arch_id(), e_spec.chunk_idx(), e_spec.idx_in_chunk())
         };
-        let b_arch_id = self.get_or_create_archetype_id::<T>();
-
+        // `b_arch_id` is only needed in a debug build now: it is here purely to compare the two
+        // archetypes and report a misuse of the API. The main path goes straight to the edge cache.
         #[cfg(debug_assertions)]
         {
+            let b_arch_id = self.get_or_create_archetype_id::<T>();
             let has_any_component_duplicated = {
                 let a = self.archetypes.get(&a_arch_id).unwrap();
                 let b = self.archetypes.get(&b_arch_id).unwrap();
@@ -191,26 +199,16 @@ impl World
             }
         }
 
-        let mut component_set = std::mem::take(&mut self.temp_alloc.vec_usize);
-        component_set.clear();
-
-        self.append_archetype_component_id_of_to(a_arch_id, &mut component_set);
-        self.append_archetype_component_id_of_to(b_arch_id, &mut component_set);
-
-        normalize_set(&mut component_set);
-
-        let target_arch_id = match self.component_set_counter.get(&component_set)
-        {
-            Some(r) => *r,
-            // create a new arch from these archetypes
-            None => self.create_archetype_id_from_set_of(&component_set, a_arch_id, b_arch_id),
+        let edge_key = ArchetypeEdgeKey {
+            src_arch_id:       a_arch_id,
+            archetype_type_id: TypeId::of::<T>(),
         };
-        // put back
-        self.temp_alloc.vec_usize = component_set;
+        let target_arch_id = self.get_or_create_add_edge::<T>(edge_key);
 
         let tick = self.current_tick();
         let src_idx = self.archetypes.index_of(&a_arch_id).unwrap();
         let target_idx = self.archetypes.index_of(&target_arch_id).unwrap();
+        let migration = &self.add_edges.get(&edge_key).unwrap().migration;
         let [src_arch_spec, target_arch_spec] = self.archetypes.values_mut_slice().get_disjoint_mut([src_idx, target_idx]).unwrap();
 
         let src_e_indices = EntityIndices {
@@ -218,13 +216,13 @@ impl World
             idx_in_chunk: a_idx_in_chunk,
         };
         let params = ArchetypeTakeAndWriteComponentParams {
-            src_e:           src_e_indices,
-            src_arch:        &mut src_arch_spec.arch,
-            src_layout:      &src_arch_spec.layout,
-            dst_layout:      &target_arch_spec.layout,
-            component_specs: &self.component_counter,
-            write_val:       val,
-            tick:            tick,
+            src_e:      src_e_indices,
+            src_arch:   &mut src_arch_spec.arch,
+            src_layout: &src_arch_spec.layout,
+            dst_layout: &target_arch_spec.layout,
+            migration:  migration,
+            write_val:  val,
+            tick:       tick,
         };
         let take_and_write_result = match target_arch_spec.arch.take_and_write_from(params)
         {
@@ -250,24 +248,11 @@ impl World
             let e_spec = self.entities.get_unchecked(e.idx());
             (e_spec.arch_id(), e_spec.chunk_idx(), e_spec.idx_in_chunk())
         };
-        let b_arch_id = self.get_or_create_archetype_id::<T>();
-
-        let mut component_set = std::mem::take(&mut self.temp_alloc.vec_usize);
-        component_set.clear();
-
-        self.append_archetype_component_id_of_to(a_arch_id, &mut component_set);
-        self.append_archetype_component_id_of_to(b_arch_id, &mut component_set);
-
-        normalize_set(&mut component_set);
-
-        let target_arch_id = match self.component_set_counter.get(&component_set)
-        {
-            Some(r) => *r,
-            // create a new arch from these archetypes
-            None => self.create_archetype_id_from_set_of(&component_set, a_arch_id, b_arch_id),
+        let edge_key = ArchetypeEdgeKey {
+            src_arch_id:       a_arch_id,
+            archetype_type_id: TypeId::of::<T>(),
         };
-        // put back
-        self.temp_alloc.vec_usize = component_set;
+        let target_arch_id = self.get_or_create_add_edge::<T>(edge_key);
 
         let tick = self.current_tick();
 
@@ -286,6 +271,7 @@ impl World
 
         let src_idx = self.archetypes.index_of(&a_arch_id).unwrap();
         let target_idx = self.archetypes.index_of(&target_arch_id).unwrap();
+        let migration = &self.add_edges.get(&edge_key).unwrap().migration;
         let [src_arch_spec, target_arch_spec] = self.archetypes.values_mut_slice().get_disjoint_mut([src_idx, target_idx]).unwrap();
 
         let src_e_indices = EntityIndices {
@@ -293,13 +279,13 @@ impl World
             idx_in_chunk: a_idx_in_chunk,
         };
         let params = ArchetypeTakeAndWriteComponentParams {
-            src_e:           src_e_indices,
-            src_arch:        &mut src_arch_spec.arch,
-            src_layout:      &src_arch_spec.layout,
-            dst_layout:      &target_arch_spec.layout,
-            component_specs: &self.component_counter,
-            write_val:       val,
-            tick:            tick,
+            src_e:      src_e_indices,
+            src_arch:   &mut src_arch_spec.arch,
+            src_layout: &src_arch_spec.layout,
+            dst_layout: &target_arch_spec.layout,
+            migration:  migration,
+            write_val:  val,
+            tick:       tick,
         };
         let take_and_write_result = match target_arch_spec.arch.take_and_write_from(params)
         {
@@ -321,10 +307,10 @@ impl World
             let e_spec = self.entities.get_unchecked(e.idx());
             (e_spec.arch_id(), e_spec.chunk_idx(), e_spec.idx_in_chunk())
         };
-        let b_arch_id = self.get_or_create_archetype_id::<T>();
-
+        // like `add_component`: only a debug build needs `b_arch_id`, to check the input
         #[cfg(debug_assertions)]
         {
+            let b_arch_id = self.get_or_create_archetype_id::<T>();
             let contains_all_components = {
                 let a = self.archetypes.get(&a_arch_id).unwrap();
                 let b = self.archetypes.get(&b_arch_id).unwrap();
@@ -333,28 +319,22 @@ impl World
             if !contains_all_components
             {
                 panic!(
-                    "Cannot remove component `{}` for entity {}. Missing component to remove.",
+                    "Cannot remove component `{}` from entity {}: the entity does not have this component.",
                     std::any::type_name::<T>(),
                     e
                 )
             }
         }
-        let mut component_set = std::mem::take(&mut self.temp_alloc.vec_usize);
-        component_set.clear();
-        self.append_archetype_component_id_of_to(a_arch_id, &mut component_set);
-        self.retain_archetype_component_id_of_to(b_arch_id, &mut component_set);
-        normalize_set(&mut component_set);
-        let target_arch_id = match self.component_set_counter.get(&component_set)
-        {
-            Some(r) => *r,
-            // create a new arch from these archetypes
-            None => self.create_archetype_id_for_set_of_a_exclude_b(&component_set, a_arch_id, b_arch_id),
+
+        let edge_key = ArchetypeEdgeKey {
+            src_arch_id:       a_arch_id,
+            archetype_type_id: TypeId::of::<T>(),
         };
-        // put back
-        self.temp_alloc.vec_usize = component_set;
+        let target_arch_id = self.get_or_create_remove_edge::<T>(edge_key);
 
         let src_idx = self.archetypes.index_of(&a_arch_id).unwrap();
         let target_idx = self.archetypes.index_of(&target_arch_id).unwrap();
+        let migration = &self.remove_edges.get(&edge_key).unwrap().migration;
         let [src_arch_spec, target_arch_spec] = self.archetypes.values_mut_slice().get_disjoint_mut([src_idx, target_idx]).unwrap();
 
         let src_e_indices = EntityIndices {
@@ -362,12 +342,12 @@ impl World
             idx_in_chunk: a_idx_in_chunk,
         };
         let params = ArchetypeTakeAndRemoveComponentParams::<T> {
-            src_e:           src_e_indices,
-            src_arch:        &mut src_arch_spec.arch,
-            src_layout:      &src_arch_spec.layout,
-            dst_layout:      &target_arch_spec.layout,
-            component_specs: &self.component_counter,
-            phantom:         PhantomData,
+            src_e:      src_e_indices,
+            src_arch:   &mut src_arch_spec.arch,
+            src_layout: &src_arch_spec.layout,
+            dst_layout: &target_arch_spec.layout,
+            migration:  migration,
+            phantom:    PhantomData,
         };
         let result = match target_arch_spec.arch.take_and_remove_from(params)
         {
@@ -395,7 +375,7 @@ impl World
     /// not compile, see [`Query`].
     ///
     /// Example usages:
-    /// ```text
+    /// ```
     /// let a = w.create(Hp(1));
     /// w.create(Hp(2));
     /// w.create_query::<Changed<&Hp>>()  // 2 rows
@@ -806,6 +786,7 @@ impl World
             temp_tys:                       &mut self.temp_alloc.hashset_type_ids,
             temp_comp_des:                  &mut self.temp_alloc.comp_descriptors,
             component_col_descriptors_temp: &mut self.temp_alloc.col_descriptors,
+            columns_temp:                   &mut self.temp_alloc.col_entries,
             component_bit_set:              &mut self.temp_alloc.component_bit_set_a,
         };
         let new_arch = match ArchetypeSpec::new_from_a_exclude_b_components(merge_arch_params)
@@ -829,6 +810,7 @@ impl World
             temp_tys:                       &mut self.temp_alloc.hashset_type_ids,
             temp_comp_des:                  &mut self.temp_alloc.comp_descriptors,
             component_col_descriptors_temp: &mut self.temp_alloc.col_descriptors,
+            columns_temp:                   &mut self.temp_alloc.col_entries,
             component_bit_set:              &mut self.temp_alloc.component_bit_set_a,
         };
         let new_arch = match ArchetypeSpec::new_from_pair(merge_arch_params)
@@ -850,6 +832,7 @@ impl World
             component_specs:            &self.component_counter,
             state_offsets_temp:         &mut self.temp_alloc.state_offsets,
             component_descriptors_temp: &mut self.temp_alloc.col_descriptors,
+            columns_temp:               &mut self.temp_alloc.col_entries,
             component_bit_set_temp:     &mut self.temp_alloc.component_bit_set_a,
         };
         let layout = match ChunkLayout::new(params)
@@ -861,10 +844,118 @@ impl World
         self.archetypes.insert(id, arch_spec);
     }
 
+    /// The archetype an entity lands in when `T` is added to `key.src_arch_id`, leaving the edge
+    /// in the cache so the caller can pick up its `migration` right after.
+    ///
+    /// The first call still does all of the old work: collect both sides' component ids,
+    /// `normalize_set`, hash a `Vec<usize>` to look up `component_set_counter`. Every later call
+    /// with the same `(src, T)` costs one hash on `add_edges` and nothing else.
+    #[track_caller]
+    fn get_or_create_add_edge<T: TArchetype + 'static>(&mut self, key: ArchetypeEdgeKey) -> usize
+    {
+        if let Some(edge) = self.add_edges.get(&key)
+        {
+            return edge.dst_arch_id;
+        }
+
+        let b_arch_id = self.get_or_create_archetype_id::<T>();
+
+        let mut component_set = std::mem::take(&mut self.temp_alloc.vec_usize);
+        component_set.clear();
+        self.append_archetype_component_id_of_to(key.src_arch_id, &mut component_set);
+        self.append_archetype_component_id_of_to(b_arch_id, &mut component_set);
+        normalize_set(&mut component_set);
+
+        let dst_arch_id = match self.component_set_counter.get(&component_set)
+        {
+            Some(r) => *r,
+            // create a new arch from these archetypes
+            None => self.create_archetype_id_from_set_of(&component_set, key.src_arch_id, b_arch_id),
+        };
+        // put back
+        self.temp_alloc.vec_usize = component_set;
+
+        // `merge_component` overwrites exactly `T`'s columns right after the move, so their old
+        // values have to be dropped in place instead of travelling with the entity
+        self.insert_edge(EdgeCacheInsert {
+            is_remove:            false,
+            key:                  key,
+            dst_arch_id:          dst_arch_id,
+            overwritten_type_ids: T::STORAGE_TYPE_IDS,
+        });
+        dst_arch_id
+    }
+
+    /// The mirror of [`get_or_create_add_edge`](Self::get_or_create_add_edge) for
+    /// `remove_component`: the target archetype is the difference rather than the union, and the
+    /// plan drops nothing, because the caller reads `T`'s values out before the move.
+    #[track_caller]
+    fn get_or_create_remove_edge<T: TArchetype + 'static>(&mut self, key: ArchetypeEdgeKey) -> usize
+    {
+        if let Some(edge) = self.remove_edges.get(&key)
+        {
+            return edge.dst_arch_id;
+        }
+
+        let b_arch_id = self.get_or_create_archetype_id::<T>();
+
+        let mut component_set = std::mem::take(&mut self.temp_alloc.vec_usize);
+        component_set.clear();
+        self.append_archetype_component_id_of_to(key.src_arch_id, &mut component_set);
+        self.retain_archetype_component_id_of_to(b_arch_id, &mut component_set);
+        normalize_set(&mut component_set);
+
+        let dst_arch_id = match self.component_set_counter.get(&component_set)
+        {
+            Some(r) => *r,
+            // create a new arch from these archetypes
+            None => self.create_archetype_id_for_set_of_a_exclude_b(&component_set, key.src_arch_id, b_arch_id),
+        };
+        // put back
+        self.temp_alloc.vec_usize = component_set;
+
+        self.insert_edge(EdgeCacheInsert {
+            is_remove:            true,
+            key:                  key,
+            dst_arch_id:          dst_arch_id,
+            overwritten_type_ids: &[],
+        });
+        dst_arch_id
+    }
+
+    fn insert_edge(&mut self, params: EdgeCacheInsert)
+    {
+        let migration = {
+            let src_layout = &self.archetypes.get(&params.key.src_arch_id).unwrap().layout;
+            let dst_layout = &self.archetypes.get(&params.dst_arch_id).unwrap().layout;
+            MigrationPlan::new(src_layout, dst_layout, params.overwritten_type_ids)
+        };
+        let edge = ArchetypeEdge {
+            dst_arch_id: params.dst_arch_id,
+            migration:   migration,
+        };
+        match params.is_remove
+        {
+            true => self.remove_edges.insert(params.key, edge),
+            false => self.add_edges.insert(params.key, edge),
+        };
+    }
+
     fn structure_changed(&mut self)
     {
         self.global_archetype_version.increase();
     }
+}
+
+/// Input to [`World::insert_edge`], shared by the add path and the remove path.
+struct EdgeCacheInsert<'a>
+{
+    /// `true` puts the edge in `remove_edges`, `false` in `add_edges`.
+    is_remove:            bool,
+    key:                  ArchetypeEdgeKey,
+    dst_arch_id:          usize,
+    /// Components the caller overwrites right after the move, see [`MigrationPlan::new`].
+    overwritten_type_ids: &'a [TypeId],
 }
 
 /// Rejects an archetype that names the same component twice, e.g. `world.create((Hp(1), Hp(2)))`.

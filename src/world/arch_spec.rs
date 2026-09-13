@@ -1,12 +1,13 @@
 use std::any::TypeId;
 use std::collections::{HashMap, HashSet};
 
+use crate::apis::ComponentDescriptor;
 use crate::apis::identifies::XynokEcsError;
 use crate::apis::params::ComponentSpecs;
-use crate::apis::ComponentDescriptor;
 use crate::archetype::Archetype;
-use crate::chunk::column::{ColumnDescriptor, StateOffset};
+use crate::chunk::column::{ColumnDescriptor, ColumnEntry, StateOffset};
 use crate::chunk::layout::{ChunkLayout, ChunkLayoutParams};
+use crate::chunk::migration::MigrationPlan;
 use crate::collection::component_bit_set::ComponentBitSet;
 use crate::collection::sequence_value_hash_map::SequenceValueHashMap;
 
@@ -18,9 +19,34 @@ pub type ArchetypeSpecs = SequenceValueHashMap<usize, ArchetypeSpec>;
 
 pub struct ArchetypeSpec
 {
-    pub arch:       Archetype,
-    pub layout:     ChunkLayout,
-    pub archetypes: HashMap<usize, Archetype>,
+    pub arch:   Archetype,
+    pub layout: ChunkLayout,
+}
+
+/// The edge cache key: which archetype the entity sits in, and which archetype `T` is being
+/// added to it or taken off it.
+///
+/// `World` keeps one table for adding and one for removing, because the same key means two
+/// different things: adding is a union, removing is a difference.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ArchetypeEdgeKey
+{
+    /// The archetype the entity currently sits in, i.e. `a_arch_id` over in `World`.
+    pub src_arch_id:       usize,
+    /// `TypeId` of `T`, the archetype being added or removed.
+    pub archetype_type_id: TypeId,
+}
+
+/// Everything a structural change needs, worked out ahead of time.
+///
+/// Without it, every `add_component` or `remove_component` walks both archetypes' components
+/// again, sorts, dedups and hashes a `Vec<usize>` only to land on the same id as last time. A
+/// layout never changes once built and the archetype registry only ever grows, so an entry
+/// cached here stays good for the life of the world.
+pub struct ArchetypeEdge
+{
+    pub dst_arch_id: usize,
+    pub migration:   MigrationPlan,
 }
 pub struct PairArchetypeSpecParams<'a>
 {
@@ -30,6 +56,7 @@ pub struct PairArchetypeSpecParams<'a>
     pub temp_comp_des:                  &'a mut Vec<ComponentDescriptor>,
     pub temp_tys:                       &'a mut HashSet<TypeId>,
     pub component_col_descriptors_temp: &'a mut HashMap<TypeId, ColumnDescriptor>,
+    pub columns_temp:                   &'a mut Vec<ColumnEntry>,
     pub state_offsets_temp:             &'a mut HashMap<TypeId, StateOffset>,
     pub component_bit_set:              &'a mut ComponentBitSet,
 }
@@ -39,9 +66,8 @@ impl ArchetypeSpec
     pub fn new(layout: ChunkLayout) -> Self
     {
         Self {
-            arch:       Archetype::default(),
-            layout:     layout,
-            archetypes: HashMap::new(),
+            arch:   Archetype::default(),
+            layout: layout,
         }
     }
     pub fn new_from_pair(params: PairArchetypeSpecParams) -> Result<Self, XynokEcsError>
@@ -54,13 +80,13 @@ impl ArchetypeSpec
             state_offsets_temp:         params.state_offsets_temp,
             component_specs:            params.component_specs,
             component_descriptors_temp: params.component_col_descriptors_temp,
+            columns_temp:               params.columns_temp,
             component_bit_set_temp:     params.component_bit_set,
         })?;
 
         Ok(Self {
-            arch:       Archetype::default(),
-            layout:     target_layout,
-            archetypes: HashMap::new(),
+            arch:   Archetype::default(),
+            layout: target_layout,
         })
     }
 
@@ -75,13 +101,13 @@ impl ArchetypeSpec
             components:                 components_des,
             component_specs:            params.component_specs,
             component_descriptors_temp: params.component_col_descriptors_temp,
+            columns_temp:               params.columns_temp,
             component_bit_set_temp:     params.component_bit_set,
         })?;
 
         Ok(Self {
-            arch:       Archetype::default(),
-            layout:     target_layout,
-            archetypes: HashMap::new(),
+            arch:   Archetype::default(),
+            layout: target_layout,
         })
     }
 }

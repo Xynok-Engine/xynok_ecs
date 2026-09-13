@@ -3,8 +3,8 @@ use std::collections::HashSet;
 use crate::apis::constants::ChangedTick;
 use crate::apis::identifies::XynokEcsError;
 use crate::apis::params::{
-    ArchetypeTakeAndRemoveComponentParams, ArchetypeTakeAndWriteComponentParams, ChunkTakeComponentParams, ComponentSpecs, EntityInChunkIndices,
-    ResultTakeAndRemove, ResultTakeAndWrite, SwappedRow,
+    ArchetypeTakeAndRemoveComponentParams, ArchetypeTakeAndWriteComponentParams, ChunkTakeComponentParams, EntityInChunkIndices, ResultTakeAndRemove,
+    ResultTakeAndWrite, SwappedRow,
 };
 use crate::apis::traits::TArchetype;
 use crate::chunk::layout::ChunkLayout;
@@ -63,13 +63,7 @@ impl Archetype
         })
     }
 
-    pub fn remove_at(
-        &mut self,
-        layout: &ChunkLayout,
-        component_specs: &ComponentSpecs,
-        chunk_idx: usize,
-        idx: usize,
-    ) -> Result<Option<SwappedRow>, XynokEcsError>
+    pub fn remove_at(&mut self, layout: &ChunkLayout, chunk_idx: usize, idx: usize) -> Result<Option<SwappedRow>, XynokEcsError>
     {
         let chunk = match self.chunks.get_mut(chunk_idx)
         {
@@ -77,7 +71,7 @@ impl Archetype
             None => return Err(XynokEcsError::ChunkIdxIsNotInRange(chunk_idx, self.chunks.len())),
         };
 
-        let swapped_row = unsafe { chunk.swap_remove_at(layout, component_specs, idx)? };
+        let swapped_row = unsafe { chunk.swap_remove_at(layout, idx)? };
         unsafe {
             chunk.decrease_len();
         }
@@ -98,16 +92,16 @@ impl Archetype
             let idx_in_chunk = chunk.len();
 
             let src_chunk = params.src_arch.chunks.get_unchecked_mut(params.src_e.chunk_idx);
+            // `T`'s own columns are about to be written below; any old value src shares with T must be
+            // dropped instead of migrated, otherwise it would be silently leaked when write_at overwrites it.
+            // The plan already marks those columns as `DropInPlace`.
             let swapped_row = match chunk.take_from(ChunkTakeComponentParams {
-                from:                 params.src_e.idx_in_chunk,
-                to:                   idx_in_chunk,
-                src_chunk:            src_chunk,
-                src_layout:           params.src_layout,
-                dst_layout:           params.dst_layout,
-                component_specs:      params.component_specs,
-                // `T`'s own columns are about to be written below; any old value src shares with T must be
-                // dropped instead of migrated, otherwise it would be silently leaked when write_at overwrites it
-                overwritten_type_ids: T::STORAGE_TYPE_IDS,
+                from:       params.src_e.idx_in_chunk,
+                to:         idx_in_chunk,
+                src_chunk:  src_chunk,
+                src_layout: params.src_layout,
+                dst_layout: params.dst_layout,
+                migration:  params.migration,
             })
             {
                 Ok(r) => r,
@@ -141,7 +135,14 @@ impl Archetype
     }
     /// used by merge_component() when every component of `T` is already present in this archetype:
     /// overwrites the existing values of the row in place, dropping the old ones, without moving the entity
-    pub fn replace_at<T: TArchetype + 'static>(&mut self, layout: &ChunkLayout, chunk_idx: usize, idx_in_chunk: usize, val: T, tick: ChangedTick) -> Result<(), XynokEcsError>
+    pub fn replace_at<T: TArchetype + 'static>(
+        &mut self,
+        layout: &ChunkLayout,
+        chunk_idx: usize,
+        idx_in_chunk: usize,
+        val: T,
+        tick: ChangedTick,
+    ) -> Result<(), XynokEcsError>
     {
         let chunk = unsafe { self.chunks.get_unchecked_mut(chunk_idx) };
         T::replace_at(layout, chunk, idx_in_chunk, val, tick)
@@ -164,13 +165,12 @@ impl Archetype
             let taken = T::take_from(params.src_layout, src_chunk, params.src_e.idx_in_chunk)?;
 
             let swapped_row = match chunk.take_from(ChunkTakeComponentParams {
-                from:                 params.src_e.idx_in_chunk,
-                to:                   idx_in_chunk,
-                src_chunk:            src_chunk,
-                src_layout:           params.src_layout,
-                dst_layout:           params.dst_layout,
-                component_specs:      params.component_specs,
-                overwritten_type_ids: &[],
+                from:       params.src_e.idx_in_chunk,
+                to:         idx_in_chunk,
+                src_chunk:  src_chunk,
+                src_layout: params.src_layout,
+                dst_layout: params.dst_layout,
+                migration:  params.migration,
             })
             {
                 Ok(r) => r,
@@ -214,11 +214,11 @@ impl Archetype
     {
         &self.chunks[chunk_idx]
     }
-    pub(crate) fn dispose(&mut self, layout: &ChunkLayout, component_specs: &ComponentSpecs)
+    pub(crate) fn dispose(&mut self, layout: &ChunkLayout)
     {
         for c in self.chunks.iter_mut()
         {
-            c.dispose(layout, component_specs);
+            c.dispose(layout);
         }
     }
 }
