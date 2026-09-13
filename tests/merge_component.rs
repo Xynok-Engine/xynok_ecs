@@ -2,6 +2,7 @@
 mod common;
 
 use common::*;
+use xynok_ecs::apis::identifies::XynokEcsError;
 use xynok_ecs::{entity::Entity, world::testing, world::World};
 
 #[test]
@@ -111,4 +112,32 @@ fn t_merge_component_moving_archetype_drops_the_overwritten_value_exactly_once()
 
     w.destroy(e);
     assert_eq!(drop_count(), 2, "the new value must still be dropped exactly once when the entity is destroyed");
+}
+
+/// Issue #27, same story as `add_component`: a stale handle is rejected in every build profile.
+#[test]
+#[should_panic(expected = "does not exist")]
+fn t_merge_component_with_a_stale_handle_panics()
+{
+    let mut w = World::default();
+    let e = w.create(Hp(1));
+    w.destroy(e);
+    w.merge_component(e, Hp(9));
+}
+
+#[test]
+fn t_try_merge_component_reports_a_stale_handle_instead_of_panicking()
+{
+    let mut w = World::default();
+    let a = w.create(Hp(1));
+    w.destroy(a);
+    let b = w.create(Hp(2));
+    assert_eq!(a.idx(), b.idx(), "b is expected to recycle a's slot for this test to mean anything");
+
+    let err = w.try_merge_component(a, Hp(9)).expect_err("a is stale");
+    assert!(matches!(err, XynokEcsError::EntityDoesNotExist(idx, version) if idx == a.idx() && version == a.version()));
+    assert_eq!(testing::read_component::<Hp>(&w, b), Hp(2), "b must be untouched");
+
+    w.try_merge_component(b, Hp(9)).expect("b is alive");
+    assert_eq!(testing::read_component::<Hp>(&w, b), Hp(9));
 }

@@ -2,6 +2,7 @@
 mod common;
 
 use common::*;
+use xynok_ecs::apis::identifies::XynokEcsError;
 use xynok_ecs::entity::Entity;
 use xynok_ecs::world::{testing, World};
 
@@ -218,4 +219,44 @@ fn retiring_one_slot_leaves_the_others_recyclable()
         fresh.idx() != a.idx() && fresh.idx() != b.idx(),
         "with the free list empty the next entity takes a brand new slot"
     );
+}
+
+/// Issue #27: a stale handle used to slip through in release builds, where `debug_assert!` is
+/// compiled out, and silently rewrite whatever entity happened to sit in that slot. The check is
+/// unconditional now, so this panics in every profile.
+#[test]
+#[should_panic(expected = "does not exist")]
+fn t_destroy_with_a_stale_handle_panics()
+{
+    let mut w = World::default();
+    let e = w.create(Hp(1));
+    w.destroy(e);
+    w.destroy(e);
+}
+
+#[test]
+fn t_try_destroy_reports_a_stale_handle_instead_of_panicking()
+{
+    let mut w = World::default();
+    let e = w.create(Hp(1));
+
+    assert!(w.try_destroy(e).is_ok());
+    assert!(!w.exists(e));
+
+    let err = w.try_destroy(e).expect_err("the second destroy sees a stale handle");
+    assert!(matches!(err, XynokEcsError::EntityDoesNotExist(idx, version) if idx == e.idx() && version == e.version()));
+}
+
+#[test]
+fn t_try_destroy_does_not_touch_the_entity_that_recycled_the_slot()
+{
+    let mut w = World::default();
+    let a = w.create(Hp(1));
+    w.destroy(a);
+    let b = w.create(Hp(2));
+    assert_eq!(a.idx(), b.idx(), "b is expected to recycle a's slot for this test to mean anything");
+
+    assert!(w.try_destroy(a).is_err());
+    assert!(w.exists(b), "the stale handle must not have destroyed b");
+    assert_eq!(testing::read_component::<Hp>(&w, b), Hp(2));
 }

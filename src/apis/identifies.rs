@@ -80,6 +80,9 @@ pub enum XynokEcsError
 
     #[error("Component `{0}` does not support `{1}` state detection")]
     ComponentStateNotAvailable(&'static str, &'static str),
+
+    #[error("Entity(idx: {0}, version: {1}) does not exist: it was never created, or it was destroyed and this handle is stale")]
+    EntityDoesNotExist(usize, usize),
 }
 
 // src: https://crates.io/crates/thiserror

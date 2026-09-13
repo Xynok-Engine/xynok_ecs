@@ -2,6 +2,7 @@
 mod common;
 
 use common::*;
+use xynok_ecs::apis::identifies::XynokEcsError;
 use xynok_ecs::{world::testing, world::World};
 
 #[test]
@@ -118,4 +119,31 @@ fn t_removing_the_last_component_is_unsupported()
     let mut w = World::default();
     let e = w.create(Hp(1));
     let _ = w.remove_component::<Hp>(e);
+}
+
+/// Issue #27, same story as `add_component`: a stale handle is rejected in every build profile.
+#[test]
+#[should_panic(expected = "does not exist")]
+fn t_remove_component_with_a_stale_handle_panics()
+{
+    let mut w = World::default();
+    let e = w.create((Hp(1), Mana(2)));
+    w.destroy(e);
+    let _ = w.remove_component::<Mana>(e);
+}
+
+#[test]
+fn t_try_remove_component_reports_a_stale_handle_instead_of_panicking()
+{
+    let mut w = World::default();
+    let a = w.create((Hp(1), Mana(2)));
+    w.destroy(a);
+    let b = w.create((Hp(3), Mana(4)));
+    assert_eq!(a.idx(), b.idx(), "b is expected to recycle a's slot for this test to mean anything");
+
+    let err = w.try_remove_component::<Mana>(a).expect_err("a is stale");
+    assert!(matches!(err, XynokEcsError::EntityDoesNotExist(idx, version) if idx == a.idx() && version == a.version()));
+    assert_eq!(testing::read_component::<Mana>(&w, b), Mana(4), "b must be untouched");
+
+    assert_eq!(w.try_remove_component::<Mana>(b).expect("b is alive"), Mana(4));
 }

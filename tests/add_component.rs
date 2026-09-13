@@ -2,6 +2,7 @@
 mod common;
 
 use common::*;
+use xynok_ecs::apis::identifies::XynokEcsError;
 use xynok_ecs::{entity::Entity, world::testing, world::World};
 
 #[test]
@@ -119,4 +120,33 @@ fn t_entities_with_the_same_component_set_share_one_archetype()
     );
     assert_eq!(testing::read_component::<Hp>(&w, a), Hp(1));
     assert_eq!(testing::read_component::<Hp>(&w, b), Hp(2));
+}
+
+/// Issue #27: the existence check is unconditional now, a stale handle can no longer sneak a
+/// write into whatever entity recycled the slot in a release build.
+#[test]
+#[should_panic(expected = "does not exist")]
+fn t_add_component_with_a_stale_handle_panics()
+{
+    let mut w = World::default();
+    let e = w.create(Hp(1));
+    w.destroy(e);
+    w.add_component(e, Mana(5));
+}
+
+#[test]
+fn t_try_add_component_reports_a_stale_handle_instead_of_panicking()
+{
+    let mut w = World::default();
+    let a = w.create(Hp(1));
+    w.destroy(a);
+    let b = w.create(Hp(2));
+    assert_eq!(a.idx(), b.idx(), "b is expected to recycle a's slot for this test to mean anything");
+
+    let err = w.try_add_component(a, Mana(5)).expect_err("a is stale");
+    assert!(matches!(err, XynokEcsError::EntityDoesNotExist(idx, version) if idx == a.idx() && version == a.version()));
+    assert_eq!(testing::read_component::<Hp>(&w, b), Hp(2), "b must be untouched");
+
+    w.try_add_component(b, Mana(5)).expect("b is alive");
+    assert_eq!(testing::read_component::<Mana>(&w, b), Mana(5));
 }

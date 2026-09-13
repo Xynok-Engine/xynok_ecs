@@ -143,35 +143,67 @@ impl World
             }
         }
     }
+    /// Destroys `e` and drops every component it holds.
+    ///
+    /// Panics (in every build, release included) when `e` does not exist, for example when the
+    /// handle is stale because the entity was already destroyed. Use [`World::try_destroy`] when
+    /// a missing entity is a normal case you want to handle yourself.
     #[track_caller]
     pub fn destroy(&mut self, e: Entity)
     {
-        debug_assert!(self.exists(e), "{} does not exist to be destroyed !", e);
+        if let Err(err) = self.try_destroy(e)
+        {
+            panic!("{}", err)
+        }
+    }
+
+    /// The non panicking version of [`World::destroy`]: returns
+    /// [`XynokEcsError::EntityDoesNotExist`] instead of panicking on a stale handle.
+    pub fn try_destroy(&mut self, e: Entity) -> Result<(), XynokEcsError>
+    {
+        if !self.exists(e)
+        {
+            return Err(XynokEcsError::EntityDoesNotExist(e.idx(), e.version()));
+        }
 
         let (arch_id, chunk_idx, idx_in_chunk) = unsafe {
             let spec = self.entities.get_unchecked(e.idx());
             (spec.arch_id(), spec.chunk_idx(), spec.idx_in_chunk())
         };
         let arch = self.archetypes.get_mut(&arch_id).unwrap();
-        match arch.arch.remove_at(&arch.layout, chunk_idx, idx_in_chunk)
+        if let Some(swapped_row) = arch.arch.remove_at(&arch.layout, chunk_idx, idx_in_chunk)?
         {
-            Ok(r) =>
-            {
-                if let Some(swapped_row) = r
-                {
-                    self.update_entity_indices(swapped_row);
-                }
-            }
-            Err(e) => panic!("{}", e),
-        };
+            self.update_entity_indices(swapped_row);
+        }
 
         self.erase_entity(e);
+        Ok(())
     }
 
+    /// Adds the components of `T` to `e`. `T` must not share any component with `e`'s current
+    /// archetype, use [`World::merge_component`] for that.
+    ///
+    /// Panics (in every build, release included) when `e` does not exist. Use
+    /// [`World::try_add_component`] when a missing entity is a normal case you want to handle
+    /// yourself.
     #[track_caller]
     pub fn add_component<T: TArchetype + 'static>(&mut self, e: Entity, val: T)
     {
-        debug_assert!(self.exists(e), "{} does not exist to add component !", e);
+        if let Err(err) = self.try_add_component(e, val)
+        {
+            panic!("{}", err)
+        }
+    }
+
+    /// The non panicking version of [`World::add_component`]: returns
+    /// [`XynokEcsError::EntityDoesNotExist`] instead of panicking on a stale handle.
+    #[track_caller]
+    pub fn try_add_component<T: TArchetype + 'static>(&mut self, e: Entity, val: T) -> Result<(), XynokEcsError>
+    {
+        if !self.exists(e)
+        {
+            return Err(XynokEcsError::EntityDoesNotExist(e.idx(), e.version()));
+        }
 
         let (a_arch_id, a_chunk_idx, a_idx_in_chunk) = unsafe {
             let e_spec = self.entities.get_unchecked(e.idx());
@@ -224,25 +256,40 @@ impl World
             write_val:  val,
             tick:       tick,
         };
-        let take_and_write_result = match target_arch_spec.arch.take_and_write_from(params)
-        {
-            Ok(r) => r,
-            Err(e) => panic!("{}", e),
-        };
+        let take_and_write_result = target_arch_spec.arch.take_and_write_from(params)?;
         if let Some(swapped_row) = take_and_write_result.swapped_e
         {
             self.update_entity_indices(swapped_row);
         }
         self.update_entity_spec(e, target_arch_id, take_and_write_result.new_indices_took);
+        Ok(())
     }
 
     /// Adds the components of `T` to `e` if they are not already present, otherwise overwrites the
     /// existing values. Unlike `add_component`, this allows `T` to share components with `e`'s current
     /// archetype.
+    ///
+    /// Panics (in every build, release included) when `e` does not exist. Use
+    /// [`World::try_merge_component`] when a missing entity is a normal case you want to handle
+    /// yourself.
     #[track_caller]
     pub fn merge_component<T: TArchetype + 'static>(&mut self, e: Entity, val: T)
     {
-        debug_assert!(self.exists(e), "{} does not exist to merge component !", e);
+        if let Err(err) = self.try_merge_component(e, val)
+        {
+            panic!("{}", err)
+        }
+    }
+
+    /// The non panicking version of [`World::merge_component`]: returns
+    /// [`XynokEcsError::EntityDoesNotExist`] instead of panicking on a stale handle.
+    #[track_caller]
+    pub fn try_merge_component<T: TArchetype + 'static>(&mut self, e: Entity, val: T) -> Result<(), XynokEcsError>
+    {
+        if !self.exists(e)
+        {
+            return Err(XynokEcsError::EntityDoesNotExist(e.idx(), e.version()));
+        }
 
         let (a_arch_id, a_chunk_idx, a_idx_in_chunk) = unsafe {
             let e_spec = self.entities.get_unchecked(e.idx());
@@ -260,13 +307,8 @@ impl World
         if target_arch_id == a_arch_id
         {
             let arch_spec = self.archetypes.get_mut(&a_arch_id).unwrap();
-            match arch_spec.arch.replace_at(&arch_spec.layout, a_chunk_idx, a_idx_in_chunk, val, tick)
-            {
-                Ok(_) =>
-                {}
-                Err(e) => panic!("{}", e),
-            }
-            return;
+            arch_spec.arch.replace_at(&arch_spec.layout, a_chunk_idx, a_idx_in_chunk, val, tick)?;
+            return Ok(());
         }
 
         let src_idx = self.archetypes.index_of(&a_arch_id).unwrap();
@@ -287,22 +329,39 @@ impl World
             write_val:  val,
             tick:       tick,
         };
-        let take_and_write_result = match target_arch_spec.arch.take_and_write_from(params)
-        {
-            Ok(r) => r,
-            Err(e) => panic!("{}", e),
-        };
+        let take_and_write_result = target_arch_spec.arch.take_and_write_from(params)?;
         if let Some(swapped_row) = take_and_write_result.swapped_e
         {
             self.update_entity_indices(swapped_row);
         }
         self.update_entity_spec(e, target_arch_id, take_and_write_result.new_indices_took);
+        Ok(())
     }
 
+    /// Removes the components of `T` from `e` and hands them back.
+    ///
+    /// Panics (in every build, release included) when `e` does not exist. Use
+    /// [`World::try_remove_component`] when a missing entity is a normal case you want to handle
+    /// yourself.
     #[track_caller]
     pub fn remove_component<T: TArchetype + 'static>(&mut self, e: Entity) -> T
     {
-        debug_assert!(self.exists(e), "{} does not exist to remove component {}", e, std::any::type_name::<T>());
+        match self.try_remove_component::<T>(e)
+        {
+            Ok(r) => r,
+            Err(err) => panic!("{}", err),
+        }
+    }
+
+    /// The non panicking version of [`World::remove_component`]: returns
+    /// [`XynokEcsError::EntityDoesNotExist`] instead of panicking on a stale handle.
+    #[track_caller]
+    pub fn try_remove_component<T: TArchetype + 'static>(&mut self, e: Entity) -> Result<T, XynokEcsError>
+    {
+        if !self.exists(e)
+        {
+            return Err(XynokEcsError::EntityDoesNotExist(e.idx(), e.version()));
+        }
         let (a_arch_id, a_chunk_idx, a_idx_in_chunk) = unsafe {
             let e_spec = self.entities.get_unchecked(e.idx());
             (e_spec.arch_id(), e_spec.chunk_idx(), e_spec.idx_in_chunk())
@@ -349,18 +408,14 @@ impl World
             migration:  migration,
             phantom:    PhantomData,
         };
-        let result = match target_arch_spec.arch.take_and_remove_from(params)
-        {
-            Ok(r) => r,
-            Err(e) => panic!("{}", e),
-        };
+        let result = target_arch_spec.arch.take_and_remove_from(params)?;
         if let Some(swapped_row) = result.swapped_e
         {
             self.update_entity_indices(swapped_row);
         }
         self.update_entity_spec(e, target_arch_id, result.new_indices_took);
 
-        result.val
+        Ok(result.val)
     }
 
     /// Builds a query over the current state of the world.
