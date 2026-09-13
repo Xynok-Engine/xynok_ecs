@@ -117,11 +117,6 @@ impl<'a, T: TQueryParam + 'static> IntoIterator for Query<'a, T>
     }
 }
 
-impl<'a, T: TQueryParam + 'static> Query<'a, T>
-{
-    pub fn with_shared_component_filter<TFilter: TArchetype>() {}
-}
-
 #[cfg(test)]
 mod test
 {
