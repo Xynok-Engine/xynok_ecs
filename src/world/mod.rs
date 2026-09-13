@@ -127,7 +127,7 @@ impl World
         new_e
     }
 
-    pub fn exists(&mut self, e: Entity) -> bool
+    pub fn exists(&self, e: Entity) -> bool
     {
         match e.idx() < self.entities.len()
         {
