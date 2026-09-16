@@ -1,7 +1,7 @@
 use std::any::TypeId;
 use std::collections::{HashMap, HashSet};
 
-use crate::apis::ComponentDescriptor;
+use crate::apis::{ArchetypeCfg, ComponentDescriptor};
 use crate::apis::constants::DEFAULT_CHUNK_SIZE_IN_BYTE;
 use crate::apis::identifies::XynokEcsError;
 use crate::apis::params::ComponentSpecs;
@@ -18,10 +18,25 @@ use crate::collection::sequence_value_hash_map::SequenceValueHashMap;
 /// caches their addresses: `QuerySpec` stores indices instead.
 pub type ArchetypeSpecs = SequenceValueHashMap<usize, ArchetypeSpec>;
 
+/// How the chunks of a newly created archetype are sized.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ArchetypeKind
+{
+    /// Regular archetype built from the user's (or the default) cfg.
+    Chunked(ArchetypeCfg),
+    /// One entity at most, the single chunk is sized to fit exactly one row.
+    Singleton,
+}
+
 pub struct ArchetypeSpec
 {
-    pub arch:   Archetype,
-    pub layout: ChunkLayout,
+    /// For error messages only. `type_name` of the `T` that created it, or the same format built
+    /// from the components for an archetype made by a structure change.
+    pub name:                   String,
+    pub arch:                   Archetype,
+    pub layout:                 ChunkLayout,
+    /// See [`ArchetypeCfg::allow_structure_change`].
+    pub allow_structure_change: bool,
 }
 
 /// The edge cache key: which archetype the entity sits in, and which archetype `T` is being
@@ -64,11 +79,13 @@ pub struct PairArchetypeSpecParams<'a>
 
 impl ArchetypeSpec
 {
-    pub fn new(layout: ChunkLayout) -> Self
+    pub fn new(name: String, arch: Archetype, layout: ChunkLayout, allow_structure_change: bool) -> Self
     {
         Self {
-            arch:   Archetype::default(),
-            layout: layout,
+            name:                   name,
+            arch:                   arch,
+            layout:                 layout,
+            allow_structure_change: allow_structure_change,
         }
     }
     pub fn new_from_pair(params: PairArchetypeSpecParams) -> Result<Self, XynokEcsError>
@@ -88,10 +105,8 @@ impl ArchetypeSpec
             chunk_size_in_byte:         DEFAULT_CHUNK_SIZE_IN_BYTE,
         })?;
 
-        Ok(Self {
-            arch:   Archetype::default(),
-            layout: target_layout,
-        })
+        // derived archetypes are never registered by hand either, so they keep the default
+        Ok(Self::new(archetype_name_from(components_des), Archetype::default(), target_layout, true))
     }
 
     /// treat MergeArchetypeSpecParams.b as an exclusion
@@ -112,10 +127,8 @@ impl ArchetypeSpec
             chunk_size_in_byte:         DEFAULT_CHUNK_SIZE_IN_BYTE,
         })?;
 
-        Ok(Self {
-            arch:   Archetype::default(),
-            layout: target_layout,
-        })
+        // derived archetypes are never registered by hand either, so they keep the default
+        Ok(Self::new(archetype_name_from(components_des), Archetype::default(), target_layout, true))
     }
 }
 impl ArchetypeSpec
@@ -234,4 +247,20 @@ fn append_component_descriptor_to(
         }
     }
     Ok(())
+}
+
+/// Name for an archetype built by `add_component` or `remove_component`, written the way
+/// `type_name` prints the matching archetype: a lone component as its own path, several as a tuple
+/// `(A, B, C)`, in the archetype's component order.
+fn archetype_name_from(components: &[ComponentDescriptor]) -> String
+{
+    match components
+    {
+        [single] => single.name().to_string(),
+        _ =>
+        {
+            let names: Vec<&str> = components.iter().map(|des| des.name()).collect();
+            format!("({})", names.join(", "))
+        }
+    }
 }

@@ -19,11 +19,19 @@ use crate::chunk::migration::MigrationPlan;
 use crate::entity::Entity;
 use crate::query::Query;
 use crate::utils::normalize_set;
-use crate::world::arch_spec::{ArchetypeEdge, ArchetypeEdgeKey, ArchetypeSpec, ArchetypeSpecs, PairArchetypeSpecParams};
+use crate::archetype::Archetype;
+use crate::world::arch_spec::{ArchetypeEdge, ArchetypeKind, ArchetypeEdgeKey, ArchetypeSpec, ArchetypeSpecs, PairArchetypeSpecParams};
 use crate::world::entity_spec::EntitySpec;
 use crate::world::query_spec::{QuerySpec, QuerySpecAccessor, QuerySpecs};
 use crate::world::temp_allocation::WorldTempAllocation;
 mod temp_allocation;
+
+/// What an archetype gets when nobody registered it: spawned through `create`, or built by
+/// `add_component`/`remove_component`.
+const DEFAULT_ARCHETYPE_CFG: ArchetypeCfg = ArchetypeCfg {
+    chunk_size_in_byte:     DEFAULT_CHUNK_SIZE_IN_BYTE,
+    allow_structure_change: true,
+};
 
 pub(crate) mod entity_spec;
 pub(crate) mod arch_spec;
@@ -129,10 +137,15 @@ impl World
         let arch_id = match self.get_archetype_id::<T>()
         {
             Some(r) => r,
-            None => self.create_archetype_id::<T>(cfg.chunk_size_in_byte),
+            None => self.create_archetype_id::<T>(ArchetypeKind::Chunked(cfg)),
         };
 
-        let current = self.archetypes.get(&arch_id).unwrap().layout.chunk_size_in_byte();
+        let arch_spec = self.archetypes.get(&arch_id).unwrap();
+        if arch_spec.arch.is_singleton()
+        {
+            return Err(XynokEcsError::ArchetypeIsSingleton(arch_spec.name.clone()));
+        }
+        let current = arch_spec.layout.chunk_size_in_byte();
         if current != cfg.chunk_size_in_byte
         {
             return Err(XynokEcsError::ArchetypeAlreadyCreatedWithDifferentChunkSize(
@@ -141,18 +154,113 @@ impl World
                 cfg.chunk_size_in_byte,
             ));
         }
+        if arch_spec.allow_structure_change != cfg.allow_structure_change
+        {
+            return Err(XynokEcsError::ArchetypeAlreadyCreatedWithDifferentStructureChange(
+                std::any::type_name::<T>(),
+                arch_spec.allow_structure_change,
+                cfg.allow_structure_change,
+            ));
+        }
         Ok(())
     }
+    /// Creates the singleton archetype for `T`: it holds one entity at most, its only chunk is
+    /// sized to fit that one row instead of using a fixed chunk size, and structure changes are
+    /// always locked (see [`ArchetypeCfg::allow_structure_change`]).
+    ///
+    /// Registering the same singleton again does nothing. Panics when `T` already exists as a
+    /// regular archetype, see [`try_register_singleton`](Self::try_register_singleton).
+    #[track_caller]
+    pub fn register_singleton<T: TArchetype + 'static>(&mut self)
+    {
+        if let Err(e) = self.try_register_singleton::<T>()
+        {
+            panic!("Register Singleton `{}` Failed: {e}", std::any::type_name::<T>());
+        }
+    }
+
+    /// Like [`register_singleton`](Self::register_singleton), but returns an error instead of
+    /// panicking.
+    ///
+    /// An archetype can't switch kind once it exists, so this fails with
+    /// [`XynokEcsError::ArchetypeIsNotSingleton`] when `T` (or another tuple with the same
+    /// components) was already created as a regular archetype.
+    #[track_caller]
+    pub fn try_register_singleton<T: TArchetype + 'static>(&mut self) -> Result<(), XynokEcsError>
+    {
+        self.get_or_create_singleton_archetype_id::<T>().map(|_| ())
+    }
+
+    #[track_caller]
+    fn get_or_create_singleton_archetype_id<T: TArchetype + 'static>(&mut self) -> Result<usize, XynokEcsError>
+    {
+        let arch_id = match self.get_archetype_id::<T>()
+        {
+            Some(r) => r,
+            None => self.create_archetype_id::<T>(ArchetypeKind::Singleton),
+        };
+        let arch_spec = self.archetypes.get(&arch_id).unwrap();
+        if !arch_spec.arch.is_singleton()
+        {
+            return Err(XynokEcsError::ArchetypeIsNotSingleton(arch_spec.name.clone()));
+        }
+        Ok(arch_id)
+    }
+
+    /// Spawns the one entity of the singleton archetype `T`, registering it first if needed.
+    ///
+    /// Panics when the singleton already has its entity, or when `T` exists as a regular
+    /// archetype. Use [`try_create_singleton`](Self::try_create_singleton) to handle those yourself.
+    /// Once the entity is destroyed, a new one can be spawned again.
+    #[track_caller]
+    pub fn create_singleton<T: TArchetype + 'static>(&mut self, val: T) -> Entity
+    {
+        match self.try_create_singleton(val)
+        {
+            Ok(r) => r,
+            Err(e) => panic!("Create Singleton `{}` Failed: {e}", std::any::type_name::<T>()),
+        }
+    }
+
+    /// The non panicking version of [`create_singleton`](Self::create_singleton).
+    #[track_caller]
+    pub fn try_create_singleton<T: TArchetype + 'static>(&mut self, val: T) -> Result<Entity, XynokEcsError>
+    {
+        let arch_id = self.get_or_create_singleton_archetype_id::<T>()?;
+        // checked before `new_entity`, otherwise a failed push would leave an entity slot behind
+        let arch_spec = self.archetypes.get(&arch_id).unwrap();
+        if !arch_spec.arch.can_take_a_row()
+        {
+            return Err(XynokEcsError::SingletonAlreadyExists(arch_spec.name.clone()));
+        }
+
+        let new_e = self.new_entity()?;
+        let tick = self.current_tick();
+        let arch_spec = self.archetypes.get_mut(&arch_id).unwrap();
+        let entity_chunk_indices = arch_spec.arch.push(&arch_spec.layout, new_e, val, tick)?;
+
+        self.update_entity_spec(new_e, arch_id, entity_chunk_indices);
+        Ok(new_e)
+    }
+
     #[track_caller]
     pub fn create<T: TArchetype + 'static>(&mut self, val: T) -> Entity
     {
+        let arch_id = self.get_or_create_archetype_id::<T>();
+        // `create` onto a singleton layout that is already taken, e.g. `create_singleton(Hp)` then `create(Hp)`
+        let arch_spec = self.archetypes.get(&arch_id).unwrap();
+        if !arch_spec.arch.can_take_a_row()
+        {
+            panic!("{}", XynokEcsError::SingletonAlreadyExists(arch_spec.name.clone()));
+        }
+
         let new_e = match self.new_entity()
         {
             Ok(r) => r,
             Err(e) => panic!("{}", e),
         };
         let tick = self.current_tick();
-        let (arch_id, arch_spec) = self.get_or_create_archetype_spec_mut::<T>();
+        let arch_spec = self.archetypes.get_mut(&arch_id).unwrap();
 
         let entity_chunk_indices = match arch_spec.arch.push(&arch_spec.layout, new_e, val, tick)
         {
@@ -273,6 +381,7 @@ impl World
             archetype_type_id: TypeId::of::<T>(),
         };
         let target_arch_id = self.get_or_create_add_edge::<T>(edge_key);
+        self.check_structure_change::<T>(e, a_arch_id, target_arch_id)?;
 
         let tick = self.current_tick();
         let src_idx = self.archetypes.index_of(&a_arch_id).unwrap();
@@ -347,6 +456,7 @@ impl World
             arch_spec.arch.replace_at(&arch_spec.layout, a_chunk_idx, a_idx_in_chunk, val, tick)?;
             return Ok(());
         }
+        self.check_structure_change::<T>(e, a_arch_id, target_arch_id)?;
 
         let src_idx = self.archetypes.index_of(&a_arch_id).unwrap();
         let target_idx = self.archetypes.index_of(&target_arch_id).unwrap();
@@ -427,6 +537,7 @@ impl World
             archetype_type_id: TypeId::of::<T>(),
         };
         let target_arch_id = self.get_or_create_remove_edge::<T>(edge_key);
+        self.check_structure_change::<T>(e, a_arch_id, target_arch_id)?;
 
         let src_idx = self.archetypes.index_of(&a_arch_id).unwrap();
         let target_idx = self.archetypes.index_of(&target_arch_id).unwrap();
@@ -779,23 +890,17 @@ impl World
     }
 
     #[track_caller]
-    fn get_or_create_archetype_spec_mut<T: TArchetype + 'static>(&mut self) -> (usize, &mut ArchetypeSpec)
-    {
-        let arch_id = self.get_or_create_archetype_id::<T>();
-        (arch_id, self.archetypes.get_mut(&arch_id).unwrap())
-    }
-    #[track_caller]
     fn get_or_create_archetype_id<T: TArchetype + 'static>(&mut self) -> usize
     {
         match self.get_archetype_id::<T>()
         {
             Some(r) => r,
-            None => self.create_archetype_id::<T>(DEFAULT_CHUNK_SIZE_IN_BYTE),
+            None => self.create_archetype_id::<T>(ArchetypeKind::Chunked(DEFAULT_ARCHETYPE_CFG)),
         }
     }
 
     #[track_caller]
-    fn create_archetype_id<T: TArchetype + 'static>(&mut self, chunk_size_in_byte: usize) -> usize
+    fn create_archetype_id<T: TArchetype + 'static>(&mut self, kind: ArchetypeKind) -> usize
     {
         // Runs once per `T`, the first time the world sees it: from here on `archetype_counter`
         // answers straight away, so the check costs nothing on the hot path.
@@ -828,7 +933,7 @@ impl World
             None =>
             {
                 let component_set = std::mem::take(component_set);
-                let arch_spec = self.create_archetype::<T>(chunk_size_in_byte);
+                let arch_spec = self.create_archetype::<T>(kind);
                 let arch_id = self.register_archetype_spec(&component_set, arch_spec);
                 self.archetype_counter.insert(std::any::TypeId::of::<T>(), arch_id);
                 // put back
@@ -878,8 +983,14 @@ impl World
         self.register_archetype_spec(component_set, new_arch)
     }
     #[track_caller]
-    fn create_archetype<T: TArchetype + 'static>(&mut self, chunk_size_in_byte: usize) -> ArchetypeSpec
+    fn create_archetype<T: TArchetype + 'static>(&mut self, kind: ArchetypeKind) -> ArchetypeSpec
     {
+        let chunk_size_in_byte = match kind
+        {
+            ArchetypeKind::Chunked(cfg) => cfg.chunk_size_in_byte,
+            // ignored by `ChunkLayout::new_fitted`
+            ArchetypeKind::Singleton => 0,
+        };
         let params = ChunkLayoutParams {
             components:                 T::COMPONENT_DESCRIPTORS,
             component_specs:            &self.component_counter,
@@ -889,12 +1000,21 @@ impl World
             component_bit_set_temp:     &mut self.temp_alloc.component_bit_set_a,
             chunk_size_in_byte:         chunk_size_in_byte,
         };
-        let layout = match ChunkLayout::new(params)
+        let layout = match kind
+        {
+            ArchetypeKind::Chunked(_) => ChunkLayout::new(params),
+            ArchetypeKind::Singleton => ChunkLayout::new_fitted(params),
+        };
+        let layout = match layout
         {
             Ok(r) => r,
             Err(e) => panic!("Create Archetype `{}` Failed: {e}", std::any::type_name::<T>()),
         };
-        ArchetypeSpec::new(layout)
+        match kind
+        {
+            ArchetypeKind::Chunked(cfg) => ArchetypeSpec::new(std::any::type_name::<T>().to_string(), Archetype::default(), layout, cfg.allow_structure_change),
+            ArchetypeKind::Singleton => ArchetypeSpec::new(std::any::type_name::<T>().to_string(), Archetype::singleton(), layout, false),
+        }
     }
 
     /// The one place an `arch_id` is handed out: it is always the index the spec lands on inside
@@ -1005,6 +1125,18 @@ impl World
             true => self.remove_edges.insert(params.key, edge),
             false => self.add_edges.insert(params.key, edge),
         };
+    }
+
+    /// Runs before anything moves: the edge lookup right before it only fills caches.
+    fn check_structure_change<T: 'static>(&self, e: Entity, src_arch_id: usize, dst_arch_id: usize) -> Result<(), XynokEcsError>
+    {
+        let src = self.archetypes.get(&src_arch_id).unwrap();
+        let dst = self.archetypes.get(&dst_arch_id).unwrap();
+        if !src.allow_structure_change || !dst.allow_structure_change
+        {
+            return Err(XynokEcsError::StructureChangeNotAllowed(e.idx(), e.version(), std::any::type_name::<T>()));
+        }
+        Ok(())
     }
 
     fn structure_changed(&mut self)

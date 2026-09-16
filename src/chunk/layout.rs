@@ -54,6 +54,30 @@ impl ChunkLayout
         Ok(result)
     }
 
+    /// Layout for a singleton archetype: exactly one row, and the chunk is only as big as that row
+    /// needs (rounded up to the chunk's alignment) instead of a fixed size.
+    ///
+    /// `params.chunk_size_in_byte` is ignored. The first pass runs against a huge bound just to see
+    /// how many bytes one row takes, the second builds the real layout with that size.
+    pub fn new_fitted(mut params: ChunkLayoutParams) -> Result<Self, XynokEcsError>
+    {
+        build_component_bit_set(params.component_bit_set_temp, params.components, params.component_specs)?;
+
+        // Any bound works as long as `Layout::from_size_align` still accepts it, half of
+        // `isize::MAX` leaves plenty of room for the alignment round up.
+        params.chunk_size_in_byte = isize::MAX as usize / 2;
+        let probe = try_layout(1, &mut params)?;
+
+        let used = probe
+            .columns
+            .iter()
+            .map(|c| c.offset + c.byte_size)
+            .fold(probe.header.size, usize::max);
+        // `alloc_layout.align()` is at least `CPU_WORD`, so the result stays a multiple of it
+        params.chunk_size_in_byte = align_up(used.max(1), probe.alloc_layout.align());
+        try_layout(1, &mut params)
+    }
+
     /// Bytes allocated for every chunk built from this layout.
     #[inline]
     pub fn chunk_size_in_byte(&self) -> usize

@@ -80,6 +80,22 @@ pub fn max_len(w: &World, arch_owner: Entity) -> usize
     w.archetypes.get(&arch_id).expect("archetype must exist").layout.max_len
 }
 
+/// Debug name of `arch_owner`'s archetype, see `ArchetypeSpec::name`.
+#[track_caller]
+pub fn archetype_name(w: &World, arch_owner: Entity) -> String
+{
+    let arch_id = w.entities[arch_owner.idx()].arch_id();
+    w.archetypes.get(&arch_id).expect("archetype must exist").name.clone()
+}
+
+/// Bytes allocated per chunk of `arch_owner`'s archetype.
+#[track_caller]
+pub fn chunk_size_in_byte(w: &World, arch_owner: Entity) -> usize
+{
+    let arch_id = w.entities[arch_owner.idx()].arch_id();
+    w.archetypes.get(&arch_id).expect("archetype must exist").layout.chunk_size_in_byte()
+}
+
 #[track_caller]
 pub fn free_chunk_count(w: &World, arch_owner: Entity) -> usize
 {
