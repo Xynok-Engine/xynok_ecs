@@ -28,7 +28,7 @@ cargo run --example query
 - **Structural changes.** `add_component`, `remove_component`, `merge_component`, on a single
   component or on a tuple of them.
 - **Queries.** `&T` and `&mut T`, alone or in tuples, iterated across every archetype that
-  matches.
+  matches. Add `&Entity` to get the handle of each row too.
 - **Query filters.** `Added`, `Changed`, `Enabled`, `Disabled` for state, and `Without` to
   exclude an archetype entirely.
 - **Per-system change detection.** Each system gets its own baseline tick, so a system running
@@ -233,6 +233,35 @@ Naming the same component twice in one query, for example `(&mut Hp, &Hp)`, is a
 panics at the `create_query` call.
 
 Runnable version: [`examples/query.rs`](../examples/query.rs).
+
+#### Querying the entity itself
+
+Need to know *which* entity a row belongs to? Put `&Entity` in the query, next to your
+components:
+
+```rust
+use xynok_ecs::entity::Entity;
+
+for (e, mut hp, mana) in world.create_query::<(&Entity, &mut Hp, &Mana)>()
+{
+    hp.0 += mana.0;
+    println!("{e} now has {} hp", hp.0);
+}
+
+// on its own, it walks every entity in the world
+for e in world.create_query::<&Entity>() { }
+```
+
+`Entity` is not a component. Every chunk already keeps its entity handles in its header, and
+`&Entity` just reads them from there. A few things follow from that:
+
+- It is read-only. `Query<&mut Entity>` does not compile, because rewriting a handle in place
+  would break the mapping the world keeps from handles to rows.
+- Filters do not apply to it. `Changed<&Entity>` or `Enabled<&Entity>` do not compile either,
+  since there is no state to check. Put the filter on a real component instead, for example
+  `(&Entity, Changed<&Hp>)`.
+- It does not touch any component, so it never conflicts with other queries in the scheduler.
+- `world.create(some_entity)` does not compile. An entity cannot be stored as a component.
 
 #### Query filters
 

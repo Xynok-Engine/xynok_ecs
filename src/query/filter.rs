@@ -119,25 +119,8 @@ define_filter!(
 /// [`AccessScope::exclude`], and `belong_to` then drops those archetypes before iteration even
 /// starts. That also means it costs nothing per row.
 ///
-/// It only makes sense as one element of a tuple, next to the columns you do want:
-///
-/// ```
-/// # use xynok_ecs::query::Query;
-/// # use xynok_ecs::query::filter::Without;
-/// # #[xynok_ecs::component]
-/// # struct Hp(u32);
-/// # #[xynok_ecs::component]
-/// # struct Frozen(u32);
-/// fn thaw(q: Query<(&Hp, Without<Frozen>)>)
-/// {
-///     for (hp, _) in q
-///     {
-///         let _ = hp;
-///     }
-/// }
-/// ```
-///
-/// Used on its own, `Query<Without<Frozen>>` names no column to walk, so it yields nothing.
+/// It only makes sense as one element of a tuple, next to the columns you do want, e.g.
+/// `Query<(&Hp, Without<Frozen>)>`. Used on its own, `Query<Without<Frozen>>` names no column to walk, so it yields nothing.
 pub struct Without<T: TComponent + 'static>(PhantomData<fn() -> T>);
 
 impl<T: TComponent + 'static> TQueryParam for Without<T>

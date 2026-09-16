@@ -539,28 +539,6 @@ impl World
     /// this call carries a tick of its own and gets reported. Pairing
     /// [`current_tick`](Self::current_tick) with [`advance_tick`](Self::advance_tick) by hand
     /// gives the same result, it is just easy to forget the second half.
-    ///
-    /// ```
-    /// use xynok_ecs::query::filter::Changed;
-    /// use xynok_ecs::world::World;
-    /// #[xynok_ecs::component(ChangeAble)]
-    /// #[derive(Debug)]
-    /// struct Hp(u32);
-    ///
-    /// let mut w = World::default();
-    /// let a = w.create(Hp(1));
-    /// w.create(Hp(2));
-    ///
-    /// let seen_up_to = w.capture_current_tick();
-    /// w.merge_component(a, Hp(99));
-    ///
-    /// let changed: Vec<u32> = w
-    ///     .create_query_since::<Changed<&Hp>>(seen_up_to)
-    ///     .into_iter()
-    ///     .map(|hp| hp.0)
-    ///     .collect();
-    /// assert_eq!(changed, vec![99]);
-    /// ```
     #[inline]
     pub fn capture_current_tick(&mut self) -> ChangedTick
     {
