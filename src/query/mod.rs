@@ -1,15 +1,11 @@
 use crate::apis::identifies::XynokEcsError;
 use crate::apis::internal_traits::{TQueryParam, TReadOnlyQueryParam};
-use crate::query::query_iter::QueryIter;
+use crate::query::query_iter::{QueryBatches, QueryChunks, QueryIter};
 use crate::world::query_spec::QuerySpecAccessor;
 use crate::world::World;
 use std::marker::PhantomData;
 
 pub(crate) mod access_scope;
-pub(crate) mod src_access;
-pub(crate) mod src_access_enable;
-pub(crate) mod src_access_changed;
-pub(crate) mod src_access_added;
 mod tuple;
 mod variant;
 
@@ -101,6 +97,48 @@ impl<'a, T: TQueryParam + 'static> Query<'a, T>
             accessor: world.query_src_access::<T>(last_run_tick)?,
             phantom:  PhantomData,
         })
+    }
+
+    /// Every entity of the query, one at a time.
+    ///
+    /// Takes `&mut self` even for a read-only query, so the items of two `iter` calls can never
+    /// both be alive. A read-only `Query` is `Copy`, so copy it when you need two walks at once.
+    ///
+    /// ```compile_fail
+    /// # use xynok_ecs::world::World;
+    /// # #[xynok_ecs::component]
+    /// # struct Hp(u32);
+    /// let mut w = World::default();
+    /// w.create(Hp(1));
+    /// let mut query = w.create_query::<&mut Hp>();
+    /// let a = query.iter().next();
+    /// let b = query.iter().next(); // a second `&mut Hp` to the same entity
+    /// drop((a, b));
+    /// ```
+    #[inline]
+    pub fn iter(&mut self) -> QueryIter<'_, T>
+    {
+        QueryIter::new(&self.accessor)
+    }
+
+    /// Every non-empty chunk of the query. Walk each one with `chunk.iter()` or `for item in chunk`.
+    #[inline]
+    pub fn iter_chunk(&mut self) -> QueryChunks<'_, T>
+    {
+        QueryChunks::new(&self.accessor)
+    }
+
+    /// Cuts the query into batches of `batch_amount` rows each, crossing chunk and archetype
+    /// borders as needed. Rows are counted before filters, and only the last batch can be
+    /// smaller. Batches cover disjoint rows and are `Send`, so each can go to its own thread.
+    ///
+    /// # Panics
+    /// If `batch_amount` is 0.
+    #[inline]
+    #[track_caller]
+    pub fn iter_batch(&mut self, batch_amount: usize) -> QueryBatches<'_, T>
+    {
+        QueryBatches::new(&self.accessor, batch_amount)
     }
 }
 

@@ -14,7 +14,7 @@ pub(crate) mod migration;
 mod header;
 
 // Free functions operating on an already-resolved region pointer (chunk base + state offset).
-// Query-side access structs (`SrcAccess`, `SrcAccessEnable`, `SrcAccessChange`) resolve that
+// The query side (`TQueryParam::fetch_init`) resolves that
 // pointer once per chunk (like `current_col_ptr`) and call these directly per row, with no
 // `Chunk` borrow and no `component_col_descriptors` lookup in the hot loop.
 #[inline]
@@ -560,7 +560,7 @@ impl Chunk
     }
 
     // ---- fast path: caller already resolved & cached `region_offset` once per chunk
-    // (mirrors how `SrcAccess` caches `current_col_ptr` once per chunk instead of
+    // (mirrors how a query's `fetch_init` caches the column pointer once per chunk instead of
     // hitting `component_col_descriptors` on every row). No HashMap lookup, no Result.
     #[inline]
     pub(crate) unsafe fn set_bit_unchecked(&mut self, region_offset: usize, row: usize, value: bool)

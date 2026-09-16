@@ -6,7 +6,9 @@ use crate::chunk::Chunk;
 use crate::chunk::layout::ChunkLayout;
 use crate::query::mut_ref::TMutPolicy;
 
-pub trait TComponent: Sized
+/// `Send + Sync` because query batches hand components out on other threads, see
+/// [`Query::iter_batch`](crate::query::Query::iter_batch).
+pub trait TComponent: Sized + Send + Sync
 {
     type QueryType: TComponent + 'static;
     type StorageType: TComponent + 'static;
