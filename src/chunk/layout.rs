@@ -2,11 +2,11 @@ use std::alloc::Layout;
 use std::any::TypeId;
 use std::collections::HashMap;
 
-use crate::apis::ComponentDescriptor;
-use crate::apis::constants::{BITS_PER_BYTE, CHANGED_TICK_BYTE_SIZE, CHUNK_SIZE_IN_BYTE, CPU_WORD};
+use crate::apis::constants::{BITS_PER_BYTE, CHANGED_TICK_BYTE_SIZE, CPU_WORD};
 use crate::apis::identifies::{StateDetection, XynokEcsError};
 use crate::apis::params::ComponentSpecs;
 use crate::apis::traits::TComponentDescriptor;
+use crate::apis::ComponentDescriptor;
 use crate::chunk::column::{ColumnDescriptor, ColumnEntry, StateOffset};
 use crate::chunk::header::Header;
 use crate::collection::component_bit_set::ComponentBitSet;
@@ -34,6 +34,8 @@ pub struct ChunkLayoutParams<'a>
     pub component_descriptors_temp: &'a mut HashMap<TypeId, ColumnDescriptor>,
     pub columns_temp:               &'a mut Vec<ColumnEntry>,
     pub component_bit_set_temp:     &'a mut ComponentBitSet,
+    /// Bytes allocated per chunk. Validated by `ArchetypeCfg::validate` before it gets here.
+    pub chunk_size_in_byte:         usize,
 }
 
 impl ChunkLayout
@@ -52,12 +54,19 @@ impl ChunkLayout
         let result = compute_layout(&mut params)?;
         Ok(result)
     }
+
+    /// Bytes allocated for every chunk built from this layout.
+    #[inline]
+    pub fn chunk_size_in_byte(&self) -> usize
+    {
+        self.alloc_layout.size()
+    }
 }
 fn compute_layout(params: &mut ChunkLayoutParams) -> Result<ChunkLayout, XynokEcsError>
 {
     build_component_bit_set(params.component_bit_set_temp, params.components, params.component_specs)?;
 
-    let mut upper_bound = estimate_max_entities(params.components);
+    let mut upper_bound = estimate_max_entities(params.components, params.chunk_size_in_byte);
 
     // The estimate ignores padding, so it can only be too generous, never too small. That makes
     // it a valid upper bound for the search below.
@@ -100,7 +109,7 @@ fn compute_layout(params: &mut ChunkLayoutParams) -> Result<ChunkLayout, XynokEc
 /// the `added` and `changed` ticks entirely. For a change-tracked archetype that is 8 bytes per
 /// row per component missing, so the starting guess came out several hundred rows too high and
 /// the search had to walk all the way down.
-fn estimate_max_entities(components: &[ComponentDescriptor]) -> usize
+fn estimate_max_entities(components: &[ComponentDescriptor], chunk_size_in_byte: usize) -> usize
 {
     // Each entity costs its handle in the header plus one slot in every component column
     let mut bits_per_entity = Entity::COMPONENT_DESCRIPTOR.byte_size.saturating_mul(BITS_PER_BYTE);
@@ -125,7 +134,7 @@ fn estimate_max_entities(components: &[ComponentDescriptor]) -> usize
     {
         return 0;
     }
-    (CHUNK_SIZE_IN_BYTE * BITS_PER_BYTE) / bits_per_entity
+    chunk_size_in_byte.saturating_mul(BITS_PER_BYTE) / bits_per_entity
 }
 /// Builds the archetype's component bit set, and rejects a component named twice on the way.
 ///
@@ -153,7 +162,7 @@ fn build_component_bit_set(dst: &mut ComponentBitSet, src: &[ComponentDescriptor
     }
     Ok(())
 }
-/// Attempts to build a layout for `max_entities` rows, returns `None` if the total size exceeds [`CHUNK_SIZE_IN_BYTE`]
+/// Attempts to build a layout for `max_entities` rows, returns `None` if the total size exceeds the chunk size
 fn try_layout(max_entities: usize, params: &mut ChunkLayoutParams) -> Result<ChunkLayout, XynokEcsError>
 {
     let header = Header::new(max_entities, params.components, params.state_offsets_temp);
@@ -168,7 +177,7 @@ fn try_layout(max_entities: usize, params: &mut ChunkLayoutParams) -> Result<Chu
     {
         cursor = align_up(cursor, des.align);
 
-        if cursor > CHUNK_SIZE_IN_BYTE
+        if cursor > params.chunk_size_in_byte
         {
             return Err(XynokEcsError::ArchetypeIsTooLarge);
         }
@@ -202,13 +211,13 @@ fn try_layout(max_entities: usize, params: &mut ChunkLayoutParams) -> Result<Chu
             Some(r) => r,
             None => return Err(XynokEcsError::ArchetypeIsTooLarge),
         };
-        if cursor > CHUNK_SIZE_IN_BYTE
+        if cursor > params.chunk_size_in_byte
         {
             return Err(XynokEcsError::ArchetypeIsTooLarge);
         }
         max_align = max_align.max(des.align);
     }
-    let alloc_layout = match Layout::from_size_align(CHUNK_SIZE_IN_BYTE, max_align)
+    let alloc_layout = match Layout::from_size_align(params.chunk_size_in_byte, max_align)
     {
         Ok(l) => l,
         Err(e) => return Err(XynokEcsError::ChunkLayoutAllocation(e)),
@@ -229,6 +238,7 @@ mod test
     use std::collections::HashMap;
 
     use super::*;
+    use crate::apis::constants::DEFAULT_CHUNK_SIZE_IN_BYTE as CHUNK_SIZE_IN_BYTE;
     use crate::apis::identifies::{StateDetection, StorageLocation};
     use crate::apis::params::ComponentSpec;
 
@@ -296,6 +306,11 @@ mod test
 
     fn layout_with(descriptors: &[ComponentDescriptor], specs: &ComponentSpecs) -> Result<ChunkLayout, XynokEcsError>
     {
+        layout_sized(descriptors, specs, CHUNK_SIZE_IN_BYTE)
+    }
+
+    fn layout_sized(descriptors: &[ComponentDescriptor], specs: &ComponentSpecs, chunk_size_in_byte: usize) -> Result<ChunkLayout, XynokEcsError>
+    {
         let mut temp = HashMap::new();
         let mut offset = HashMap::new();
         let mut columns = Vec::new();
@@ -307,6 +322,7 @@ mod test
             component_descriptors_temp: &mut temp,
             columns_temp:               &mut columns,
             component_bit_set_temp:     &mut bit_set,
+            chunk_size_in_byte:         chunk_size_in_byte,
         })
     }
 
@@ -330,7 +346,7 @@ mod test
 
         for descriptors in sets
         {
-            let estimate = estimate_max_entities(descriptors);
+            let estimate = estimate_max_entities(descriptors, CHUNK_SIZE_IN_BYTE);
             let actual = layout_of(descriptors).expect("layout must be constructible").max_len;
 
             assert!(
@@ -410,11 +426,17 @@ mod test
 
         match Chunk::validate_writable::<Mana>(&layout)
         {
-            Err(XynokEcsError::ChunkDoesNotContainComponent(_, storage)) => assert!(storage.ends_with("Mana"), "the message must name the missing component, got `{storage}`"),
+            Err(XynokEcsError::ChunkDoesNotContainComponent(_, storage)) =>
+            {
+                assert!(storage.ends_with("Mana"), "the message must name the missing component, got `{storage}`")
+            }
             Err(e) => panic!("wrong error: {e}"),
             Ok(_) => panic!("Mana has no column in this layout"),
         }
-        assert!(matches!(Chunk::validate_takeable::<Mana>(&layout), Err(XynokEcsError::ChunkDoesNotContainComponent(_, _))));
+        assert!(matches!(
+            Chunk::validate_takeable::<Mana>(&layout),
+            Err(XynokEcsError::ChunkDoesNotContainComponent(_, _))
+        ));
     }
 
     /// A tuple is written one component at a time, so the check has to cover all of them: a single
@@ -509,6 +531,36 @@ mod test
             "layout wastes too much of the chunk: {used}/{CHUNK_SIZE_IN_BYTE} bytes used for max_len = {}",
             layout.max_len
         );
+    }
+
+    /// Issue #33: the row count follows the chunk size picked for the archetype, and the
+    /// allocation is exactly that size.
+    #[test]
+    fn row_count_follows_the_chunk_size()
+    {
+        let descriptors = [Hp::COMPONENT_DESCRIPTOR, Mana::COMPONENT_DESCRIPTOR];
+        let specs = specs_of(&descriptors);
+
+        let small = layout_sized(&descriptors, &specs, 4 * 1024).expect("layout must be constructible");
+        let big = layout_sized(&descriptors, &specs, 64 * 1024).expect("layout must be constructible");
+
+        assert_eq!(small.chunk_size_in_byte(), 4 * 1024);
+        assert_eq!(big.chunk_size_in_byte(), 64 * 1024);
+        assert!(
+            big.max_len > small.max_len * 15,
+            "a 16x bigger chunk should hold roughly 16x the rows, got {} vs {}",
+            big.max_len,
+            small.max_len
+        );
+    }
+
+    /// A chunk too small for even one row is reported, not turned into an empty layout.
+    #[test]
+    fn a_chunk_too_small_for_one_row_is_rejected()
+    {
+        let descriptors = [Aligned32::COMPONENT_DESCRIPTOR];
+        let result = layout_sized(&descriptors, &specs_of(&descriptors), CPU_WORD);
+        assert!(matches!(result, Err(XynokEcsError::ArchetypeIsTooLarge)));
     }
 
     #[test]

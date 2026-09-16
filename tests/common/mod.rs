@@ -3,12 +3,12 @@
 //! does not also treat it as a standalone test binary.
 #![allow(unused)]
 
-use std::sync::{
-    atomic::{AtomicUsize, Ordering},
-    Mutex,
-};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Mutex;
 
-use xynok_ecs::{component, entity::Entity, world::testing, world::World};
+use xynok_ecs::component;
+use xynok_ecs::entity::Entity;
+use xynok_ecs::world::{testing, World};
 
 // ------------------------------------------------------------------------------------------------
 // Component fixtures
@@ -99,6 +99,16 @@ pub fn assert_entity_mapping_is_consistent(w: &World, live: &[Entity])
     {
         let stored = testing::entity_stored_at_row_of(w, e);
         let loc = testing::entity_location(w, e);
-        assert_eq!(stored, e, "row {} of chunk {} should hold {} but holds {}", loc.idx_in_chunk, loc.chunk_idx, e, stored);
+        assert_eq!(
+            stored, e,
+            "row {} of chunk {} should hold {} but holds {}",
+            loc.idx_in_chunk, loc.chunk_idx, e, stored
+        );
     }
 }
+
+/// Chunk size for tests that register archetypes but don't care about the layout.
+#[allow(dead_code)]
+pub const CFG: xynok_ecs::apis::ArchetypeCfg = xynok_ecs::apis::ArchetypeCfg {
+    chunk_size_in_byte: xynok_ecs::apis::constants::DEFAULT_CHUNK_SIZE_IN_BYTE,
+};

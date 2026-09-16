@@ -16,7 +16,7 @@ mod alloc_probe
         cell::Cell,
     };
 
-    use xynok_ecs::apis::constants::CHUNK_SIZE_IN_BYTE;
+    use xynok_ecs::apis::constants::DEFAULT_CHUNK_SIZE_IN_BYTE as CHUNK_SIZE_IN_BYTE;
 
     thread_local! {
         static LIVE_CHUNKS: Cell<isize> = const { Cell::new(0) };

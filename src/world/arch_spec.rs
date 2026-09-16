@@ -2,6 +2,7 @@ use std::any::TypeId;
 use std::collections::{HashMap, HashSet};
 
 use crate::apis::ComponentDescriptor;
+use crate::apis::constants::DEFAULT_CHUNK_SIZE_IN_BYTE;
 use crate::apis::identifies::XynokEcsError;
 use crate::apis::params::ComponentSpecs;
 use crate::archetype::Archetype;
@@ -82,6 +83,9 @@ impl ArchetypeSpec
             component_descriptors_temp: params.component_col_descriptors_temp,
             columns_temp:               params.columns_temp,
             component_bit_set_temp:     params.component_bit_set,
+            // Derived archetypes are never registered by hand, so they get the default. Register
+            // the full component set up front if it needs a different size.
+            chunk_size_in_byte:         DEFAULT_CHUNK_SIZE_IN_BYTE,
         })?;
 
         Ok(Self {
@@ -103,6 +107,9 @@ impl ArchetypeSpec
             component_descriptors_temp: params.component_col_descriptors_temp,
             columns_temp:               params.columns_temp,
             component_bit_set_temp:     params.component_bit_set,
+            // Derived archetypes are never registered by hand, so they get the default. Register
+            // the full component set up front if it needs a different size.
+            chunk_size_in_byte:         DEFAULT_CHUNK_SIZE_IN_BYTE,
         })?;
 
         Ok(Self {
