@@ -1,7 +1,6 @@
 use std::any::TypeId;
 
 use crate::apis::constants::ChangedTick;
-use crate::apis::params::ComponentSpecs;
 use crate::collection::sequence_value_hash_map::SequenceValueHashMap;
 use crate::query::access_scope::AccessScope;
 use crate::world::arch_spec::ArchetypeSpecs;
@@ -32,12 +31,12 @@ pub struct QuerySpec
 #[derive(Clone, Copy)]
 pub struct QuerySpecAccessor<'a>
 {
-    pub query_idx:       usize,
-    pub queries:         &'a QuerySpecs,
-    pub archetypes:      &'a ArchetypeSpecs,
-    pub component_specs: &'a ComponentSpecs,
-    pub last_run_tick:   ChangedTick,
-    pub this_run_tick:   ChangedTick,
+    pub query_idx:     usize,
+    pub queries:       &'a QuerySpecs,
+    pub archetypes:    &'a ArchetypeSpecs,
+    //pub component_specs: &'a ComponentSpecs,
+    pub last_run_tick: ChangedTick,
+    pub this_run_tick: ChangedTick,
 }
 
 impl<'a> QuerySpecAccessor<'a>
