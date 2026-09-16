@@ -5,7 +5,6 @@ use std::collections::HashMap;
 use crate::apis::constants::{BITS_PER_BYTE, CHANGED_TICK_BYTE_SIZE, CPU_WORD};
 use crate::apis::identifies::{StateDetection, XynokEcsError};
 use crate::apis::params::ComponentSpecs;
-use crate::apis::traits::TComponentDescriptor;
 use crate::apis::ComponentDescriptor;
 use crate::chunk::column::{ColumnDescriptor, ColumnEntry, StateOffset};
 use crate::chunk::header::Header;
@@ -112,7 +111,7 @@ fn compute_layout(params: &mut ChunkLayoutParams) -> Result<ChunkLayout, XynokEc
 fn estimate_max_entities(components: &[ComponentDescriptor], chunk_size_in_byte: usize) -> usize
 {
     // Each entity costs its handle in the header plus one slot in every component column
-    let mut bits_per_entity = Entity::COMPONENT_DESCRIPTOR.byte_size.saturating_mul(BITS_PER_BYTE);
+    let mut bits_per_entity = Entity::BYTE_SIZE.saturating_mul(BITS_PER_BYTE);
 
     for des in components
     {
@@ -235,6 +234,7 @@ fn try_layout(max_entities: usize, params: &mut ChunkLayoutParams) -> Result<Chu
 #[cfg(test)]
 mod test
 {
+    use crate::apis::traits::TComponentDescriptor;
     use std::collections::HashMap;
 
     use super::*;

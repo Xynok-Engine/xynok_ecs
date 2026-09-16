@@ -3,7 +3,6 @@ use std::collections::HashMap;
 
 use crate::apis::constants::{BITS_PER_BYTE, CHANGED_TICK_BYTE_SIZE, CPU_WORD};
 use crate::apis::identifies::StateDetection;
-use crate::apis::traits::TComponentDescriptor;
 use crate::apis::ComponentDescriptor;
 use crate::chunk::column::StateOffset;
 use crate::entity::Entity;
@@ -54,8 +53,8 @@ impl Header
             state_offsets.insert(e.storage_type_id, state_offset);
         }
         // entities
-        let entities_offset = align_up(offset, Entity::COMPONENT_DESCRIPTOR.align);
-        let entities_size = max_entities * Entity::COMPONENT_DESCRIPTOR.byte_size;
+        let entities_offset = align_up(offset, Entity::ALIGN);
+        let entities_size = max_entities * Entity::BYTE_SIZE;
 
         let size = align_up(entities_offset + entities_size, CPU_WORD);
         Self {

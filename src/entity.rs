@@ -1,5 +1,4 @@
-use crate::apis::identifies::{StateDetection, StorageLocation, XynokEcsError};
-use crate::apis::traits::TComponent;
+use crate::apis::identifies::XynokEcsError;
 
 /// Stores an Index and Version, packed into a u64
 /// Layout: bits 0..40 = idx (up to ~1 trillion slots), bits 40..64 = version (~16 million reuses per slot)
@@ -7,19 +6,6 @@ use crate::apis::traits::TComponent;
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 #[repr(transparent)]
 pub struct Entity(u64);
-
-impl TComponent for Entity
-{
-    type StorageType = Self;
-
-    type QueryType = Self;
-
-    type MutPolicy = crate::query::mut_ref::NoTracking;
-
-    const STORAGE_LOCATION: StorageLocation = StorageLocation::Chunk;
-
-    const STATE_DETECTION: crate::apis::identifies::StateDetection = StateDetection::None;
-}
 
 impl Entity
 {
@@ -33,6 +19,12 @@ impl Entity
     pub const MAX_IDX: usize = Self::IDX_MASK as usize;
     /// The maximum representable version value (2^24 - 1)
     pub const MAX_VERSION: usize = Self::VERSION_MASK as usize;
+
+    /// Bytes one handle takes in a chunk's entity region.
+    /// `Entity` is not a component, so chunk layout asks for this instead of a component descriptor.
+    pub const BYTE_SIZE: usize = std::mem::size_of::<Self>();
+    /// Alignment of the chunk's entity region
+    pub const ALIGN: usize = std::mem::align_of::<Self>();
 }
 impl Entity
 {

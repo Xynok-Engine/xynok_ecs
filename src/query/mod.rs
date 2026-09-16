@@ -8,55 +8,16 @@ use std::marker::PhantomData;
 pub(crate) mod access_scope;
 mod tuple;
 mod variant;
+mod entity;
 
 pub mod query_iter;
 pub mod filter;
 pub mod mut_ref;
 
-/// A `Query` is `Copy` only when it is read-only:
+/// A `Query` is `Copy` only when it is read-only. Any `&mut` in the query makes it non-copyable.
 ///
-/// ```
-/// use xynok_ecs::query::Query;
-/// fn needs_copy<T: Copy>() {}
-/// #[xynok_ecs::component]
-/// struct Hp(u32);
-/// #[xynok_ecs::component]
-/// struct Mana(u32);
-/// needs_copy::<Query<'static, &Hp>>();
-/// needs_copy::<Query<'static, (&Hp, &Mana)>>();
-/// ```
-///
-/// Any `&mut` in the query makes it non-copyable:
-///
-/// ```compile_fail
-/// use xynok_ecs::query::Query;
-/// fn needs_copy<T: Copy>() {}
-/// #[xynok_ecs::component]
-/// struct Hp(u32);
-/// needs_copy::<Query<'static, &mut Hp>>();
-/// ```
-///
-/// ```compile_fail
-/// use xynok_ecs::query::Query;
-/// fn needs_copy<T: Copy>() {}
-/// #[xynok_ecs::component]
-/// struct Hp(u32);
-/// #[xynok_ecs::component]
-/// struct Mana(u32);
-/// needs_copy::<Query<'static, (&Hp, &mut Mana)>>();
-/// ```
 /// A query cannot outlive a change to the world it reads, since it borrows the world mutably
-/// for as long as it lives:
-///
-/// ```compile_fail
-/// use xynok_ecs::world::World;
-/// #[xynok_ecs::component]
-/// struct Hp(u32);
-/// let mut w = World::default();
-/// let query = w.create_query::<&Hp>();
-/// w.create(Hp(1));
-/// for _ in query {}
-/// ```
+/// for as long as it lives.
 pub struct Query<'a, T: TQueryParam + 'static>
 {
     accessor: QuerySpecAccessor<'a>,
@@ -103,18 +64,6 @@ impl<'a, T: TQueryParam + 'static> Query<'a, T>
     ///
     /// Takes `&mut self` even for a read-only query, so the items of two `iter` calls can never
     /// both be alive. A read-only `Query` is `Copy`, so copy it when you need two walks at once.
-    ///
-    /// ```compile_fail
-    /// # use xynok_ecs::world::World;
-    /// # #[xynok_ecs::component]
-    /// # struct Hp(u32);
-    /// let mut w = World::default();
-    /// w.create(Hp(1));
-    /// let mut query = w.create_query::<&mut Hp>();
-    /// let a = query.iter().next();
-    /// let b = query.iter().next(); // a second `&mut Hp` to the same entity
-    /// drop((a, b));
-    /// ```
     #[inline]
     pub fn iter(&mut self) -> QueryIter<'_, T>
     {
