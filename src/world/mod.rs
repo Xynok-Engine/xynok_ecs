@@ -5,7 +5,8 @@ use std::sync::atomic::Ordering;
 
 use xynok_std::collection::Queue;
 
-use crate::apis::constants::{AtomicChangedTick, ChangedTick};
+use crate::apis::ArchetypeCfg;
+use crate::apis::constants::{AtomicChangedTick, ChangedTick, DEFAULT_CHUNK_SIZE_IN_BYTE};
 use crate::apis::identifies::XynokEcsError;
 use crate::apis::internal_traits::TQueryParam;
 use crate::apis::params::{
@@ -101,10 +102,46 @@ impl Drop for World
 }
 impl World
 {
+    /// Creates the archetype for `T` with the given chunk size, before any entity lands in it.
+    ///
+    /// Registering the same component set again with the same size does nothing. A different size
+    /// panics, see [`try_register_archetype`](Self::try_register_archetype).
     #[track_caller]
-    pub fn register_archetype<T: TArchetype + 'static>(&mut self)
+    pub fn register_archetype<T: TArchetype + 'static>(&mut self, cfg: ArchetypeCfg)
     {
-        let _ = self.get_or_create_archetype_id::<T>();
+        if let Err(e) = self.try_register_archetype::<T>(cfg)
+        {
+            panic!("Register Archetype `{}` Failed: {e}", std::any::type_name::<T>());
+        }
+    }
+
+    /// Like [`register_archetype`](Self::register_archetype), but reports a bad `cfg` instead of
+    /// panicking.
+    ///
+    /// An archetype that already exists (registered before, spawned through `create`, or built by
+    /// `add_component`) keeps its layout. Its chunk size can't be changed afterwards: cached
+    /// migration plans point at the old column offsets. So asking for a different size is an error.
+    #[track_caller]
+    pub fn try_register_archetype<T: TArchetype + 'static>(&mut self, cfg: ArchetypeCfg) -> Result<(), XynokEcsError>
+    {
+        cfg.validate()?;
+
+        let arch_id = match self.get_archetype_id::<T>()
+        {
+            Some(r) => r,
+            None => self.create_archetype_id::<T>(cfg.chunk_size_in_byte),
+        };
+
+        let current = self.archetypes.get(&arch_id).unwrap().layout.chunk_size_in_byte();
+        if current != cfg.chunk_size_in_byte
+        {
+            return Err(XynokEcsError::ArchetypeAlreadyCreatedWithDifferentChunkSize(
+                std::any::type_name::<T>(),
+                current,
+                cfg.chunk_size_in_byte,
+            ));
+        }
+        Ok(())
     }
     #[track_caller]
     pub fn create<T: TArchetype + 'static>(&mut self, val: T) -> Entity
@@ -428,16 +465,6 @@ impl World
     /// The query borrows the world mutably for as long as it lives, so treat it as a short lived
     /// value: create it, iterate it, let it go. Keeping one around while the world changes does
     /// not compile, see [`Query`].
-    ///
-    /// Example usages:
-    /// ```
-    /// let a = w.create(Hp(1));
-    /// w.create(Hp(2));
-    /// w.create_query::<Changed<&Hp>>()  // 2 rows
-    /// w.create_query::<Changed<&Hp>>()  // empty
-    /// w.merge_component(a, Hp(99));
-    /// w.create_query::<Changed<&Hp>>()  // only 99
-    /// ```
     #[track_caller]
     pub fn create_query<'a, T: TQueryParam + 'static>(&'a mut self) -> Query<'a, T>
     {
@@ -785,12 +812,12 @@ impl World
         match self.get_archetype_id::<T>()
         {
             Some(r) => r,
-            None => self.create_archetype_id::<T>(),
+            None => self.create_archetype_id::<T>(DEFAULT_CHUNK_SIZE_IN_BYTE),
         }
     }
 
     #[track_caller]
-    fn create_archetype_id<T: TArchetype + 'static>(&mut self) -> usize
+    fn create_archetype_id<T: TArchetype + 'static>(&mut self, chunk_size_in_byte: usize) -> usize
     {
         // Runs once per `T`, the first time the world sees it: from here on `archetype_counter`
         // answers straight away, so the check costs nothing on the hot path.
@@ -823,7 +850,7 @@ impl World
             None =>
             {
                 let component_set = std::mem::take(component_set);
-                let arch_spec = self.create_archetype::<T>();
+                let arch_spec = self.create_archetype::<T>(chunk_size_in_byte);
                 let arch_id = self.register_archetype_spec(&component_set, arch_spec);
                 self.archetype_counter.insert(std::any::TypeId::of::<T>(), arch_id);
                 // put back
@@ -873,7 +900,7 @@ impl World
         self.register_archetype_spec(component_set, new_arch)
     }
     #[track_caller]
-    fn create_archetype<T: TArchetype + 'static>(&mut self) -> ArchetypeSpec
+    fn create_archetype<T: TArchetype + 'static>(&mut self, chunk_size_in_byte: usize) -> ArchetypeSpec
     {
         let params = ChunkLayoutParams {
             components:                 T::COMPONENT_DESCRIPTORS,
@@ -882,6 +909,7 @@ impl World
             component_descriptors_temp: &mut self.temp_alloc.col_descriptors,
             columns_temp:               &mut self.temp_alloc.col_entries,
             component_bit_set_temp:     &mut self.temp_alloc.component_bit_set_a,
+            chunk_size_in_byte:         chunk_size_in_byte,
         };
         let layout = match ChunkLayout::new(params)
         {

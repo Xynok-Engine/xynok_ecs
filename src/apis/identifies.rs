@@ -27,8 +27,14 @@ pub enum XynokEcsError
     #[error("Entity slot {0} has used up all {1} of its versions")]
     EntityVersionOverflow(usize, usize),
 
-    #[error("Archetype's component total size exceeds 16kB")]
+    #[error("Archetype's component total size exceeds its chunk size")]
     ArchetypeIsTooLarge,
+
+    #[error("Invalid chunk size {0} bytes: it must be greater than 0 and a multiple of {1}")]
+    InvalidChunkSize(usize, usize),
+
+    #[error("Archetype `{0}` already exists with a chunk size of {1} bytes, cannot register it again with {2} bytes")]
+    ArchetypeAlreadyCreatedWithDifferentChunkSize(&'static str, usize, usize),
 
     #[error("Chunk Layout allocation creation failed: {0}")]
     ChunkLayoutAllocation(LayoutError),

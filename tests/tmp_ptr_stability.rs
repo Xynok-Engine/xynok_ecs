@@ -8,22 +8,22 @@ use xynok_ecs::world::{testing, World};
 /// boundaries (hashbrown reallocates at 3, 7, 14, 28 entries for a map built empty).
 fn register_many_archetypes(w: &mut World)
 {
-    w.register_archetype::<Mana>();
-    w.register_archetype::<Pos>();
-    w.register_archetype::<Marker>();
-    w.register_archetype::<Aligned32>();
-    w.register_archetype::<(Hp, Mana)>();
-    w.register_archetype::<(Hp, Pos)>();
-    w.register_archetype::<(Hp, Marker)>();
-    w.register_archetype::<(Hp, Aligned32)>();
-    w.register_archetype::<(Mana, Pos)>();
-    w.register_archetype::<(Mana, Marker)>();
-    w.register_archetype::<(Mana, Aligned32)>();
-    w.register_archetype::<(Pos, Marker)>();
-    w.register_archetype::<(Pos, Aligned32)>();
-    w.register_archetype::<(Marker, Aligned32)>();
-    w.register_archetype::<(Hp, Mana, Pos)>();
-    w.register_archetype::<(Hp, Mana, Marker)>();
+    w.register_archetype::<Mana>(CFG);
+    w.register_archetype::<Pos>(CFG);
+    w.register_archetype::<Marker>(CFG);
+    w.register_archetype::<Aligned32>(CFG);
+    w.register_archetype::<(Hp, Mana)>(CFG);
+    w.register_archetype::<(Hp, Pos)>(CFG);
+    w.register_archetype::<(Hp, Marker)>(CFG);
+    w.register_archetype::<(Hp, Aligned32)>(CFG);
+    w.register_archetype::<(Mana, Pos)>(CFG);
+    w.register_archetype::<(Mana, Marker)>(CFG);
+    w.register_archetype::<(Mana, Aligned32)>(CFG);
+    w.register_archetype::<(Pos, Marker)>(CFG);
+    w.register_archetype::<(Pos, Aligned32)>(CFG);
+    w.register_archetype::<(Marker, Aligned32)>(CFG);
+    w.register_archetype::<(Hp, Mana, Pos)>(CFG);
+    w.register_archetype::<(Hp, Mana, Marker)>(CFG);
 }
 
 /// A query is a short lived value, so each read builds a fresh one. After the query registry has
