@@ -6,6 +6,7 @@ use std::collections::HashSet;
 
 use xynok_ecs::component;
 use xynok_ecs::query::filter::{Changed, Without};
+use xynok_ecs::query::query_iter::MIN_BATCH_AMOUNT;
 use xynok_ecs::world::World;
 
 #[component(ChangeAble)]
@@ -95,7 +96,7 @@ fn t_a_chunk_can_be_walked_by_value()
 }
 
 #[test]
-fn t_iter_batch_cuts_rows_into_even_batches_with_a_short_last_one()
+fn t_iter_batch_cuts_rows_into_batches_at_most_7_rows_short()
 {
     let mut w = two_archetypes();
     let mut query = w.create_query::<&Hp>();
@@ -104,10 +105,11 @@ fn t_iter_batch_cuts_rows_into_even_batches_with_a_short_last_one()
     let batch_amount = 777;
     let total = all_hp().len();
 
+    // a cut inside a chunk snaps down to a multiple of 8, so a batch loses at most 7 rows
     let sizes: Vec<usize> = query.iter_batch(batch_amount).map(|batch| batch.len()).collect();
-    assert_eq!(sizes.len(), total.div_ceil(batch_amount));
-    assert!(sizes[..sizes.len() - 1].iter().all(|&size| size == batch_amount));
-    assert_eq!(*sizes.last().unwrap(), total % batch_amount);
+    assert_eq!(sizes.iter().sum::<usize>(), total);
+    assert!(sizes.iter().all(|&size| size <= batch_amount));
+    assert!(sizes[..sizes.len() - 1].iter().all(|&size| size + MIN_BATCH_AMOUNT > batch_amount));
 
     let mut seen = Vec::new();
     for mut batch in query.iter_batch(batch_amount)
@@ -130,12 +132,27 @@ fn t_iter_batch_bigger_than_the_query_gives_one_batch()
 }
 
 #[test]
-#[should_panic(expected = "batch_amount above 0")]
-fn t_iter_batch_of_zero_panics()
+#[should_panic(expected = "batch_amount of at least 8")]
+fn t_iter_batch_below_the_minimum_panics()
 {
     let mut w = two_archetypes();
     let mut query = w.create_query::<&Hp>();
-    let _ = query.iter_batch(0);
+    let _ = query.iter_batch(MIN_BATCH_AMOUNT - 1);
+}
+
+#[test]
+fn t_iter_batch_of_the_minimum_covers_every_row()
+{
+    let mut w = two_archetypes();
+    let mut query = w.create_query::<&Hp>();
+
+    let mut seen = HashSet::new();
+    for batch in query.iter_batch(MIN_BATCH_AMOUNT)
+    {
+        assert!(batch.len() <= MIN_BATCH_AMOUNT);
+        seen.extend(batch.into_iter().map(|hp| hp.0));
+    }
+    assert_eq!(seen, all_hp());
 }
 
 #[test]
