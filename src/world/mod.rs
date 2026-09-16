@@ -18,6 +18,7 @@ use crate::chunk::layout::{ChunkLayout, ChunkLayoutParams};
 use crate::chunk::migration::MigrationPlan;
 use crate::entity::Entity;
 use crate::query::Query;
+use crate::schedule::executor::TJobExecutor;
 use crate::utils::normalize_set;
 use crate::archetype::Archetype;
 use crate::world::arch_spec::{ArchetypeEdge, ArchetypeKind, ArchetypeEdgeKey, ArchetypeSpec, ArchetypeSpecs, PairArchetypeSpecParams};
@@ -70,6 +71,8 @@ pub struct World
     // the tick as of the previous `create_query` call, i.e. the baseline that call's successor
     // measures `Added`/`Changed` against. `0` means "nobody has queried yet".
     last_query_tick:          ChangedTick,
+    // where parallel work goes, see `TJobExecutor`. `None` means everything runs on the caller
+    executor:                 Option<Box<dyn TJobExecutor>>,
 }
 impl Default for World
 {
@@ -95,6 +98,7 @@ impl Default for World
             // first system run would be invisible to that system's first `Added`/`Changed` check
             tick:                     AtomicChangedTick::new(1),
             last_query_tick:          0,
+            executor:                 None,
         }
     }
 }
@@ -110,6 +114,23 @@ impl Drop for World
 }
 impl World
 {
+    /// Hands the world a place to run parallel work, or takes it away with `None`. The previous
+    /// executor is returned so you can keep it or let it drop.
+    ///
+    /// It takes `&mut self` on purpose: nothing can swap the executor while a system or a
+    /// parallel query is still using it.
+    pub fn set_executor(&mut self, executor: Option<Box<dyn TJobExecutor>>) -> Option<Box<dyn TJobExecutor>>
+    {
+        std::mem::replace(&mut self.executor, executor)
+    }
+
+    /// The executor parallel work goes to, if the world has one
+    #[inline]
+    pub fn executor(&self) -> Option<&dyn TJobExecutor>
+    {
+        self.executor.as_deref()
+    }
+
     /// Creates the archetype for `T` with the given chunk size, before any entity lands in it.
     ///
     /// Registering the same component set again with the same size does nothing. A different size
