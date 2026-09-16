@@ -15,14 +15,23 @@ pub mod traits;
 /// There is no `Default` on purpose: registering is where you decide how the archetype sits in
 /// memory, so the chunk size has to be written out. Archetypes that are never registered (spawned
 /// straight through `World::create`, or reached through `add_component`/`remove_component`) use
-/// [`constants::DEFAULT_CHUNK_SIZE_IN_BYTE`].
+/// [`constants::DEFAULT_CHUNK_SIZE_IN_BYTE`] and allow structure changes.
+///
+/// A singleton archetype (`World::register_singleton`) doesn't take a cfg from you: its chunk is
+/// sized to fit one row and `allow_structure_change` is always `false`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ArchetypeCfg
 {
     /// Bytes allocated per chunk. Must be greater than 0 and a multiple of
     /// [`constants::CPU_WORD`]. A chunk is also the unit a query hands to one thread, so this
     /// decides how finely the work can be split.
-    pub chunk_size_in_byte: usize,
+    pub chunk_size_in_byte:     usize,
+    /// `false` locks the component set of the entities in this archetype: `add_component`,
+    /// `remove_component` and a `merge_component` that would move the entity all return
+    /// [`identifies::XynokEcsError::StructureChangeNotAllowed`], both for entities leaving this
+    /// archetype and for entities that would land in it. A `merge_component` that only
+    /// overwrites existing components is still fine, since nothing moves.
+    pub allow_structure_change: bool,
 }
 
 impl ArchetypeCfg

@@ -36,6 +36,21 @@ pub enum XynokEcsError
     #[error("Archetype `{0}` already exists with a chunk size of {1} bytes, cannot register it again with {2} bytes")]
     ArchetypeAlreadyCreatedWithDifferentChunkSize(&'static str, usize, usize),
 
+    #[error("Archetype `{0}` already exists with allow_structure_change = {1}, cannot register it again with {2}")]
+    ArchetypeAlreadyCreatedWithDifferentStructureChange(&'static str, bool, bool),
+
+    #[error("Cannot add/remove `{2}` on Entity(idx: {0}, version: {1}): the source or target archetype does not allow structure changes")]
+    StructureChangeNotAllowed(usize, usize, &'static str),
+
+    #[error("Singleton archetype `{0}` already has its entity, destroy it before spawning another one")]
+    SingletonAlreadyExists(String),
+
+    #[error("Archetype `{0}` already exists as a regular archetype, it cannot become a singleton")]
+    ArchetypeIsNotSingleton(String),
+
+    #[error("Archetype `{0}` is a singleton, it cannot be registered as a regular archetype")]
+    ArchetypeIsSingleton(String),
+
     #[error("Chunk Layout allocation creation failed: {0}")]
     ChunkLayoutAllocation(LayoutError),
 

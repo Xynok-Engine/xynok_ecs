@@ -101,7 +101,7 @@ fn t_registered_chunk_size_is_used()
     use xynok_ecs::apis::ArchetypeCfg;
 
     let mut w = World::default();
-    w.register_archetype::<Hp>(ArchetypeCfg { chunk_size_in_byte: 4 * 1024 });
+    w.register_archetype::<Hp>(ArchetypeCfg { chunk_size_in_byte: 4 * 1024, allow_structure_change: true });
     let small = w.create(Hp(1));
     let big = w.create(Mana(2));
 
@@ -119,12 +119,12 @@ fn t_registering_an_existing_archetype_with_another_chunk_size_fails()
     use xynok_ecs::apis::{identifies::XynokEcsError, ArchetypeCfg};
 
     let mut w = World::default();
-    w.register_archetype::<(Hp, Mana)>(ArchetypeCfg { chunk_size_in_byte: 8 * 1024 });
+    w.register_archetype::<(Hp, Mana)>(ArchetypeCfg { chunk_size_in_byte: 8 * 1024, allow_structure_change: true });
 
-    w.try_register_archetype::<(Mana, Hp)>(ArchetypeCfg { chunk_size_in_byte: 8 * 1024 })
+    w.try_register_archetype::<(Mana, Hp)>(ArchetypeCfg { chunk_size_in_byte: 8 * 1024, allow_structure_change: true })
         .expect("same size, nothing to change");
     assert!(matches!(
-        w.try_register_archetype::<(Mana, Hp)>(ArchetypeCfg { chunk_size_in_byte: 4 * 1024 }),
+        w.try_register_archetype::<(Mana, Hp)>(ArchetypeCfg { chunk_size_in_byte: 4 * 1024, allow_structure_change: true }),
         Err(XynokEcsError::ArchetypeAlreadyCreatedWithDifferentChunkSize(_, 8192, 4096))
     ));
 }
@@ -139,7 +139,7 @@ fn t_registering_after_spawn_with_another_chunk_size_fails()
     let mut w = World::default();
     w.create(Hp(1));
     assert!(matches!(
-        w.try_register_archetype::<Hp>(ArchetypeCfg { chunk_size_in_byte: 4 * 1024 }),
+        w.try_register_archetype::<Hp>(ArchetypeCfg { chunk_size_in_byte: 4 * 1024, allow_structure_change: true }),
         Err(XynokEcsError::ArchetypeAlreadyCreatedWithDifferentChunkSize(_, _, _))
     ));
 }
@@ -153,7 +153,7 @@ fn t_invalid_chunk_size_is_rejected()
     for size in [0, 1023]
     {
         assert!(matches!(
-            w.try_register_archetype::<Hp>(ArchetypeCfg { chunk_size_in_byte: size }),
+            w.try_register_archetype::<Hp>(ArchetypeCfg { chunk_size_in_byte: size, allow_structure_change: true }),
             Err(XynokEcsError::InvalidChunkSize(_, _))
         ));
     }

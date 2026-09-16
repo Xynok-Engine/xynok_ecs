@@ -110,5 +110,6 @@ pub fn assert_entity_mapping_is_consistent(w: &World, live: &[Entity])
 /// Chunk size for tests that register archetypes but don't care about the layout.
 #[allow(dead_code)]
 pub const CFG: xynok_ecs::apis::ArchetypeCfg = xynok_ecs::apis::ArchetypeCfg {
-    chunk_size_in_byte: xynok_ecs::apis::constants::DEFAULT_CHUNK_SIZE_IN_BYTE,
+    chunk_size_in_byte:     xynok_ecs::apis::constants::DEFAULT_CHUNK_SIZE_IN_BYTE,
+    allow_structure_change: true,
 };

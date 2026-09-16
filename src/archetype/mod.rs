@@ -19,6 +19,8 @@ pub struct Archetype
     chunks:             Vec<Chunk>,
     free_chunks:        Queue<usize>,
     free_chunks_stored: HashSet<usize>,
+    // see `Archetype::singleton`
+    is_singleton:       bool,
 }
 impl Default for Archetype
 {
@@ -28,11 +30,42 @@ impl Default for Archetype
             chunks:             Vec::with_capacity(16),
             free_chunks:        Queue::new(),
             free_chunks_stored: HashSet::with_capacity(16),
+            is_singleton:       false,
         }
     }
 }
 impl Archetype
 {
+    /// An archetype that holds at most one entity at a time.
+    ///
+    /// Its layout is built with `max_len = 1`, so "a second entity" is the same thing as "a second
+    /// chunk". `World` checks [`can_take_a_row`](Self::can_take_a_row) before pushing (it has the
+    /// archetype's name for the error), and structure changes on a singleton are locked, so
+    /// `take_a_free_chunk_idx` only keeps a debug assert as a backstop. Once the entity is
+    /// destroyed, the chunk is free again and can be reused.
+    pub fn singleton() -> Self
+    {
+        Self {
+            chunks:             Vec::with_capacity(1),
+            free_chunks:        Queue::new(),
+            free_chunks_stored: HashSet::with_capacity(1),
+            is_singleton:       true,
+        }
+    }
+
+    #[inline]
+    pub fn is_singleton(&self) -> bool
+    {
+        self.is_singleton
+    }
+
+    /// `false` only for a singleton that already holds its entity
+    #[inline]
+    pub fn can_take_a_row(&self) -> bool
+    {
+        !self.is_singleton || self.chunks.is_empty() || !self.free_chunks.is_empty()
+    }
+
     /// Write to a free chunk and increment its length
     ///
     /// `StorageType = T` restricts this to archetypes whose value is already in storage form.
@@ -254,6 +287,7 @@ impl Archetype
             self.free_chunks_stored.remove(&free_idx);
             return free_idx;
         }
+        debug_assert!(!self.is_singleton || self.chunks.is_empty(), "a singleton archetype must never get a second chunk");
         let new_chunk = Chunk::new(layout);
         let idx = self.chunks.len();
         self.chunks.push(new_chunk);
