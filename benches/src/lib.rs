@@ -11,6 +11,9 @@
 //!   one thread. It times a whole frame of a schedule running a group of non-conflicting systems,
 //!   so what it compares is the two schedulers rather than the two query loops. Its workload lives
 //!   in [`parallel`] and the plain `Vec` baseline sits it out, having no scheduler to speak of.
+//! - `benches/query_iter.rs` is a third criterion target. It walks the same 3 component pass as
+//!   `benches/query.rs` three ways (`iter`, `iter_chunk`, `iter_batch`), each against the closest
+//!   thing bevy has. Its settings live in [`iter_modes`].
 //! - `src/bin/report.rs` runs the query workload through a counting global allocator to get the
 //!   memory numbers, reads back what criterion measured, and writes the combined report.
 //!
@@ -23,6 +26,7 @@ pub mod alloc_probe;
 pub mod bevy;
 pub mod config;
 pub mod criterion_data;
+pub mod iter_modes;
 pub mod parallel;
 pub mod report;
 pub mod stdvec;

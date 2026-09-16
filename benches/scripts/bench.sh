@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Runs both benchmarks and writes the report.
+# Runs every benchmark and writes the report.
 #
 #   ./benches/scripts/bench.sh                 # everything
 #   ./benches/scripts/bench.sh 1_archetype     # only the benchmarks whose id contains that
 #
-# The filter goes to both targets, so a filter that matches nothing in one of them just means that
+# The filter goes to every target, so a filter that matches nothing in one of them just means that
 # target runs no benchmarks, which is fine: the report says which scenarios have no timing yet.
 #
 # Criterion keeps the previous run on disk, so the second time this is run every benchmark also
@@ -17,9 +17,11 @@ filter="${1:-}"
 if [[ -n "$filter" ]]; then
   cargo bench -p xynok_ecs_benches --bench query -- "$filter"
   cargo bench -p xynok_ecs_benches --bench parallel -- "$filter"
+  cargo bench -p xynok_ecs_benches --bench query_iter -- "$filter"
 else
   cargo bench -p xynok_ecs_benches --bench query
   cargo bench -p xynok_ecs_benches --bench parallel
+  cargo bench -p xynok_ecs_benches --bench query_iter
 fi
 
 cargo run --release -p xynok_ecs_benches --bin report

@@ -48,3 +48,7 @@ harness = false
 [[bench]]
 name = "parallel"
 harness = false
+
+[[bench]]
+name = "query_iter"
+harness = false

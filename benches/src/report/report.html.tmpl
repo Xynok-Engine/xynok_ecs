@@ -254,6 +254,36 @@
     </div>
   </section>
 
+  <section class="iter-section">
+    <h2>Query iteration modes</h2>
+    <p class="desc">
+      One more benchmark: the same 3 component pass over 5 archetypes, walked three ways.
+      <code>iter</code> goes one entity at a time. <code>iter_chunk</code> loops over chunks with an
+      inner loop per chunk. bevy has no public per chunk walk, so its side of both is the same
+      <code>iter_mut</code> loop. <code>iter_batch</code> cuts the rows into batches of
+      <b id="iter-batch-size"></b> and spawns each on the task pool, against bevy's
+      <code>par_iter_mut</code> with the same fixed batch size, both on the same pool.
+    </p>
+    <div class="controls">
+      <div class="control-group"><span>mode:</span><div id="filter-mode"></div></div>
+    </div>
+    <div class="compare-grid" id="iter-compare"></div>
+  </section>
+
+  <section class="iter-section">
+    <h2>Iteration mode speed (mean time per pass, lower is better)</h2>
+    <p class="desc">The whisker is criterion's bootstrapped 95% confidence interval for the mean.</p>
+    <div class="chart-grid" id="chart-iter-mean"></div>
+  </section>
+
+  <section class="iter-section">
+    <h2>All iteration mode scenarios</h2>
+    <p class="desc">Every row of the iteration mode benchmark, filters ignored.</p>
+    <div class="table-wrap">
+      <table id="iter-raw-table"></table>
+    </div>
+  </section>
+
   <section>
     <h2>All scenarios</h2>
     <p class="desc">
@@ -271,11 +301,14 @@ const ROWS = REPORT.rows;
 // Empty whenever `cargo bench --bench parallel` has never run, in which case every section built
 // from it is hidden rather than left as a page of dashes.
 const PARALLEL_ROWS = REPORT.parallel_rows ?? [];
+// Timings are `null` whenever `cargo bench --bench query_iter` has never run.
+const ITER_MODE_ROWS = REPORT.iter_mode_rows ?? [];
+const HAS_ITER_MODES = ITER_MODE_ROWS.some(r => r.timing);
 const SVGNS = "http://www.w3.org/2000/svg";
 
 const LAYOUT_LABELS = { "Single": "1 archetype", "Fragmented5": "5 archetypes" };
 
-const state = { componentCount: null, layout: null, systemCount: null };
+const state = { componentCount: null, layout: null, systemCount: null, iterMode: null };
 
 // ---------------------------------------------------------------- data helpers
 
@@ -319,6 +352,18 @@ function systemCounts() {
 }
 function parallelRowsAt(entityCount) {
   return PARALLEL_ROWS.filter(r => r.system_count === state.systemCount && r.entity_count === entityCount);
+}
+function iterModes() {
+  return [...new Set(ITER_MODE_ROWS.map(r => r.mode))];
+}
+function iterModeLabel(mode) {
+  return ITER_MODE_ROWS.find(r => r.mode === mode)?.mode_label ?? mode;
+}
+function iterEntityCounts() {
+  return [...new Set(ITER_MODE_ROWS.map(r => r.entity_count))].sort((a, b) => a - b);
+}
+function iterRowsAt(entityCount) {
+  return ITER_MODE_ROWS.filter(r => r.mode === state.iterMode && r.entity_count === entityCount);
 }
 /** Bytes and allocator calls for a single frame, from the total over the measured ones. */
 function bytesPerFrame(row) {
@@ -489,6 +534,37 @@ const PARALLEL_METRICS = [
   },
 ];
 
+// The iteration mode rows carry a timing and nothing else, so their table is the timing half of
+// PARALLEL_METRICS with "per frame" read as "per pass".
+const ITER_METRICS = [
+  {
+    label: "Mean time / pass", note: "95% CI below",
+    get: r => r.timing?.mean.point, fmt: fmtNs, better: "lower",
+    sub: r => r.timing ? fmtInterval(r.timing.mean, fmtNs) : null,
+  },
+  {
+    label: "Median time / pass",
+    get: r => r.timing?.median.point, fmt: fmtNs, better: "lower",
+    sub: r => r.timing ? fmtInterval(r.timing.median, fmtNs) : null,
+  },
+  { label: "p95", get: r => r.timing?.p95_ns, fmt: fmtNs, better: "lower" },
+  { label: "p99", get: r => r.timing?.p99_ns, fmt: fmtNs, better: "lower" },
+  {
+    label: "Throughput", note: "entities / s",
+    get: r => r.timing?.elements_per_second, fmt: fmtThroughput, better: "higher",
+  },
+  { label: "Time / entity", get: r => r.timing?.ns_per_entity, fmt: fmtNs, better: "lower" },
+  {
+    label: "Relative to fastest",
+    get: (r, ctx) => ctx.fastestMean ? r.timing?.mean.point / ctx.fastestMean : null,
+    fmt: v => v === null || v === undefined ? "-" : v.toFixed(2) + "x", better: "lower",
+  },
+  {
+    label: "Change vs previous run", note: "criterion, same benchmark id",
+    get: r => r.timing?.change_mean?.point, fmt: fmtPercent, better: "none",
+  },
+];
+
 // ---------------------------------------------------------------- chrome
 
 function renderEnvironment() {
@@ -533,6 +609,16 @@ function renderFilters() {
     btn.className = l === state.layout ? "active" : "";
     btn.onclick = () => { state.layout = l; renderAll(); };
     layoutEl.appendChild(btn);
+  }
+
+  const modeEl = document.getElementById("filter-mode");
+  modeEl.innerHTML = "";
+  for (const m of iterModes()) {
+    const btn = document.createElement("button");
+    btn.textContent = iterModeLabel(m);
+    btn.className = m === state.iterMode ? "active" : "";
+    btn.onclick = () => { state.iterMode = m; renderIterModes(); };
+    modeEl.appendChild(btn);
   }
 
   const systemsEl = document.getElementById("filter-systems");
@@ -625,6 +711,15 @@ function renderParallelCompare() {
   for (const ec of parallelEntityCounts()) {
     const title = `${ec.toLocaleString()} entities &middot; ${state.systemCount} systems in one group`;
     renderCompareCard(container, title, parallelRowsAt(ec), parallelLibraries(), PARALLEL_METRICS);
+  }
+}
+
+function renderIterCompare() {
+  const container = document.getElementById("iter-compare");
+  container.innerHTML = "";
+  for (const ec of iterEntityCounts()) {
+    const title = `${ec.toLocaleString()} entities &middot; ${iterModeLabel(state.iterMode)}`;
+    renderCompareCard(container, title, iterRowsAt(ec), librariesOf(ITER_MODE_ROWS), ITER_METRICS);
   }
 }
 
@@ -740,6 +835,19 @@ function renderParallelCharts(containerId, pick, formatter, error) {
   }
 }
 
+/** The same, over the iteration mode rows and whichever mode is selected. */
+function renderIterCharts(containerId, pick, formatter, error) {
+  const container = document.getElementById(containerId);
+  container.innerHTML = "";
+  const libs = librariesOf(ITER_MODE_ROWS);
+  for (const ec of iterEntityCounts()) {
+    const rows = iterRowsAt(ec);
+    const values = new Map(rows.map(r => [r.library_id, pick(r)]));
+    const errors = error ? new Map(rows.map(r => [r.library_id, error(r)]).filter(([, e]) => e)) : null;
+    renderBarChart(container, `${ec.toLocaleString()} entities`, values, errors, formatter, libs);
+  }
+}
+
 // ---------------------------------------------------------------- full table
 
 const RAW_COLUMNS = [
@@ -792,6 +900,23 @@ const PARALLEL_RAW_COLUMNS = [
   { header: "criterion id", get: r => `<code>${r.criterion_id}</code>`, align: "left" },
 ];
 
+const ITER_RAW_COLUMNS = [
+  { header: "library", get: r => r.library, align: "left" },
+  { header: "mode", get: r => r.mode_label, align: "left" },
+  { header: "entities", get: r => r.entity_count.toLocaleString() },
+  { header: "mean", get: r => fmtNs(r.timing?.mean.point) },
+  { header: "95% CI", get: r => r.timing ? fmtInterval(r.timing.mean, fmtNs) : "-" },
+  { header: "median", get: r => fmtNs(r.timing?.median.point) },
+  { header: "min", get: r => fmtNs(r.timing?.min_ns) },
+  { header: "p95", get: r => fmtNs(r.timing?.p95_ns) },
+  { header: "p99", get: r => fmtNs(r.timing?.p99_ns) },
+  { header: "max", get: r => fmtNs(r.timing?.max_ns) },
+  { header: "throughput", get: r => fmtThroughput(r.timing?.elements_per_second) },
+  { header: "change", get: r => fmtPercent(r.timing?.change_mean?.point) },
+  { header: "samples", get: r => fmtCount(r.timing?.sample_count) },
+  { header: "criterion id", get: r => `<code>${r.criterion_id}</code>`, align: "left" },
+];
+
 function renderTable(tableId, columns, rows) {
   const table = document.getElementById(tableId);
   table.innerHTML = "";
@@ -831,6 +956,16 @@ function renderParallelRawTable() {
   renderTable("parallel-raw-table", PARALLEL_RAW_COLUMNS, sorted);
 }
 
+function renderIterRawTable() {
+  const modeOrder = iterModes();
+  const sorted = [...ITER_MODE_ROWS].sort((a, b) =>
+    modeOrder.indexOf(a.mode) - modeOrder.indexOf(b.mode)
+    || a.entity_count - b.entity_count
+    || a.library.localeCompare(b.library)
+  );
+  renderTable("iter-raw-table", ITER_RAW_COLUMNS, sorted);
+}
+
 // ---------------------------------------------------------------- entry point
 
 function renderAll() {
@@ -844,6 +979,21 @@ function renderAll() {
   renderMetricCharts("chart-loop-alloc", r => r.memory.query_loop_bytes, fmtBytes);
   renderMetricCharts("chart-leak", r => r.memory.leaked_bytes, fmtBytes);
   renderParallel();
+  renderIterModes();
+}
+
+/** Only the iteration mode half, which the mode buttons redraw on their own. */
+function renderIterModes() {
+  if (!HAS_ITER_MODES) return;
+  document.getElementById("iter-batch-size").textContent = REPORT.environment.iter_batch_size?.toLocaleString() ?? "?";
+  renderIterCompare();
+  renderIterCharts("chart-iter-mean", r => r.timing?.mean.point, fmtNs, r => r.timing?.mean);
+  renderIterRawTable();
+
+  const modeEl = document.getElementById("filter-mode");
+  for (const btn of modeEl.children) {
+    btn.className = btn.textContent === iterModeLabel(state.iterMode) ? "active" : "";
+  }
 }
 
 /** Only the parallel half, which the group-size buttons redraw on their own. */
@@ -866,11 +1016,16 @@ function renderParallel() {
 state.componentCount = componentCounts()[0];
 state.layout = layouts()[0];
 state.systemCount = systemCounts()[0] ?? null;
+state.iterMode = iterModes()[0] ?? null;
 
 // A page built from a query-only run has nothing to put in these, and a section of dashes reads as
 // a result rather than as a benchmark that was never run.
 if (!PARALLEL_ROWS.length) {
   for (const section of document.querySelectorAll(".parallel-section")) section.style.display = "none";
+}
+
+if (!HAS_ITER_MODES) {
+  for (const section of document.querySelectorAll(".iter-section")) section.style.display = "none";
 }
 
 renderEnvironment();

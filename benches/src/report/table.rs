@@ -1,7 +1,7 @@
 //! The terminal view of the report: one comparison table per scenario, then the same for the
-//! multi-threaded benchmark, plus the two checks that have a right answer rather than a ranking.
+//! multi-threaded and iteration mode benchmarks, plus the two checks that have a right answer rather than a ranking.
 
-use super::{BenchRow, ParallelRow, Report};
+use super::{BenchRow, IterModeRow, ParallelRow, Report};
 
 pub fn fmt_bytes(bytes: u64) -> String
 {
@@ -139,6 +139,7 @@ pub fn print(report: &Report)
     }
 
     print_parallel(report);
+    print_iter_modes(report);
     print_checks(report);
 }
 
@@ -208,6 +209,66 @@ fn print_parallel(report: &Report)
     );
 }
 
+/// The iteration mode benchmark, one block per (mode, entity count). Timing only: the storage is the
+/// one the query tables above already weigh.
+fn print_iter_modes(report: &Report)
+{
+    if report.iter_mode_rows.iter().all(|row| row.timing.is_none())
+    {
+        return;
+    }
+
+    println!(
+        "\n\n### query iteration modes, 3 components, 5 archetypes, iter_batch size {} ###",
+        report.environment.iter_batch_size
+    );
+
+    let mut scenarios: Vec<_> = report.iter_mode_rows.iter().map(|row| (row.mode, row.entity_count)).collect();
+    scenarios.sort_unstable();
+    scenarios.dedup();
+
+    for (mode, entity_count) in scenarios
+    {
+        let rows: Vec<&IterModeRow> = report
+            .iter_mode_rows
+            .iter()
+            .filter(|row| row.mode == mode && row.entity_count == entity_count)
+            .collect();
+
+        let fastest_ns = rows
+            .iter()
+            .filter_map(|row| row.timing.as_ref().map(|t| t.mean.point))
+            .fold(f64::INFINITY, f64::min);
+
+        println!("\n=== {entity_count} entities | {} ===", mode.label());
+        println!(
+            "{:<10} | {:>10} | {:>21} | {:>10} | {:>10} | {:>10} | {:>7} | {:>14} | {:>8}",
+            "library", "mean", "95% CI", "median", "p95", "p99", "vs best", "throughput", "change",
+        );
+        println!("{}", "-".repeat(120));
+
+        for row in &rows
+        {
+            let (mean, ci, median, p95, p99) = timing_cells(row.timing.as_ref());
+
+            println!(
+                "{:<10} | {:>10} | {:>21} | {:>10} | {:>10} | {:>10} | {:>7} | {:>14} | {:>8}",
+                row.library,
+                mean,
+                ci,
+                median,
+                p95,
+                p99,
+                fmt_ratio(row.timing.as_ref(), fastest_ns),
+                fmt_throughput(row.timing.as_ref().and_then(|t| t.elements_per_second)),
+                fmt_change(row.timing.as_ref()),
+            );
+        }
+    }
+
+    println!("\nbevy has no per chunk walk, so its side of iter_chunk is the same iter_mut loop as its side of iter.");
+}
+
 /// The two columns above that are not a comparison. A library either allocates in the timed loop
 /// or it does not, and it either leaks or it does not, so they get called out rather than left for
 /// someone to spot in a wide table.
@@ -270,6 +331,11 @@ fn print_checks(report: &Report)
     if missing_parallel > 0
     {
         println!("timings: {missing_parallel} parallel scenario(s) have no criterion data. Run `cargo bench -p xynok_ecs_benches --bench parallel` for those.");
+    }
+    let missing_iter_modes = report.iter_mode_rows.iter().filter(|row| row.timing.is_none()).count();
+    if missing_iter_modes > 0
+    {
+        println!("timings: {missing_iter_modes} iteration mode scenario(s) have no criterion data. Run `cargo bench -p xynok_ecs_benches --bench query_iter` for those.");
     }
     println!();
 }

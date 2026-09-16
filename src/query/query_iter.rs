@@ -1,4 +1,5 @@
 use std::marker::PhantomData;
+use std::mem::MaybeUninit;
 
 use crate::apis::internal_traits::{QueryTicks, TQueryParam};
 use crate::archetype::Archetype;
@@ -140,11 +141,19 @@ impl<'q, T: TQueryParam> Iterator for ChunkIter<'q, T>
 }
 
 /// Every row of a query, one entity at a time. Returned by [`Query::iter`](crate::query::Query::iter).
+///
+/// The current chunk's cursor is kept flat in here rather than as an `Option<ChunkIter>`. Once
+/// this loop gets inlined into the caller, the nested form keeps LLVM from hoisting the
+/// `row < end` check and costs about 3x on a plain `position += velocity` pass.
 pub struct QueryIter<'q, T: TQueryParam>
 {
-    cursor: ChunkCursor<'q, T>,
-    rows:   Option<ChunkIter<'q, T>>,
-    ticks:  QueryTicks,
+    cursor:  ChunkCursor<'q, T>,
+    // only initialized once the first chunk is reached, and only read while `row < end`
+    fetch:   MaybeUninit<T::Fetch>,
+    row:     usize,
+    end:     usize,
+    ticks:   QueryTicks,
+    phantom: PhantomData<&'q ()>,
 }
 
 impl<'q, T: TQueryParam> QueryIter<'q, T>
@@ -152,9 +161,12 @@ impl<'q, T: TQueryParam> QueryIter<'q, T>
     pub(crate) fn new(accessor: &QuerySpecAccessor<'q>) -> Self
     {
         Self {
-            cursor: ChunkCursor::new(accessor),
-            rows:   None,
-            ticks:  ticks_of(accessor),
+            cursor:  ChunkCursor::new(accessor),
+            fetch:   MaybeUninit::uninit(),
+            row:     0,
+            end:     0,
+            ticks:   ticks_of(accessor),
+            phantom: PhantomData,
         }
     }
 }
@@ -169,14 +181,26 @@ impl<'q, T: TQueryParam> Iterator for QueryIter<'q, T>
     {
         loop
         {
-            if let Some(rows) = &mut self.rows
-                && let Some(item) = rows.next()
+            let row = self.row;
+            if row < self.end
             {
-                return Some(item);
+                self.row = row + 1;
+                // SAFETY: `end` only goes above 0 after `fetch` was written for the same chunk,
+                // `row` is below that chunk's length, and no other live walk covers this row
+                unsafe {
+                    let fetch = self.fetch.assume_init_ref();
+                    if T::accepts(fetch, row, self.ticks)
+                    {
+                        return Some(T::fetch(fetch, row, self.ticks));
+                    }
+                }
+                continue;
             }
 
             let (fetch, len) = self.cursor.next_chunk()?;
-            self.rows = Some(ChunkIter::new(RowRange { fetch, start: 0, end: len }, self.ticks));
+            self.fetch = MaybeUninit::new(fetch);
+            self.row = 0;
+            self.end = len;
         }
     }
 }
