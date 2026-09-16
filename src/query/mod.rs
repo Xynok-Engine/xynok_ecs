@@ -1,9 +1,11 @@
 use crate::apis::identifies::XynokEcsError;
 use crate::apis::internal_traits::{TQueryParam, TReadOnlyQueryParam};
-use crate::query::query_iter::{QueryBatches, QueryChunks, QueryIter};
+use crate::query::query_iter::{ParWalker, QueryBatches, QueryChunks, QueryIter};
+use crate::schedule::executor::TJobExecutor;
 use crate::world::query_spec::QuerySpecAccessor;
 use crate::world::World;
 use std::marker::PhantomData;
+use std::ptr::NonNull;
 
 pub(crate) mod access_scope;
 mod tuple;
@@ -13,6 +15,7 @@ mod entity;
 pub mod query_iter;
 pub mod filter;
 pub mod mut_ref;
+pub mod detail;
 
 /// A `Query` is `Copy` only when it is read-only. Any `&mut` in the query makes it non-copyable.
 ///
@@ -21,6 +24,9 @@ pub mod mut_ref;
 pub struct Query<'a, T: TQueryParam + 'static>
 {
     accessor: QuerySpecAccessor<'a>,
+    // Only ever read through, to reach the world's executor. `accessor` is derived from this
+    // pointer, so reading the world through it leaves the accessor's borrows valid.
+    world:    NonNull<World>,
     phantom:  PhantomData<T>,
 }
 
@@ -39,9 +45,12 @@ impl<'a, T: TQueryParam + 'static> Query<'a, T>
 {
     pub(crate) fn new(world: &'a mut World, last_run_tick: crate::apis::constants::ChangedTick) -> Result<Self, XynokEcsError>
     {
-        let accessor = world.get_or_create_query_src_access::<T>(last_run_tick)?;
+        let world = NonNull::from(world);
+        // SAFETY: `world` came from a `&'a mut World` that this query now stands in for
+        let accessor = unsafe { &mut *world.as_ptr() }.get_or_create_query_src_access::<T>(last_run_tick)?;
         Ok(Self {
             accessor: accessor,
+            world:    world,
             phantom:  PhantomData,
         })
     }
@@ -54,8 +63,10 @@ impl<'a, T: TQueryParam + 'static> Query<'a, T>
     /// jobs building their queries at once stay sound.
     pub(crate) fn new_prepared(world: &'a World, last_run_tick: crate::apis::constants::ChangedTick) -> Option<Self>
     {
+        let world_ptr = NonNull::from(world);
         Some(Self {
             accessor: world.query_src_access::<T>(last_run_tick)?,
+            world:    world_ptr,
             phantom:  PhantomData,
         })
     }
@@ -77,17 +88,71 @@ impl<'a, T: TQueryParam + 'static> Query<'a, T>
         QueryChunks::new(&self.accessor)
     }
 
-    /// Cuts the query into batches of `batch_amount` rows each, crossing chunk and archetype
-    /// borders as needed. Rows are counted before filters, and only the last batch can be
-    /// smaller. Batches cover disjoint rows and are `Send`, so each can go to its own thread.
+    /// Cuts the query into batches of about `batch_amount` rows each, crossing chunk and
+    /// archetype borders as needed. Rows are counted before filters. A cut inside a chunk snaps
+    /// down to a multiple of [`MIN_BATCH_AMOUNT`](query_iter::MIN_BATCH_AMOUNT), so a batch can
+    /// be up to 7 rows short, and the last one can be smaller still. Batches cover disjoint rows
+    /// and are `Send`, so each can go to its own thread.
     ///
     /// # Panics
-    /// If `batch_amount` is 0.
+    /// If `batch_amount` is below [`MIN_BATCH_AMOUNT`](query_iter::MIN_BATCH_AMOUNT).
     #[inline]
     #[track_caller]
     pub fn iter_batch(&mut self, batch_amount: usize) -> QueryBatches<'_, T>
     {
         QueryBatches::new(&self.accessor, batch_amount)
+    }
+
+    /// Calls `f` on every entity of the query, with each non-empty chunk sent as one job to the
+    /// world's executor. Returns once every job is done.
+    ///
+    /// When the world has no executor (see [`World::set_executor`]) it walks the rows on the
+    /// calling thread instead, so the result is the same either way, only slower.
+    ///
+    /// `f` runs on several threads at once, which is why it has to be `Fn + Send + Sync`. Keep
+    /// in mind that the order rows are visited in is not fixed.
+    #[inline]
+    pub fn par_for_each_chunk<'s, F>(&'s mut self, f: F)
+    where
+        F: Fn(T::QueryItem<'s>) + Send + Sync,
+    {
+        let walker = ParWalker::<T>::new(&self.accessor);
+        match self.executor()
+        {
+            // SAFETY: every start comes from `chunk_starts` and names a different chunk
+            Some(executor) => executor.run_jobs(&mut walker.chunk_starts(), &|start| unsafe { walker.walk_chunk(start, &f) }),
+            None => self.iter().for_each(f),
+        }
+    }
+
+    /// Same as [`par_for_each_chunk`](Self::par_for_each_chunk), but one job is one batch of
+    /// about `batch_amount` rows, cut the way [`iter_batch`](Self::iter_batch) cuts them. Handy
+    /// when a chunk holds too many or too few rows to be a good job on its own.
+    ///
+    /// # Panics
+    /// If `batch_amount` is below [`MIN_BATCH_AMOUNT`](query_iter::MIN_BATCH_AMOUNT).
+    #[inline]
+    #[track_caller]
+    pub fn par_for_each_batch<'s, F>(&'s mut self, batch_amount: usize, f: F)
+    where
+        F: Fn(T::QueryItem<'s>) + Send + Sync,
+    {
+        let walker = ParWalker::<T>::new(&self.accessor);
+        let mut starts = walker.batch_starts(batch_amount);
+        match self.executor()
+        {
+            // SAFETY: every start comes from `batch_starts` with this same `batch_amount`, and
+            // batches cut that way never overlap
+            Some(executor) => executor.run_jobs(&mut starts, &|start| unsafe { walker.walk_batch(start, batch_amount, &f) }),
+            None => self.iter().for_each(f),
+        }
+    }
+
+    #[inline]
+    fn executor(&self) -> Option<&dyn TJobExecutor>
+    {
+        // SAFETY: only a shared read, and the world cannot change while this query borrows it
+        unsafe { self.world.as_ref() }.executor()
     }
 }
 
@@ -108,6 +173,7 @@ mod test
 {
     use crate::apis::internal_traits::TQueryParam;
     use crate::component;
+    use crate::query::detail::Detail;
     use crate::query::filter::{Added, Changed, Disabled, Enabled, Without};
     use crate::world::World;
 
@@ -139,6 +205,9 @@ mod test
             <(Changed<&Hp>, &Mana) as TQueryParam>::TYPE_ID,
             <(&Hp, Without<Mana>) as TQueryParam>::TYPE_ID,
             <(&Hp, Without<Hp>) as TQueryParam>::TYPE_ID,
+            <Detail<&Hp> as TQueryParam>::TYPE_ID,
+            <Detail<&mut Hp> as TQueryParam>::TYPE_ID,
+            <(Detail<&Hp>, &Mana) as TQueryParam>::TYPE_ID,
         ];
 
         for (i, a) in ids.iter().enumerate()

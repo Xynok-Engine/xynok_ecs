@@ -141,7 +141,7 @@ impl<'a, T: PartialEq> PartialEq<T> for Mut<'a, T>
 pub trait TMutPolicy
 {
     /// What one row looks like to the caller
-    type Item<'a, T: 'a>;
+    type Item<'a, T: 'a>: DerefMut<Target = T>;
 
     /// # Safety
     /// `ptr` must point at a live `T` at `row` of the current chunk, and `stamp` must satisfy

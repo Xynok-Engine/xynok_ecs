@@ -31,7 +31,6 @@ pub struct DefaultScheduler
     world:        HeapPtr<World>,
     system_specs: SystemSpecs,
     steps:        HashMap<DefaultScheduleSession, Vec<ScheduleStep>>,
-    thread_pool:  ThreadPool,
 }
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
@@ -101,18 +100,25 @@ impl TScheduler for DefaultScheduler
             {
                 ScheduleStep::Single(tsystem) => run_system(tsystem, world),
 
-                ScheduleStep::Parallel(tsystems) => run_system_group(&self.thread_pool, tsystems, world),
+                ScheduleStep::Parallel(tsystems) => run_system_group(tsystems, world),
             }
         }
     }
 
     fn new(world: HeapPtr<World>) -> Self
     {
+        // The pool lives in the world, so a `Query` can reach it too. An executor the user
+        // already plugged in is kept as it is.
+        let w = world.as_ref_mut().as_ref_mut();
+        if w.executor().is_none()
+        {
+            w.set_executor(Some(Box::new(ThreadPool::new(CfgThreadPool::new("Default Xynok ECS Scheduler ThreadPool", 4)))));
+        }
+
         Self {
             world:        world,
             steps:        HashMap::new(),
             system_specs: SystemSpecs::default(),
-            thread_pool:  ThreadPool::new(CfgThreadPool::new("Default Xynok ECS Scheduler ThreadPool", 4)),
         }
     }
 }
@@ -135,13 +141,18 @@ fn run_system(system: &mut SystemTypeStorage, world: HeapMut<World>)
 }
 
 #[track_caller]
-fn run_system_group(pool: &ThreadPool, group: &mut [SystemTypeStorage], world: HeapMut<World>)
+fn run_system_group(group: &mut [SystemTypeStorage], world: HeapMut<World>)
 {
-    if let [only] = group
+    // With no executor there is nowhere to fan out, so the group just runs one system at a time
+    let pool = match world.as_ref_with_caller_lifetime().executor()
     {
-        run_system(only, world);
-        return;
-    }
+        Some(pool) if group.len() > 1 => pool,
+        _ =>
+        {
+            group.iter_mut().for_each(|system| run_system(system, world));
+            return;
+        }
+    };
 
     // The preparation pass, on this very thread: initialising a query writes into the world's
     // registries, and two jobs writing there at once is a race. After this pass, `init` inside a
@@ -156,7 +167,34 @@ fn run_system_group(pool: &ThreadPool, group: &mut [SystemTypeStorage], world: H
         }
     }
 
-    pool.run_batch(group.iter_mut().map(|system| move || run_system(system, world)));
+    // Job `i` runs system `i`. Every index is handed out exactly once, so no two jobs ever
+    // reach the same system even though they all go through this one shared pointer.
+    let systems = SyncMutPtr(group.as_mut_ptr());
+    pool.run_indexed(group.len(), &|i| {
+        // SAFETY: `i < group.len()`, only this job gets `i`, and `group` outlives `run_indexed`
+        let system = unsafe { systems.at(i) };
+        run_system(system, world);
+    });
+}
+
+/// Lets a raw pointer into a slice be shared by jobs that each touch a different element
+struct SyncMutPtr<T>(*mut T);
+
+// SAFETY: only used by `run_system_group`, where each job reaches a distinct element
+unsafe impl<T: Send> Sync for SyncMutPtr<T> {}
+
+impl<T> SyncMutPtr<T>
+{
+    /// Going through a method makes a closure capture the whole wrapper, not the bare pointer
+    /// field, which is what keeps the `Sync` impl above in play
+    ///
+    /// # Safety
+    /// `i` must be in bounds of the slice, and nobody else may hold element `i` at the same time
+    #[inline]
+    unsafe fn at<'a>(&self, i: usize) -> &'a mut T
+    {
+        unsafe { &mut *self.0.add(i) }
+    }
 }
 impl DefaultScheduler
 {
