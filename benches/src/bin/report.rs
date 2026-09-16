@@ -4,10 +4,11 @@
 //! ```bash
 //! cargo bench -p xynok_ecs_benches --bench query         # single-threaded timings
 //! cargo bench -p xynok_ecs_benches --bench parallel      # multi-threaded timings
+//! cargo bench -p xynok_ecs_benches --bench query_iter    # iter / iter_chunk / iter_batch timings
 //! cargo run --release -p xynok_ecs_benches --bin report  # produces the report
 //! ```
 //!
-//! `scripts/bench.sh` runs both in order, which is the usual way in.
+//! `scripts/bench.sh` runs all of them in order, which is the usual way in.
 //!
 //! Nothing here times anything. Criterion answers "how fast", and re-measuring that with a second
 //! harness is how a report ends up disagreeing with itself, so the timings are read straight out of
@@ -36,6 +37,9 @@
 //! for. What the report says about it is the per-frame figure, which is the difference between
 //! paying that cost once and paying it every frame.
 //!
+//! The iteration mode benchmark only gets its timings read back. It walks the same storage the
+//! query benchmark already weighs, so there is no memory half to add.
+//!
 //! The process exits non-zero if any query scenario allocates in the timed loop or leaks, so this
 //! doubles as a check that can run in CI. The parallel rows are reported but never fail the run.
 
@@ -45,9 +49,10 @@ use std::path::Path;
 
 use xynok_ecs_benches::config::require_release_build;
 use xynok_ecs_benches::criterion_data::{self, CriterionResult};
+use xynok_ecs_benches::iter_modes::IterMode;
 use xynok_ecs_benches::parallel::{self, PARALLEL_ENTITY_COUNTS, ParallelWorkload, SystemGroup};
 use xynok_ecs_benches::report::{
-    BenchRow, Environment, FRAME_PASSES, FRAME_WARMUP, FrameMemory, Memory, ParallelRow, QUERY_LOOP_PASSES, QUERY_LOOP_WARMUP, Report, Timing, html, json,
+    BenchRow, Environment, FRAME_PASSES, FRAME_WARMUP, FrameMemory, IterModeRow, Memory, ParallelRow, QUERY_LOOP_PASSES, QUERY_LOOP_WARMUP, Report, Timing, html, json,
     table,
 };
 use xynok_ecs_benches::workload::{ArchetypeLayout, COMPONENT_COUNTS, ENTITY_COUNTS, QueryWorkload, count_label};
@@ -214,6 +219,23 @@ fn build_parallel_row<W: ParallelWorkload>(entity_count: usize, group: SystemGro
     }
 }
 
+/// One iteration mode row. Nothing to measure here, the timing is looked up by the criterion id
+/// `benches/query_iter.rs` filed it under.
+fn build_iter_mode_row<W: QueryWorkload>(mode: IterMode, entity_count: usize, criterion: &HashMap<String, CriterionResult>) -> IterModeRow
+{
+    let criterion_id = format!("query_iter/{}/{}/{}", mode.slug(), W::NAME, count_label(entity_count));
+
+    IterModeRow {
+        library:      W::DISPLAY_NAME.to_string(),
+        library_id:   W::NAME.to_string(),
+        mode:         mode,
+        mode_label:   mode.label().to_string(),
+        entity_count: entity_count,
+        timing:       criterion.get(&criterion_id).map(|result| Timing::from_criterion(result, entity_count)),
+        criterion_id: criterion_id,
+    }
+}
+
 fn main()
 {
     require_release_build();
@@ -228,7 +250,7 @@ fn main()
     if criterion.is_empty()
     {
         eprintln!("warning: no criterion results found. The report will have memory numbers but no timings.");
-        eprintln!("         run `cargo bench -p xynok_ecs_benches --bench query` and `--bench parallel` first.");
+        eprintln!("         run `cargo bench -p xynok_ecs_benches --bench query`, `--bench parallel` and `--bench query_iter` first.");
     }
     else if let Some(dir) = &criterion_dir
     {
@@ -283,10 +305,21 @@ fn main()
         }
     }
 
+    let mut iter_mode_rows = Vec::new();
+    for mode in IterMode::ALL
+    {
+        for &entity_count in &ENTITY_COUNTS
+        {
+            iter_mode_rows.push(build_iter_mode_row::<xynok::Query3>(mode, entity_count, &criterion));
+            iter_mode_rows.push(build_iter_mode_row::<bevy::Query3>(mode, entity_count, &criterion));
+        }
+    }
+
     let report = Report {
-        environment:   Environment::detect(),
-        rows:          rows,
-        parallel_rows: parallel_rows,
+        environment:    Environment::detect(),
+        rows:           rows,
+        parallel_rows:  parallel_rows,
+        iter_mode_rows: iter_mode_rows,
     };
 
     table::print(&report);

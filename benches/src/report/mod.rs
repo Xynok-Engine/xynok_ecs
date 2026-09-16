@@ -7,6 +7,10 @@
 //! memory half from the counting allocator. Either half can be missing, which is normal rather than
 //! an error: a filtered `cargo bench` run only produces timings for the benchmarks it ran.
 //!
+//! An [`IterModeRow`] is one (library, iteration mode, entity count) scenario of the iteration mode
+//! benchmark. It only has a timing half: the storage is the same one [`BenchRow`] already weighs, so
+//! measuring its memory again would just repeat those numbers.
+//!
 //! A [`ParallelRow`] is one (library, group size, entity count) scenario of the multi-threaded
 //! benchmark. It is a separate type rather than a flag on `BenchRow` because it answers a different
 //! question and its memory half is measured differently: a frame runs on several threads at once,
@@ -19,6 +23,7 @@ pub mod table;
 use serde::Serialize;
 
 use crate::criterion_data::{CriterionResult, Estimate};
+use crate::iter_modes::IterMode;
 use crate::parallel::SystemGroup;
 use crate::workload::ArchetypeLayout;
 
@@ -223,6 +228,20 @@ pub struct ParallelRow
     pub memory:        FrameMemory,
 }
 
+/// One scenario of the iteration mode benchmark: one way of walking the query, for one library.
+#[derive(Serialize, Clone, Debug)]
+pub struct IterModeRow
+{
+    pub library:      String,
+    pub library_id:   String,
+    pub mode:         IterMode,
+    pub mode_label:   String,
+    pub entity_count: usize,
+    pub criterion_id: String,
+    /// `None` when `cargo bench --bench query_iter` has not run this scenario yet.
+    pub timing:       Option<Timing>,
+}
+
 /// Where and when the numbers were produced. Timings only mean something next to this.
 #[derive(Serialize, Clone, Debug)]
 pub struct Environment
@@ -238,6 +257,8 @@ pub struct Environment
     /// Worker threads both schedulers were given for the parallel benchmark. Next to
     /// `available_parallelism` this says how much of the machine the frame numbers could use.
     pub worker_threads:        usize,
+    /// Rows per batch in the `iter_batch` scenarios, on both sides.
+    pub iter_batch_size:       usize,
 }
 
 impl Environment
@@ -256,6 +277,7 @@ impl Environment
             query_loop_passes:     QUERY_LOOP_PASSES,
             frame_passes:          FRAME_PASSES,
             worker_threads:        crate::parallel::WORKER_THREADS,
+            iter_batch_size:       crate::iter_modes::ITER_BATCH_SIZE,
         }
     }
 }
@@ -271,4 +293,6 @@ pub struct Report
     pub rows:          Vec<BenchRow>,
     /// The multi-threaded benchmark's rows. Empty when only the query benchmark has been run.
     pub parallel_rows: Vec<ParallelRow>,
+    /// The iteration mode benchmark's rows. Their timings are `None` when it has not been run.
+    pub iter_mode_rows: Vec<IterModeRow>,
 }

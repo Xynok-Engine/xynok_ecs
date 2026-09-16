@@ -1,12 +1,13 @@
 
 [package]
 name = "xynok_ecs"
-version = "0.2.28"
+version = "0.2.32"
 edition = "2024"
 
 [lints.clippy]
 redundant_field_names = "allow"
 too_many_arguments = "allow"
+missing_safety_doc = "allow"
 
 [profile.release]
 lto = "thin"

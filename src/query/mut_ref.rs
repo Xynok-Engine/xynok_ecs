@@ -6,7 +6,7 @@ use crate::chunk::write_changed_tick;
 
 /// Everything a query item needs on top of its own column pointer.
 ///
-/// Resolved once per chunk by the `SrcAccess` that walks it, the same way the column pointer is,
+/// Resolved once per chunk by `TQueryParam::fetch_init`, the same way the column pointer is,
 /// so handing out a row stays a couple of pointer adds with no descriptor lookup in the loop.
 #[derive(Clone, Copy)]
 pub struct WriteStamp
@@ -15,21 +15,10 @@ pub struct WriteStamp
     /// does not track changes at all. A `Mut` only ever exists for a `ChangeAble` component, and
     /// every chunk holding such a column carries its `changed` region (see `ChunkHeader::new`),
     /// so by the time a stamp reaches a `Mut` this pointer is non-null. The null case is just the
-    /// resting value carried by read-only items and by an access struct that has not reached its
-    /// first chunk yet.
+    /// resting value carried by read-only items.
     pub changed_ptr: *mut u8,
     /// The tick a write should be stamped with, i.e. the world's tick as of this query
     pub tick:        ChangedTick,
-}
-
-impl WriteStamp
-{
-    /// A stamp that records nothing, for read-only items and for the initial state of an
-    /// access struct that has not reached its first chunk yet
-    pub const NONE: Self = Self {
-        changed_ptr: std::ptr::null_mut(),
-        tick:        0,
-    };
 }
 
 /// What a `&mut T` query hands out for one row, when `T` is a `ChangeAble` component. A

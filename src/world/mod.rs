@@ -637,12 +637,12 @@ impl World
         }
 
         Some(QuerySpecAccessor {
-            query_idx:       query_idx,
-            queries:         &self.query_counter,
-            archetypes:      &self.archetypes,
-            component_specs: &self.component_counter,
-            last_run_tick:   last_run_tick,
-            this_run_tick:   self.current_tick(),
+            query_idx:     query_idx,
+            queries:       &self.query_counter,
+            archetypes:    &self.archetypes,
+            //component_specs: &self.component_counter,
+            last_run_tick: last_run_tick,
+            this_run_tick: self.current_tick(),
         })
     }
 
