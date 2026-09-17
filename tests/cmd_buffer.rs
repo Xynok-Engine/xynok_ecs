@@ -1,20 +1,21 @@
-//! Cmd buffer: mọi thao tác ghi qua `Cmd` chỉ là một bản ghi, không đụng gì tới world cho tới
-//! khi `World::sync_point()` chạy. Bộ test này bám vào hai thứ: lúc nào thay đổi mới hiện ra,
-//! và sau khi flush thì trạng thái có đúng như gọi thẳng API của `World` hay không.
+//! Cmd buffer: every write that goes through `Cmd` is only a recording. It touches nothing in
+//! the world until `World::sync_point()` runs. These tests pin down two things: when a change
+//! becomes visible, and whether the state after a flush matches what calling `World` directly
+//! would have produced.
 //!
-//! System trong scheduler là `Fn` chứ không phải `FnMut`, nên không capture được biến local.
-//! Các test vì vậy trao đổi dữ liệu với system qua static. Test runner chạy các test song song
-//! trong cùng một binary, nên mỗi test giữ static riêng và không dùng chung với test khác.
+//! Systems in the scheduler are `Fn`, not `FnMut`, so they cannot capture locals. The tests
+//! therefore hand data to their systems through statics. The test runner runs tests in parallel
+//! inside one binary, so every test keeps its own statics and never shares them with another.
 
-use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 
 use xynok_ecs::cmd_buffer::cmd::Cmd;
 use xynok_ecs::component;
 use xynok_ecs::entity::Entity;
 use xynok_ecs::query::Query;
 use xynok_ecs::schedule::scheduler::{DefaultScheduleSession, DefaultScheduler, TScheduler};
-use xynok_ecs::world::{testing, World};
+use xynok_ecs::world::{World, testing};
 use xynok_std::unsafe_ptr::HeapPtr;
 
 #[component]
@@ -31,9 +32,10 @@ struct Armor(u32);
 
 const UPDATE: DefaultScheduleSession = DefaultScheduleSession::Update;
 
-/// Chỗ để system và test đưa entity qua lại cho nhau.
+/// Where a system and its test pass entities back and forth.
 ///
-/// `lock` ở đây bỏ qua poison: một test fail không nên kéo test khác fail lây.
+/// `lock` here ignores poisoning on purpose: one failing test should not drag the others down
+/// with it.
 struct Slot(Mutex<Vec<Entity>>);
 
 impl Slot
@@ -62,7 +64,7 @@ impl Slot
     }
 }
 
-/// World mới toanh, đặt trên heap vì scheduler giữ con trỏ tới nó.
+/// A fresh world, on the heap because the scheduler holds a pointer into it.
 fn new_world() -> HeapPtr<World>
 {
     HeapPtr::new(World::default())
@@ -80,7 +82,7 @@ fn sys_create_one(mut cmd: Cmd)
 }
 
 #[test]
-fn t_create_chi_hien_ra_sau_sync_point()
+fn t_create_only_shows_up_after_sync_point()
 {
     let mut world = new_world();
     let mut scheduler = DefaultScheduler::new(world.as_ref_mut());
@@ -89,18 +91,18 @@ fn t_create_chi_hien_ra_sau_sync_point()
 
     let e = CREATE_ONE.one();
 
-    // Handle đã nằm trong tay ngay lúc gọi, nhưng entity thì chưa thuộc archetype nào.
-    assert!(!world.exists(e), "{e} không được phép tồn tại trước sync_point");
-    assert_eq!(world.create_query::<&Hp>().into_iter().count(), 0, "query không được thấy gì trước khi flush");
+    // The handle is already in hand, but the entity does not belong to any archetype yet.
+    assert!(!world.exists(e), "{e} must not exist before sync_point");
+    assert_eq!(world.create_query::<&Hp>().into_iter().count(), 0, "a query must see nothing before the flush");
 
     world.sync_point();
 
-    assert!(world.exists(e), "{e} phải sống sau sync_point");
+    assert!(world.exists(e), "{e} must be alive after sync_point");
     assert_eq!(testing::read_component::<Hp>(&world, e), Hp(10));
     assert_eq!(world.create_query::<&Hp>().into_iter().count(), 1);
 }
 
-// Đủ lớn để xài hết lô pre-allocate 32 cái rồi phải xin thêm lô nữa.
+// Large enough to drain the batch of 32 pre-allocated entities and ask for another one.
 const MANY: u32 = 100;
 static CREATE_MANY: Slot = Slot::new();
 
@@ -113,7 +115,7 @@ fn sys_create_many(mut cmd: Cmd)
 }
 
 #[test]
-fn t_create_nhieu_hon_mot_lo_pre_allocate()
+fn t_create_past_one_pre_allocation_batch()
 {
     let mut world = new_world();
     let mut scheduler = DefaultScheduler::new(world.as_ref_mut());
@@ -124,19 +126,19 @@ fn t_create_nhieu_hon_mot_lo_pre_allocate()
     let created = CREATE_MANY.all();
     assert_eq!(created.len(), MANY as usize);
 
-    // Không có handle nào bị phát trùng, kể cả ở chỗ nối giữa hai lô pre-allocate.
+    // No handle is ever handed out twice, not even at the seam between two batches.
     let mut slots: Vec<_> = created.iter().map(|e| e.idx()).collect();
     slots.sort_unstable();
     slots.dedup();
-    assert_eq!(slots.len(), MANY as usize, "cmd buffer phát trùng entity giữa các lô pre-allocate");
+    assert_eq!(slots.len(), MANY as usize, "the cmd buffer handed out the same entity twice across pre-allocation batches");
 
     for (i, &e) in created.iter().enumerate()
     {
-        assert!(world.exists(e), "{e} phải sống sau sync_point");
+        assert!(world.exists(e), "{e} must be alive after sync_point");
         assert_eq!(testing::read_component::<Hp>(&world, e), Hp(i as u32));
     }
 
-    // Phần entity pre-allocate còn thừa vẫn chưa gắn vào archetype nào, nên query không thấy.
+    // Leftover pre-allocated entities are attached to no archetype, so no query can see them.
     assert_eq!(world.create_query::<&Hp>().into_iter().count(), MANY as usize);
 }
 
@@ -152,7 +154,7 @@ fn sys_add_component(mut cmd: Cmd)
 }
 
 #[test]
-fn t_add_component_deferred()
+fn t_add_component_is_deferred()
 {
     let mut world = new_world();
     let e = world.create(Hp(1));
@@ -162,32 +164,24 @@ fn t_add_component_deferred()
     scheduler.add_system(UPDATE, sys_add_component);
     scheduler.run(UPDATE);
 
-    assert_eq!(
-        world.create_query::<&Mana>().into_iter().count(),
-        0,
-        "Mana không được xuất hiện trước sync_point"
-    );
+    assert_eq!(world.create_query::<&Mana>().into_iter().count(), 0, "Mana must not appear before sync_point");
 
     world.sync_point();
 
     assert_eq!(testing::read_component::<Mana>(&world, e), Mana(7));
-    assert_eq!(
-        testing::read_component::<Hp>(&world, e),
-        Hp(1),
-        "component cũ phải theo entity sang archetype mới"
-    );
+    assert_eq!(testing::read_component::<Hp>(&world, e), Hp(1), "the old component must follow the entity into its new archetype");
 }
 
 static MERGE_TARGET: Slot = Slot::new();
 
 fn sys_merge_component(mut cmd: Cmd)
 {
-    // merge vừa ghi đè component đã có, vừa thêm component chưa có.
+    // merge both overwrites a component that is already there and adds one that is not.
     cmd.merge_component(MERGE_TARGET.one(), (Hp(99), Armor(5)));
 }
 
 #[test]
-fn t_merge_component_deferred()
+fn t_merge_component_is_deferred()
 {
     let mut world = new_world();
     let e = world.create(Hp(1));
@@ -197,7 +191,7 @@ fn t_merge_component_deferred()
     scheduler.add_system(UPDATE, sys_merge_component);
     scheduler.run(UPDATE);
 
-    assert_eq!(testing::read_component::<Hp>(&world, e), Hp(1), "giá trị cũ phải giữ nguyên trước sync_point");
+    assert_eq!(testing::read_component::<Hp>(&world, e), Hp(1), "the old value must stay untouched before sync_point");
 
     world.sync_point();
 
@@ -213,7 +207,7 @@ fn sys_remove_component(mut cmd: Cmd)
 }
 
 #[test]
-fn t_remove_component_deferred()
+fn t_remove_component_is_deferred()
 {
     let mut world = new_world();
     let e = world.create((Hp(1), Mana(2)));
@@ -223,7 +217,7 @@ fn t_remove_component_deferred()
     scheduler.add_system(UPDATE, sys_remove_component);
     scheduler.run(UPDATE);
 
-    assert_eq!(world.create_query::<&Mana>().into_iter().count(), 1, "Mana phải còn nguyên trước sync_point");
+    assert_eq!(world.create_query::<&Mana>().into_iter().count(), 1, "Mana must still be there before sync_point");
 
     world.sync_point();
 
@@ -244,7 +238,7 @@ fn sys_destroy(mut cmd: Cmd)
 }
 
 #[test]
-fn t_destroy_deferred()
+fn t_destroy_is_deferred()
 {
     let mut world = new_world();
     let keep = world.create(Hp(1));
@@ -255,30 +249,26 @@ fn t_destroy_deferred()
     scheduler.add_system(UPDATE, sys_destroy);
     scheduler.run(UPDATE);
 
-    assert!(world.exists(doomed), "entity phải còn sống tới lúc flush");
+    assert!(world.exists(doomed), "the entity must stay alive until the flush");
 
     world.sync_point();
 
     assert!(!world.exists(doomed));
     assert!(world.exists(keep));
-    assert_eq!(
-        testing::read_component::<Hp>(&world, keep),
-        Hp(1),
-        "swap-remove không được làm hỏng hàng còn lại"
-    );
+    assert_eq!(testing::read_component::<Hp>(&world, keep), Hp(1), "swap-remove must leave the surviving row intact");
     assert_eq!(testing::entity_stored_at_row_of(&world, keep), keep);
 }
 
 // ------------------------------------------------------------------------------------------------
-// thứ tự thực thi
+// execution order
 // ------------------------------------------------------------------------------------------------
 
 static ORDERED: Slot = Slot::new();
 
 fn sys_create_then_touch(mut cmd: Cmd)
 {
-    // create -> add -> merge -> add -> remove trên cùng một entity, tất cả đều chỉ là bản ghi.
-    // Chạy sai thứ tự thì add_component sẽ nổ ngay vì entity chưa tồn tại.
+    // create, add, merge, add, remove on one entity, all of them just recordings. Run them out
+    // of order and add_component blows up right away, because the entity is not there yet.
     let e = cmd.create(Hp(1));
     cmd.add_component(e, Mana(2));
     cmd.merge_component(e, Hp(3));
@@ -288,7 +278,7 @@ fn sys_create_then_touch(mut cmd: Cmd)
 }
 
 #[test]
-fn t_lenh_chay_dung_thu_tu_ghi()
+fn t_commands_run_in_the_order_they_were_recorded()
 {
     let mut world = new_world();
     let mut scheduler = DefaultScheduler::new(world.as_ref_mut());
@@ -297,9 +287,9 @@ fn t_lenh_chay_dung_thu_tu_ghi()
     world.sync_point();
 
     let e = ORDERED.one();
-    assert_eq!(testing::read_component::<Hp>(&world, e), Hp(3), "merge phải chạy sau create");
+    assert_eq!(testing::read_component::<Hp>(&world, e), Hp(3), "merge must run after create");
     assert_eq!(testing::read_component::<Armor>(&world, e), Armor(4));
-    assert_eq!(world.create_query::<&Mana>().into_iter().count(), 0, "remove phải chạy sau add");
+    assert_eq!(world.create_query::<&Mana>().into_iter().count(), 0, "remove must run after add");
 }
 
 static CREATE_DESTROY: Slot = Slot::new();
@@ -314,7 +304,7 @@ fn sys_create_then_destroy(mut cmd: Cmd)
 }
 
 #[test]
-fn t_create_roi_destroy_trong_cung_mot_lo()
+fn t_create_then_destroy_within_one_batch()
 {
     let mut world = new_world();
     let mut scheduler = DefaultScheduler::new(world.as_ref_mut());
@@ -324,12 +314,12 @@ fn t_create_roi_destroy_trong_cung_mot_lo()
 
     let out = CREATE_DESTROY.all();
     assert!(world.exists(out[0]));
-    assert!(!world.exists(out[1]), "entity vừa tạo rồi destroy trong cùng lô phải biến mất sau flush");
+    assert!(!world.exists(out[1]), "an entity created and destroyed in the same batch must be gone after the flush");
     assert_eq!(world.create_query::<&Hp>().into_iter().count(), 1);
 }
 
 // ------------------------------------------------------------------------------------------------
-// vòng đời của buffer
+// buffer lifecycle
 // ------------------------------------------------------------------------------------------------
 
 static FLUSH_TWICE: Slot = Slot::new();
@@ -340,7 +330,7 @@ fn sys_create_for_double_flush(mut cmd: Cmd)
 }
 
 #[test]
-fn t_sync_point_lan_hai_khong_lam_gi_them()
+fn t_a_second_sync_point_does_nothing_more()
 {
     let mut world = new_world();
     let mut scheduler = DefaultScheduler::new(world.as_ref_mut());
@@ -352,11 +342,7 @@ fn t_sync_point_lan_hai_khong_lam_gi_them()
 
     world.sync_point();
     world.sync_point();
-    assert_eq!(
-        world.create_query::<&Hp>().into_iter().count(),
-        1,
-        "flush lại buffer rỗng không được tạo thêm gì"
-    );
+    assert_eq!(world.create_query::<&Hp>().into_iter().count(), 1, "flushing an empty buffer again must not create anything");
 }
 
 static ACCUMULATE: Slot = Slot::new();
@@ -367,7 +353,7 @@ fn sys_create_for_accumulate(mut cmd: Cmd)
 }
 
 #[test]
-fn t_nhieu_lan_run_don_lai_roi_flush_mot_the()
+fn t_several_runs_pile_up_and_flush_in_one_go()
 {
     let mut world = new_world();
     let mut scheduler = DefaultScheduler::new(world.as_ref_mut());
@@ -380,11 +366,7 @@ fn t_nhieu_lan_run_don_lai_roi_flush_mot_the()
 
     world.sync_point();
 
-    assert_eq!(
-        world.create_query::<&Hp>().into_iter().count(),
-        3,
-        "lệnh của nhiều lần run phải dồn lại chứ không mất"
-    );
+    assert_eq!(world.create_query::<&Hp>().into_iter().count(), 3, "commands from several runs must pile up rather than get lost");
 }
 
 static INTERLEAVED: Slot = Slot::new();
@@ -395,7 +377,7 @@ fn sys_create_for_interleaved(mut cmd: Cmd)
 }
 
 #[test]
-fn t_flush_xen_ke_giua_cac_lan_run()
+fn t_flushing_between_runs()
 {
     let mut world = new_world();
     let mut scheduler = DefaultScheduler::new(world.as_ref_mut());
@@ -410,18 +392,18 @@ fn t_flush_xen_ke_giua_cac_lan_run()
 }
 
 #[test]
-fn t_sync_point_tren_world_chua_tung_dung_cmd()
+fn t_sync_point_on_a_world_that_never_used_cmd()
 {
     let mut world = World::default();
     world.create(Hp(1));
-    // Chưa có worker nào, flush phải là no-op chứ không phải panic.
+    // No worker has registered anything, so the flush has to be a no-op rather than a panic.
     world.sync_point();
     world.sync_point();
     assert_eq!(world.create_query::<&Hp>().into_iter().count(), 1);
 }
 
 // ------------------------------------------------------------------------------------------------
-// nhiều worker
+// several workers
 // ------------------------------------------------------------------------------------------------
 
 const PER_WORKER: u32 = 50;
@@ -445,7 +427,7 @@ fn sys_worker_b(mut cmd: Cmd)
 }
 
 #[test]
-fn t_hai_system_song_song_moi_ben_mot_buffer()
+fn t_two_parallel_systems_get_a_buffer_each()
 {
     let mut world = new_world();
     let mut scheduler = DefaultScheduler::new(world.as_ref_mut());
@@ -461,22 +443,22 @@ fn t_hai_system_song_song_moi_ben_mot_buffer()
     assert_eq!(a.len(), PER_WORKER as usize);
     assert_eq!(b.len(), PER_WORKER as usize);
 
-    // Hai worker xin entity từ cùng một allocator, không ai được nhận trùng slot của ai.
+    // Both workers draw from the same allocator, so neither may end up with the other's slot.
     let mut slots: Vec<_> = a.iter().chain(b.iter()).map(|e| e.idx()).collect();
     slots.sort_unstable();
     slots.dedup();
-    assert_eq!(slots.len(), 2 * PER_WORKER as usize, "hai worker nhận trùng entity slot");
+    assert_eq!(slots.len(), 2 * PER_WORKER as usize, "the two workers were handed the same entity slot");
 
     assert_eq!(world.create_query::<&Hp>().into_iter().count(), PER_WORKER as usize);
     assert_eq!(world.create_query::<&Mana>().into_iter().count(), PER_WORKER as usize);
     for &e in a.iter().chain(b.iter())
     {
-        assert!(world.exists(e), "{e} do worker tạo phải sống sau sync_point");
+        assert!(world.exists(e), "{e}, created by a worker, must be alive after sync_point");
     }
 }
 
 // ------------------------------------------------------------------------------------------------
-// phối hợp với query
+// working alongside a query
 // ------------------------------------------------------------------------------------------------
 
 static SPAWNED_FROM_QUERY: AtomicUsize = AtomicUsize::new(0);
@@ -491,7 +473,7 @@ fn sys_spawn_per_row(mut cmd: Cmd, query: Query<&Hp>)
 }
 
 #[test]
-fn t_tao_entity_trong_luc_dang_duyet_query()
+fn t_creating_entities_while_iterating_a_query()
 {
     let mut world = new_world();
     for i in 0..10
@@ -503,7 +485,7 @@ fn t_tao_entity_trong_luc_dang_duyet_query()
     scheduler.add_system(UPDATE, sys_spawn_per_row);
     scheduler.run(UPDATE);
 
-    // Vì lệnh bị hoãn nên vòng lặp không tự nhân hàng lên khi đang chạy.
+    // Because the commands are deferred, the loop does not grow rows out from under itself.
     assert_eq!(SPAWNED_FROM_QUERY.load(Ordering::SeqCst), 10);
 
     world.sync_point();
@@ -525,7 +507,7 @@ fn sys_destroy_even(mut cmd: Cmd, query: Query<(&Entity, &Hp)>)
 }
 
 #[test]
-fn t_destroy_hang_loat_giu_nguyen_phan_con_lai()
+fn t_bulk_destroy_leaves_the_survivors_intact()
 {
     let mut world = new_world();
     let all: Vec<Entity> = (0..40).map(|i| world.create(Hp(i))).collect();
@@ -541,11 +523,11 @@ fn t_destroy_hang_loat_giu_nguyen_phan_con_lai()
     for (i, &e) in all.iter().enumerate()
     {
         let alive = i % 2 == 1;
-        assert_eq!(world.exists(e), alive, "{e} (hp={i}) sai trạng thái sống chết sau flush");
+        assert_eq!(world.exists(e), alive, "{e} (hp={i}) is alive or dead when it should be the other way round");
         if alive
         {
             assert_eq!(testing::read_component::<Hp>(&world, e), Hp(i as u32));
-            assert_eq!(testing::entity_stored_at_row_of(&world, e), e, "swap-remove làm lệch ánh xạ hàng của {e}");
+            assert_eq!(testing::entity_stored_at_row_of(&world, e), e, "swap-remove knocked the row mapping of {e} out of line");
         }
     }
 }

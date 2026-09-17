@@ -186,9 +186,10 @@ impl Cmd
 {
     fn cmd_buffer(&mut self) -> Result<&mut VecDeque<CmdBuffer>, XynokEcsError>
     {
-        // Thread này có thể chưa từng gọi `try_create`, tức là chưa có worker spec nào. Warm up
-        // ngay tại đây để mọi lệnh hoãn đều dùng chung một đường vào, thay vì bắt caller phải
-        // create một cái gì đó trước rồi mới được destroy hay đổi component.
+        // This thread may never have called `try_create`, in which case it has no worker spec
+        // yet. Warming up here gives every deferred command the same way in, instead of asking
+        // the caller to create something first before they are allowed to destroy an entity or
+        // change its components.
         self.warm_up();
         let worker_idx = Self::worker_idx().unwrap();
         match self.world.get_worker_spec_mut(worker_idx)
