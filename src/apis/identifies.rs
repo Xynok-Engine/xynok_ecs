@@ -42,6 +42,12 @@ pub enum XynokEcsError
     #[error("Cannot add/remove `{2}` on Entity(idx: {0}, version: {1}): the source or target archetype does not allow structure changes")]
     StructureChangeNotAllowed(usize, usize, &'static str),
 
+    #[error("Cannot add component `{2}` for Entity(idx: {0}, version: {1}): a component with this type already exists. add_component() only accepts components the entity does not have yet, use merge_component() to overwrite them")]
+    ComponentAlreadyExists(usize, usize, &'static str),
+
+    #[error("Cannot remove component `{2}` from Entity(idx: {0}, version: {1}): the entity does not have this component")]
+    ComponentNotFound(usize, usize, &'static str),
+
     #[error("Singleton archetype `{0}` already has its entity, destroy it before spawning another one")]
     SingletonAlreadyExists(String),
 

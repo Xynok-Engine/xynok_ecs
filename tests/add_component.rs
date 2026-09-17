@@ -150,3 +150,32 @@ fn t_try_add_component_reports_a_stale_handle_instead_of_panicking()
     w.try_add_component(b, Mana(5)).expect("b is alive");
     assert_eq!(testing::read_component::<Mana>(&w, b), Mana(5));
 }
+
+/// Issue #42: adding a component the entity already has used to panic with `OverlappingIndices`
+/// in a release build. Now every build returns an error and leaves the entity where it was.
+#[test]
+fn t_try_add_component_reports_an_existing_component()
+{
+    let mut w = World::default();
+    let e = w.create(Hp(1));
+    let before = testing::entity_location(&w, e).arch_id;
+
+    let err = w.try_add_component(e, Hp(2)).expect_err("e already has Hp");
+    assert!(matches!(err, XynokEcsError::ComponentAlreadyExists(idx, version, _) if idx == e.idx() && version == e.version()));
+    assert_eq!(testing::entity_location(&w, e).arch_id, before);
+    assert_eq!(testing::read_component::<Hp>(&w, e), Hp(1), "the stored value must be untouched");
+}
+
+/// Issue #42: a partial overlap used to behave like `merge_component` in a release build.
+#[test]
+fn t_try_add_component_reports_a_partially_existing_component_set()
+{
+    let mut w = World::default();
+    let e = w.create(Hp(1));
+    let before = testing::entity_location(&w, e).arch_id;
+
+    let err = w.try_add_component(e, (Hp(2), Mana(3))).expect_err("e already has Hp");
+    assert!(matches!(err, XynokEcsError::ComponentAlreadyExists(..)));
+    assert_eq!(testing::entity_location(&w, e).arch_id, before);
+    assert_eq!(testing::read_component::<Hp>(&w, e), Hp(1));
+}

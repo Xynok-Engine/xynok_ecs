@@ -147,3 +147,40 @@ fn t_try_remove_component_reports_a_stale_handle_instead_of_panicking()
 
     assert_eq!(w.try_remove_component::<Mana>(b).expect("b is alive"), Mana(4));
 }
+
+/// Issue #42: removing a component the entity does not have used to panic with
+/// `OverlappingIndices` in a release build. Now every build returns an error.
+#[test]
+fn t_try_remove_component_reports_a_missing_component()
+{
+    let mut w = World::default();
+    let e = w.create(Hp(1));
+    let before = testing::entity_location(&w, e).arch_id;
+
+    let err = w.try_remove_component::<Mana>(e).expect_err("e has no Mana");
+    assert!(matches!(err, XynokEcsError::ComponentNotFound(idx, version, _) if idx == e.idx() && version == e.version()));
+    assert_eq!(testing::entity_location(&w, e).arch_id, before);
+    assert_eq!(testing::read_component::<Hp>(&w, e), Hp(1));
+}
+
+#[test]
+fn t_try_remove_component_reports_a_partially_missing_component_set()
+{
+    let mut w = World::default();
+    let e = w.create((Hp(1), Pos { x: 2.0, y: 3.0 }));
+    let before = testing::entity_location(&w, e).arch_id;
+
+    let err = w.try_remove_component::<(Hp, Mana)>(e).expect_err("e has no Mana");
+    assert!(matches!(err, XynokEcsError::ComponentNotFound(..)));
+    assert_eq!(testing::entity_location(&w, e).arch_id, before);
+    assert_eq!(testing::read_component::<Hp>(&w, e), Hp(1));
+}
+
+#[test]
+#[should_panic(expected = "does not have this component")]
+fn t_remove_component_panics_on_a_missing_component()
+{
+    let mut w = World::default();
+    let e = w.create(Hp(1));
+    let _ = w.remove_component::<Mana>(e);
+}
