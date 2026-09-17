@@ -1,12 +1,10 @@
 use std::any::TypeId;
 use std::collections::HashMap;
 use std::marker::PhantomData;
-use std::sync::atomic::Ordering;
 
 use xynok_std::collection::Queue;
 
-use crate::apis::ArchetypeCfg;
-use crate::apis::constants::{AtomicChangedTick, ChangedTick, DEFAULT_CHUNK_SIZE_IN_BYTE};
+use crate::apis::constants::{ChangedTick, DEFAULT_CHUNK_SIZE_IN_BYTE};
 use crate::apis::identifies::XynokEcsError;
 use crate::apis::internal_traits::TQueryParam;
 use crate::apis::params::{
@@ -14,14 +12,15 @@ use crate::apis::params::{
 };
 use crate::apis::safe_counter::SafeCounter;
 use crate::apis::traits::TArchetype;
+use crate::apis::ArchetypeCfg;
+use crate::archetype::Archetype;
 use crate::chunk::layout::{ChunkLayout, ChunkLayoutParams};
 use crate::chunk::migration::MigrationPlan;
 use crate::entity::Entity;
 use crate::query::Query;
 use crate::schedule::executor::TJobExecutor;
 use crate::utils::normalize_set;
-use crate::archetype::Archetype;
-use crate::world::arch_spec::{ArchetypeEdge, ArchetypeKind, ArchetypeEdgeKey, ArchetypeSpec, ArchetypeSpecs, PairArchetypeSpecParams};
+use crate::world::arch_spec::{ArchetypeEdge, ArchetypeEdgeKey, ArchetypeKind, ArchetypeSpec, ArchetypeSpecs, PairArchetypeSpecParams};
 use crate::world::entity_spec::EntitySpec;
 use crate::world::query_spec::{QuerySpec, QuerySpecAccessor, QuerySpecs};
 use crate::world::temp_allocation::WorldTempAllocation;
@@ -64,10 +63,10 @@ pub struct World
     retired_entity_slots:     usize,
     temp_alloc:               WorldTempAllocation,
     global_archetype_version: SafeCounter,
-    // atomic because a parallel system group calls `advance_tick` from multiple threads at once
-    // (see `schedule::scheduler::run_system_group`); only uniqueness/monotonicity is required
-    // between systems, not any particular ordering, so `Relaxed` is enough
-    tick:                     AtomicChangedTick,
+    // a plain counter: the tick only ever moves on the thread that drives the schedule, once per
+    // step, before any work fans out (see `schedule::scheduler::run_system_group`). Jobs inside a
+    // parallel group only read it, so there is nothing to synchronise
+    tick:                     ChangedTick,
     // the tick as of the previous `create_query` call, i.e. the baseline that call's successor
     // measures `Added`/`Changed` against. `0` means "nobody has queried yet".
     last_query_tick:          ChangedTick,
@@ -96,7 +95,7 @@ impl Default for World
             // first-ever write also stamped tick `0`, `is_newer_than(0, last_run=0, this_run=1)`
             // would compare it as "not newer" (equal ages), so anything spawned before the very
             // first system run would be invisible to that system's first `Added`/`Changed` check
-            tick:                     AtomicChangedTick::new(1),
+            tick:                     1,
             last_query_tick:          0,
             executor:                 None,
         }
@@ -661,7 +660,7 @@ impl World
     #[inline]
     pub fn current_tick(&self) -> ChangedTick
     {
-        self.tick.load(Ordering::Relaxed)
+        self.tick
     }
 
     /// Captures the current tick as a "from here on" baseline for
@@ -680,19 +679,20 @@ impl World
         captured
     }
 
-    /// Moves the world's tick forward and returns the new value. Called once per system run
+    /// Moves the world's tick forward and returns the new value. Called once per schedule step
     /// (see `schedule::scheduler::run_system`), the same granularity Bevy advances its
-    /// `change_tick` at: every write within one system run is stamped with that one tick, and
-    /// two different systems always see two different ticks even if they run back to back - even
-    /// when they run concurrently in the same parallel group, since this is an atomic increment
+    /// `change_tick` at: every write within one step is stamped with that one tick, and two
+    /// steps running back to back always see two different ticks. A parallel group is one step,
+    /// so the systems inside it share a tick, see `schedule::scheduler::run_system_group`.
     ///
     /// Driving a world by hand rather than through a schedule, this is how you close one round
     /// of change detection and open the next. Without it every ad-hoc write shares one tick and
     /// `Changed` can only ever answer "was this ever written", not "was it written since".
     #[inline]
-    pub fn advance_tick(&self) -> ChangedTick
+    pub fn advance_tick(&mut self) -> ChangedTick
     {
-        self.tick.fetch_add(1, Ordering::Relaxed) + 1
+        self.tick += 1;
+        self.tick
     }
 }
 
@@ -797,7 +797,7 @@ impl World
         match this.query_src_access::<T>(last_run_tick)
         {
             Some(r) => Ok(r),
-            None => panic!("query spec for {} vanished right after it was prepared", std::any::type_name::<T>()),
+            None => Err(XynokEcsError::QuerySpecVanishedAfterPrepared(std::any::type_name::<T>())),
         }
     }
 }

@@ -42,7 +42,9 @@ pub enum XynokEcsError
     #[error("Cannot add/remove `{2}` on Entity(idx: {0}, version: {1}): the source or target archetype does not allow structure changes")]
     StructureChangeNotAllowed(usize, usize, &'static str),
 
-    #[error("Cannot add component `{2}` for Entity(idx: {0}, version: {1}): a component with this type already exists. add_component() only accepts components the entity does not have yet, use merge_component() to overwrite them")]
+    #[error(
+        "Cannot add component `{2}` for Entity(idx: {0}, version: {1}): a component with this type already exists. add_component() only accepts components the entity does not have yet, use merge_component() to overwrite them"
+    )]
     ComponentAlreadyExists(usize, usize, &'static str),
 
     #[error("Cannot remove component `{2}` from Entity(idx: {0}, version: {1}): the entity does not have this component")]
@@ -110,6 +112,9 @@ pub enum XynokEcsError
 
     #[error("Entity(idx: {0}, version: {1}) does not exist: it was never created, or it was destroyed and this handle is stale")]
     EntityDoesNotExist(usize, usize),
+
+    #[error("query spec for {0} vanished right after it was prepared")]
+    QuerySpecVanishedAfterPrepared(&'static str),
 }
 
 // src: https://crates.io/crates/thiserror

@@ -113,8 +113,7 @@ impl<'a, T: TQueryParam + 'static> Query<'a, T>
     /// in mind that the order rows are visited in is not fixed.
     #[inline]
     pub fn par_for_each_chunk<'s, F>(&'s mut self, f: F)
-    where
-        F: Fn(T::QueryItem<'s>) + Send + Sync,
+    where F: Fn(T::QueryItem<'s>) + Send + Sync
     {
         let walker = ParWalker::<T>::new(&self.accessor);
         match self.executor()
@@ -134,8 +133,7 @@ impl<'a, T: TQueryParam + 'static> Query<'a, T>
     #[inline]
     #[track_caller]
     pub fn par_for_each_batch<'s, F>(&'s mut self, batch_amount: usize, f: F)
-    where
-        F: Fn(T::QueryItem<'s>) + Send + Sync,
+    where F: Fn(T::QueryItem<'s>) + Send + Sync
     {
         let walker = ParWalker::<T>::new(&self.accessor);
         let mut starts = walker.batch_starts(batch_amount);
