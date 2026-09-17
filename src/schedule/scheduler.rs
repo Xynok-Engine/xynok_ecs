@@ -1,13 +1,12 @@
 use std::collections::HashMap;
 use std::hash::Hash;
 
-use xynok_concurrency::thread_pool::cfg::CfgThreadPool;
 use xynok_concurrency::thread_pool::ThreadPool;
+use xynok_concurrency::thread_pool::cfg::CfgThreadPool;
 use xynok_std::unsafe_ptr::HeapMut;
 
 use crate::apis::constants::ChangedTick;
-use crate::schedule::step::ScheduleStep;
-use crate::schedule::system_spec::SystemSpecs;
+use crate::schedule::system_spec::{ScheduleStep, SystemSpecs};
 use crate::system::traits::{SystemTypeStorage, TIntoSystem, TIntoSystems};
 use crate::world::World;
 
@@ -17,7 +16,7 @@ use crate::world::World;
 /// but you should implement your own. YOUR WORLD, YOUR RULE !  
 pub trait TScheduler: Sized
 {
-    type SessionType: Eq + Hash + Clone;
+    type SessionType: Hash + PartialEq + Eq;
 
     #[track_caller]
     fn new(world: HeapMut<World>) -> Self;
@@ -31,17 +30,11 @@ pub trait TScheduler: Sized
     #[track_caller]
     fn run(&mut self, session: Self::SessionType);
 }
-
 /// THIS IS FOR DEMO PURPOSES ONLY.
 ///
 /// This scheduler serves as an example of how to use xynok_ecs,
 /// but you should implement your own. YOUR WORLD, YOUR RULE !  
-pub struct DefaultScheduler
-{
-    world:        HeapMut<World>,
-    system_specs: SystemSpecs,
-    steps:        HashMap<DefaultScheduleSession, Vec<ScheduleStep>>,
-}
+pub type DefaultScheduler = Scheduler<DefaultScheduleSession>;
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
 pub enum DefaultScheduleSession
@@ -55,10 +48,30 @@ pub enum DefaultScheduleSession
     LateFixedUpdate,
     AppQuit,
 }
-
-impl TScheduler for DefaultScheduler
+pub struct Scheduler<T: Hash + Eq>
 {
-    type SessionType = DefaultScheduleSession;
+    world:        HeapMut<World>,
+    system_specs: SystemSpecs,
+    steps:        HashMap<T, Vec<ScheduleStep>>,
+}
+impl<T: Hash + PartialEq + Eq> Scheduler<T>
+{
+    /// Records a system's spec before it ever gets a chance to run.
+    ///
+    /// That is what reports a system whose parameters alias each other at the `add_system` call
+    /// site rather than at the first `run`.
+    #[track_caller]
+    fn register(&mut self, s: &SystemTypeStorage)
+    {
+        if let Err(e) = self.system_specs.register(s.as_ref(), self.world.component_specs_mut())
+        {
+            panic!("{}: {}", s.name(), e);
+        }
+    }
+}
+impl<TS: Hash + PartialEq + Eq> TScheduler for Scheduler<TS>
+{
+    type SessionType = TS;
 
     fn add_system<P, T: TIntoSystem<P>>(&mut self, session: Self::SessionType, s: T) -> &mut Self
     {
@@ -229,21 +242,7 @@ impl<T> SyncMutPtr<T>
         unsafe { &mut *self.0.add(i) }
     }
 }
-impl DefaultScheduler
-{
-    /// Records a system's spec before it ever gets a chance to run.
-    ///
-    /// That is what reports a system whose parameters alias each other at the `add_system` call
-    /// site rather than at the first `run`.
-    #[track_caller]
-    fn register(&mut self, s: &SystemTypeStorage)
-    {
-        if let Err(e) = self.system_specs.register(s.as_ref(), self.world.component_specs_mut())
-        {
-            panic!("{}: {}", s.name(), e);
-        }
-    }
-}
+
 #[allow(unused)]
 #[cfg(test)]
 mod test
@@ -253,7 +252,7 @@ mod test
     use crate::apis::traits::TComponent;
     use crate::query::Query;
     use crate::schedule::scheduler::{DefaultScheduleSession, DefaultScheduler, TScheduler};
-    use crate::schedule::step::ScheduleStep;
+    use crate::schedule::system_spec::ScheduleStep;
     use crate::world::World;
     use xynok_ecs_proc_macro::component;
     use xynok_std::unsafe_ptr::HeapPtr;

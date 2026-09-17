@@ -17,6 +17,12 @@ pub struct SystemSpecs
 {
     specs: HashMap<TypeId, SystemSpec>,
 }
+
+pub enum ScheduleStep
+{
+    Single(SystemTypeStorage),
+    Parallel(Vec<SystemTypeStorage>),
+}
 impl SystemSpecs
 {
     pub fn register(&mut self, system: &dyn TSystem, component_specs: &mut ComponentSpecs) -> Result<(), XynokEcsError>
