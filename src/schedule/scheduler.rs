@@ -5,6 +5,7 @@ use xynok_concurrency::thread_pool::cfg::CfgThreadPool;
 use xynok_concurrency::thread_pool::ThreadPool;
 use xynok_std::unsafe_ptr::{HeapMut, HeapPtr};
 
+use crate::apis::constants::ChangedTick;
 use crate::schedule::step::ScheduleStep;
 use crate::schedule::system_spec::SystemSpecs;
 use crate::system::traits::{SystemTypeStorage, TIntoSystem, TIntoSystems};
@@ -125,11 +126,19 @@ impl TScheduler for DefaultScheduler
 #[track_caller]
 fn run_system(system: &mut SystemTypeStorage, world: HeapMut<World>)
 {
-    // one tick per system run: every write this system makes is stamped with the same tick, and
-    // the next system (even a concurrent one in the same parallel group) sees a strictly later
-    // one - `advance_tick` is an atomic increment, so this is race-free across threads
+    // one tick per step: every write this system makes is stamped with it, and the next step
+    // sees a strictly later one
     let this_run = world.as_ref_mut().advance_tick();
+    run_system_at(system, world, this_run);
+}
 
+/// Runs a system whose tick was already taken by the caller.
+///
+/// Queries read their tick back through `World::current_tick`, so `this_run` has to still be
+/// the world's current tick while the system runs. Nobody may call `advance_tick` in between.
+#[track_caller]
+fn run_system_at(system: &mut SystemTypeStorage, world: HeapMut<World>, this_run: ChangedTick)
+{
     match system.run(world)
     {
         Ok(_) =>
@@ -143,13 +152,19 @@ fn run_system(system: &mut SystemTypeStorage, world: HeapMut<World>)
 #[track_caller]
 fn run_system_group(group: &mut [SystemTypeStorage], world: HeapMut<World>)
 {
+    // The whole group is one step, so it shares one tick. Systems in a group never touch what
+    // another one writes, so nobody inside it needs to tell their writes apart. Taking a tick per
+    // system would also break change detection: a query reads `current_tick` when it starts, and
+    // by then another job may have moved the tick past the one its system stores as `last_run_tick`.
+    let this_run = world.as_ref_mut().advance_tick();
+
     // With no executor there is nowhere to fan out, so the group just runs one system at a time
     let pool = match world.as_ref_with_caller_lifetime().executor()
     {
         Some(pool) if group.len() > 1 => pool,
         _ =>
         {
-            group.iter_mut().for_each(|system| run_system(system, world));
+            group.iter_mut().for_each(|system| run_system_at(system, world, this_run));
             return;
         }
     };
@@ -173,7 +188,7 @@ fn run_system_group(group: &mut [SystemTypeStorage], world: HeapMut<World>)
     pool.run_indexed(group.len(), &|i| {
         // SAFETY: `i < group.len()`, only this job gets `i`, and `group` outlives `run_indexed`
         let system = unsafe { systems.at(i) };
-        run_system(system, world);
+        run_system_at(system, world, this_run);
     });
 }
 
@@ -220,6 +235,7 @@ mod test
     use crate::apis::traits::TComponent;
     use crate::query::Query;
     use crate::schedule::scheduler::{DefaultScheduleSession, DefaultScheduler, TScheduler};
+    use crate::schedule::step::ScheduleStep;
     use crate::world::World;
     use xynok_ecs_proc_macro::component;
     use xynok_std::unsafe_ptr::HeapPtr;
@@ -393,5 +409,77 @@ mod test
         {
             assert_eq!((hp.0, mana.0), (3, 14));
         }
+    }
+
+    #[component(ChangeAble)]
+    struct Armor(u64);
+    #[component(ChangeAble)]
+    struct Speed(u64);
+
+    /// A parallel group is one step with one tick. Each system must not see its own writes from
+    /// the last frame as `Changed`, and a system after the group must still see them.
+    #[test]
+    fn parallel_group_shares_one_tick()
+    {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        use crate::query::filter::Changed;
+
+        static ARMOR_SEEN: AtomicUsize = AtomicUsize::new(0);
+        static SPEED_SEEN: AtomicUsize = AtomicUsize::new(0);
+        static AFTER_SEEN: AtomicUsize = AtomicUsize::new(0);
+
+        fn bump_armor(query: Query<Changed<&mut Armor>>)
+        {
+            for mut armor in query
+            {
+                armor.0 += 1;
+                ARMOR_SEEN.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+        fn bump_speed(query: Query<Changed<&mut Speed>>)
+        {
+            for mut speed in query
+            {
+                speed.0 += 1;
+                SPEED_SEEN.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+        fn after(query: Query<Changed<&Armor>>)
+        {
+            AFTER_SEEN.fetch_add(query.into_iter().count(), Ordering::Relaxed);
+        }
+
+        let mut world = HeapPtr::new(World::default());
+        for _ in 0..64
+        {
+            world.create((Armor(0), Speed(0)));
+        }
+        let mut scheduler = DefaultScheduler::new(world);
+        scheduler
+            .add_system_parallel(DefaultScheduleSession::Update, (bump_armor, bump_speed))
+            .add_system(DefaultScheduleSession::Update, after);
+
+        scheduler.run(DefaultScheduleSession::Update);
+        // checked straight on the ticks too, since the race above only shows up now and then
+        let group_ticks: Vec<_> = match &scheduler.steps[&DefaultScheduleSession::Update][0]
+        {
+            ScheduleStep::Parallel(group) => group.iter().map(|s| s.last_run_tick()).collect(),
+            ScheduleStep::Single(_) => unreachable!(),
+        };
+        let world_tick = scheduler.world.current_tick();
+        assert!(group_ticks.iter().all(|&t| t == world_tick - 1), "group ticks {group_ticks:?}, world tick {world_tick}");
+        assert_eq!(ARMOR_SEEN.load(Ordering::Relaxed), 64);
+        assert_eq!(SPEED_SEEN.load(Ordering::Relaxed), 64);
+        assert_eq!(AFTER_SEEN.load(Ordering::Relaxed), 64);
+
+        // nothing else wrote, so the group has nothing new to see, and neither does `after`
+        for _ in 0..8
+        {
+            scheduler.run(DefaultScheduleSession::Update);
+        }
+        assert_eq!(ARMOR_SEEN.load(Ordering::Relaxed), 64, "bump_armor saw its own writes again");
+        assert_eq!(SPEED_SEEN.load(Ordering::Relaxed), 64, "bump_speed saw its own writes again");
+        assert_eq!(AFTER_SEEN.load(Ordering::Relaxed), 64);
     }
 }
