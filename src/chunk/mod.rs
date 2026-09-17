@@ -255,7 +255,11 @@ impl Chunk
 {
     /// Fetch data from another chunk and incorporate it into the current one
     /// Returns the swapped indices of an entity in the chunk that was taken and subsequently swapped
-    pub(crate) unsafe fn take_from(&mut self, params: ChunkTakeComponentParams) -> Result<Option<SwappedRow>, XynokEcsError>
+    ///
+    /// This cannot fail: the migration plan already decided what happens to every column, so all
+    /// that is left is copying bytes. Keeping it infallible matters for the callers, which have
+    /// already dequeued a free chunk index by the time they get here (issue #44).
+    pub(crate) unsafe fn take_from(&mut self, params: ChunkTakeComponentParams) -> Option<SwappedRow>
     {
         let last = params.src_chunk.len() - 1;
         let is_last = params.from == last;
@@ -300,7 +304,7 @@ impl Chunk
 
         if is_last
         {
-            return Ok(None);
+            return None;
         }
 
         let swapped = unsafe {
@@ -311,7 +315,7 @@ impl Chunk
                 to:   params.from,
             }
         };
-        Ok(Some(swapped))
+        Some(swapped)
     }
     pub(crate) unsafe fn swap_remove_at(&mut self, layout: &ChunkLayout, idx: usize) -> Result<Option<SwappedRow>, XynokEcsError>
     {

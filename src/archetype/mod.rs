@@ -138,21 +138,14 @@ impl Archetype
             let src_chunk = params.src_arch.chunks.get_unchecked_mut(params.src_e.chunk_idx);
             // components src shares with `T` (merge_component) are moved like any other column, state
             // included. `write_or_replace_at` below then drops the old value when it overwrites it.
-            let swapped_row = match chunk.take_from(ChunkTakeComponentParams {
+            let swapped_row = chunk.take_from(ChunkTakeComponentParams {
                 from:       params.src_e.idx_in_chunk,
                 to:         idx_in_chunk,
                 src_chunk:  src_chunk,
                 src_layout: params.src_layout,
                 dst_layout: params.dst_layout,
                 migration:  params.migration,
-            })
-            {
-                Ok(r) => r,
-                Err(e) =>
-                {
-                    return Err(e);
-                }
-            };
+            });
 
             // unreachable failure: `validate_writable` above already resolved every column this
             // touches, and nothing since then could have changed the layout
@@ -207,38 +200,33 @@ impl Archetype
         // later. Resolving the columns first rules that out.
         T::validate_takeable(params.src_layout)?;
 
+        let src_chunk = unsafe { params.src_arch.chunks.get_unchecked_mut(params.src_e.chunk_idx) };
+
+        // we must get T first to avoid it being overwritten when chunk.take_from is called. It also
+        // runs before `take_a_free_chunk_idx`: once a free index is dequeued, nothing below may
+        // return early, or that index never makes it back into the free list (issue #44)
+        let taken = T::take_from(params.src_layout, src_chunk, params.src_e.idx_in_chunk)?;
+
         let free_chunk_idx = self.take_a_free_chunk_idx(params.dst_layout);
 
         let chunk = unsafe { self.chunks.get_unchecked_mut(free_chunk_idx) };
 
-        let (idx_in_chunk, swapped_row_at_src_chunk, taken) = unsafe {
+        let (idx_in_chunk, swapped_row_at_src_chunk) = unsafe {
             let idx_in_chunk = chunk.len();
 
-            let src_chunk = params.src_arch.chunks.get_unchecked_mut(params.src_e.chunk_idx);
-
-            // we must get T first to avoid it being overwritten when chunk.take_from is called
-            let taken = T::take_from(params.src_layout, src_chunk, params.src_e.idx_in_chunk)?;
-
-            let swapped_row = match chunk.take_from(ChunkTakeComponentParams {
+            let swapped_row = chunk.take_from(ChunkTakeComponentParams {
                 from:       params.src_e.idx_in_chunk,
                 to:         idx_in_chunk,
                 src_chunk:  src_chunk,
                 src_layout: params.src_layout,
                 dst_layout: params.dst_layout,
                 migration:  params.migration,
-            })
-            {
-                Ok(r) => r,
-                Err(e) =>
-                {
-                    return Err(e);
-                }
-            };
+            });
 
             chunk.increase_len();
             src_chunk.decrease_len();
             params.src_arch.cache_free_chunk(params.src_e.chunk_idx);
-            (idx_in_chunk, swapped_row, taken)
+            (idx_in_chunk, swapped_row)
         };
 
         if !chunk.is_full()
