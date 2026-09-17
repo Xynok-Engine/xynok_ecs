@@ -136,9 +136,8 @@ impl Archetype
             let idx_in_chunk = chunk.len();
 
             let src_chunk = params.src_arch.chunks.get_unchecked_mut(params.src_e.chunk_idx);
-            // `T`'s own columns are about to be written below; any old value src shares with T must be
-            // dropped instead of migrated, otherwise it would be silently leaked when write_at overwrites it.
-            // The plan already marks those columns as `DropInPlace`.
+            // components src shares with `T` (merge_component) are moved like any other column, state
+            // included. `write_or_replace_at` below then drops the old value when it overwrites it.
             let swapped_row = match chunk.take_from(ChunkTakeComponentParams {
                 from:       params.src_e.idx_in_chunk,
                 to:         idx_in_chunk,
@@ -157,7 +156,7 @@ impl Archetype
 
             // unreachable failure: `validate_writable` above already resolved every column this
             // touches, and nothing since then could have changed the layout
-            T::write_at(params.dst_layout, chunk, idx_in_chunk, params.write_val, params.tick)?;
+            T::write_or_replace_at(params.src_layout, params.dst_layout, chunk, idx_in_chunk, params.write_val, params.tick)?;
 
             chunk.increase_len();
             src_chunk.decrease_len();

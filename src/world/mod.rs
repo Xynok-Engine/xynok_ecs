@@ -1082,20 +1082,17 @@ impl World
         // put back
         self.temp_alloc.vec_usize = component_set;
 
-        // `merge_component` overwrites exactly `T`'s columns right after the move, so their old
-        // values have to be dropped in place instead of travelling with the entity
         self.insert_edge(EdgeCacheInsert {
-            is_remove:            false,
-            key:                  key,
-            dst_arch_id:          dst_arch_id,
-            overwritten_type_ids: T::STORAGE_TYPE_IDS,
+            is_remove:   false,
+            key:         key,
+            dst_arch_id: dst_arch_id,
         });
         dst_arch_id
     }
 
     /// The mirror of [`get_or_create_add_edge`](Self::get_or_create_add_edge) for
     /// `remove_component`: the target archetype is the difference rather than the union, and the
-    /// plan drops nothing, because the caller reads `T`'s values out before the move.
+    /// caller reads `T`'s values out before the move.
     #[track_caller]
     fn get_or_create_remove_edge<T: TArchetype + 'static>(&mut self, key: ArchetypeEdgeKey) -> usize
     {
@@ -1122,10 +1119,9 @@ impl World
         self.temp_alloc.vec_usize = component_set;
 
         self.insert_edge(EdgeCacheInsert {
-            is_remove:            true,
-            key:                  key,
-            dst_arch_id:          dst_arch_id,
-            overwritten_type_ids: &[],
+            is_remove:   true,
+            key:         key,
+            dst_arch_id: dst_arch_id,
         });
         dst_arch_id
     }
@@ -1135,7 +1131,7 @@ impl World
         let migration = {
             let src_layout = &self.archetypes.get(&params.key.src_arch_id).unwrap().layout;
             let dst_layout = &self.archetypes.get(&params.dst_arch_id).unwrap().layout;
-            MigrationPlan::new(src_layout, dst_layout, params.overwritten_type_ids)
+            MigrationPlan::new(src_layout, dst_layout)
         };
         let edge = ArchetypeEdge {
             dst_arch_id: params.dst_arch_id,
@@ -1167,14 +1163,12 @@ impl World
 }
 
 /// Input to [`World::insert_edge`], shared by the add path and the remove path.
-struct EdgeCacheInsert<'a>
+struct EdgeCacheInsert
 {
     /// `true` puts the edge in `remove_edges`, `false` in `add_edges`.
-    is_remove:            bool,
-    key:                  ArchetypeEdgeKey,
-    dst_arch_id:          usize,
-    /// Components the caller overwrites right after the move, see [`MigrationPlan::new`].
-    overwritten_type_ids: &'a [TypeId],
+    is_remove:   bool,
+    key:         ArchetypeEdgeKey,
+    dst_arch_id: usize,
 }
 
 /// Rejects an archetype that names the same component twice, e.g. `world.create((Hp(1), Hp(2)))`.

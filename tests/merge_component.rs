@@ -141,3 +141,98 @@ fn t_try_merge_component_reports_a_stale_handle_instead_of_panicking()
     w.try_merge_component(b, Hp(9)).expect("b is alive");
     assert_eq!(testing::read_component::<Hp>(&w, b), Hp(9));
 }
+
+// Issue #43: an existing component keeps its state whether or not the merge moves the entity.
+mod state_on_merge
+{
+    use xynok_ecs::component;
+    use xynok_ecs::query::detail::Detail;
+    use xynok_ecs::query::filter::{Added, Changed};
+    use xynok_ecs::world::World;
+
+    #[component(EnableAble, ChangeAble)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    struct Shield(u32);
+
+    #[component]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    struct Armor(u32);
+
+    fn disable_all_shields(w: &mut World)
+    {
+        for mut s in w.create_query::<Detail<&mut Shield>>()
+        {
+            s.set_enabled(false);
+        }
+    }
+
+    fn shield_enabled_bits(w: &mut World) -> Vec<bool>
+    {
+        w.create_query::<Detail<&Shield>>().into_iter().map(|s| s.enabled()).collect()
+    }
+
+    #[test]
+    fn t_merge_keeps_the_enable_bit_when_the_entity_moves()
+    {
+        let mut w = World::default();
+        let e = w.create(Shield(1));
+        disable_all_shields(&mut w);
+
+        w.merge_component(e, (Shield(5), Armor(1)));
+
+        assert_eq!(shield_enabled_bits(&mut w), vec![false], "a disabled component must stay disabled after a merge that moves the entity");
+        let values: Vec<u32> = w.create_query::<&Shield>().into_iter().map(|s| s.0).collect();
+        assert_eq!(values, vec![5], "the value must still be overwritten");
+    }
+
+    #[test]
+    fn t_merge_keeps_the_enable_bit_when_the_entity_stays()
+    {
+        let mut w = World::default();
+        let e = w.create(Shield(1));
+        disable_all_shields(&mut w);
+
+        w.merge_component(e, Shield(5));
+
+        assert_eq!(shield_enabled_bits(&mut w), vec![false]);
+    }
+
+    #[test]
+    fn t_merge_overwrite_counts_as_changed_but_not_added_when_the_entity_moves()
+    {
+        let mut w = World::default();
+        let e = w.create(Shield(1));
+        let seen_up_to = w.capture_current_tick();
+
+        w.merge_component(e, (Shield(5), Armor(1)));
+
+        assert_eq!(w.create_query_since::<Added<&Shield>>(seen_up_to).into_iter().count(), 0, "an overwritten component was not just added");
+        assert_eq!(w.create_query_since::<Changed<&Shield>>(seen_up_to).into_iter().count(), 1, "overwriting the value is a change");
+    }
+
+    #[test]
+    fn t_merge_overwrite_counts_as_changed_but_not_added_when_the_entity_stays()
+    {
+        let mut w = World::default();
+        let e = w.create(Shield(1));
+        let seen_up_to = w.capture_current_tick();
+
+        w.merge_component(e, Shield(5));
+
+        assert_eq!(w.create_query_since::<Added<&Shield>>(seen_up_to).into_iter().count(), 0);
+        assert_eq!(w.create_query_since::<Changed<&Shield>>(seen_up_to).into_iter().count(), 1);
+    }
+
+    #[test]
+    fn t_merge_seeds_a_new_component_like_a_fresh_insert()
+    {
+        let mut w = World::default();
+        let e = w.create(Armor(1));
+        let seen_up_to = w.capture_current_tick();
+
+        w.merge_component(e, (Armor(2), Shield(5)));
+
+        assert_eq!(shield_enabled_bits(&mut w), vec![true], "a new component starts from its default enable value");
+        assert_eq!(w.create_query_since::<Added<&Shield>>(seen_up_to).into_iter().count(), 1);
+    }
+}

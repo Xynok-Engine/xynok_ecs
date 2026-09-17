@@ -1,26 +1,23 @@
-use std::any::TypeId;
 
-use crate::apis::custom_type::FnComponentDropItSelf;
 use crate::chunk::column::StateOffset;
 use crate::chunk::layout::ChunkLayout;
 
 /// What happens to one column of the source archetype when an entity moves to the destination.
 ///
-/// Three cases, matching the three branches `Chunk::take_from` used to work out for itself with
+/// Two cases, matching the branches `Chunk::take_from` used to work out for itself with
 /// a HashMap lookup per component per entity. Each one carries only the fields it actually
 /// needs: there is no `dst_offset` on a column that is not going anywhere, and no `fn_drop` on
 /// one nobody drops.
 pub enum ComponentMigration
 {
     Move(ColumnMove),
-    DropInPlace(ColumnDropInPlace),
     Abandon(ColumnAbandon),
 }
 
 /// Where a column sits in the source chunk, and how big one element of it is.
 ///
 /// Every case needs this much, if only to backfill the last row into the hole the moved entity
-/// leaves behind, so all three variants carry a copy.
+/// leaves behind, so both variants carry a copy.
 #[derive(Clone)]
 pub struct ColumnInSrc
 {
@@ -41,15 +38,6 @@ pub struct ColumnMove
     pub dst_state_offset: StateOffset,
 }
 
-/// The caller is about to overwrite this column with a new value (`merge_component`), so the old
-/// one has to be dropped in place rather than carried over, otherwise it leaks silently.
-pub struct ColumnDropInPlace
-{
-    pub src:     ColumnInSrc,
-    /// `ComponentDescriptor::fn_drop`.
-    pub fn_drop: FnComponentDropItSelf,
-}
-
 /// The destination has no such column and the caller already read the value out
 /// (`remove_component`), so all that is left is backfilling the last row. No drop, no copy.
 pub struct ColumnAbandon
@@ -66,7 +54,6 @@ impl ComponentMigration
         match self
         {
             Self::Move(e) => &e.src,
-            Self::DropInPlace(e) => &e.src,
             Self::Abandon(e) => &e.src,
         }
     }
@@ -83,10 +70,10 @@ pub struct MigrationPlan
 
 impl MigrationPlan
 {
-    /// `overwritten_type_ids` are the components the caller overwrites as soon as the move is
-    /// done, i.e. `merge_component`'s `T::STORAGE_TYPE_IDS`. `remove_component` passes an empty
-    /// slice, since it has already read those values out.
-    pub fn new(src_layout: &ChunkLayout, dst_layout: &ChunkLayout, overwritten_type_ids: &[TypeId]) -> Self
+    /// A column the destination also has is moved, state included, even when `merge_component`
+    /// is about to overwrite it: the overwrite drops the old value and keeps enable and `added`
+    /// (issue #43).
+    pub fn new(src_layout: &ChunkLayout, dst_layout: &ChunkLayout) -> Self
     {
         let mut components = Vec::with_capacity(src_layout.columns.len());
 
@@ -98,21 +85,14 @@ impl MigrationPlan
                 state_offset: src_col.state_offset.clone(),
             };
 
-            let migration = match overwritten_type_ids.contains(&src_col.storage_type_id)
+            let migration = match dst_layout.component_col_descriptors.get(&src_col.storage_type_id)
             {
-                true => ComponentMigration::DropInPlace(ColumnDropInPlace {
-                    src:     src,
-                    fn_drop: src_col.fn_drop,
+                Some(dst) => ComponentMigration::Move(ColumnMove {
+                    src:              src,
+                    dst_offset:       dst.offset,
+                    dst_state_offset: dst.state_offset.clone(),
                 }),
-                false => match dst_layout.component_col_descriptors.get(&src_col.storage_type_id)
-                {
-                    Some(dst) => ComponentMigration::Move(ColumnMove {
-                        src:              src,
-                        dst_offset:       dst.offset,
-                        dst_state_offset: dst.state_offset.clone(),
-                    }),
-                    None => ComponentMigration::Abandon(ColumnAbandon { src: src }),
-                },
+                None => ComponentMigration::Abandon(ColumnAbandon { src: src }),
             };
 
             components.push(migration);
