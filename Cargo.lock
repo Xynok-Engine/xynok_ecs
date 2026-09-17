@@ -1518,6 +1518,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "xynok_async_toolkit"
+version = "0.1.4"
+source = "git+https://github.com/Xynok-Engine/xynok_async_toolkit.git#096d912eeec96c3dc47fabbc69bac07b23a39401"
+dependencies = [
+ "loom",
+ "xynok_std",
+]
+
+[[package]]
 name = "xynok_concurrency"
 version = "0.2.4"
 source = "git+https://github.com/Xynok-Engine/xynok_concurrency.git#867ef751fe528f960c8a6a2631dde9d32403264f"
@@ -1530,13 +1539,15 @@ dependencies = [
 
 [[package]]
 name = "xynok_ecs"
-version = "0.2.46"
+version = "0.2.47"
 dependencies = [
  "thiserror",
+ "xynok_async_toolkit",
  "xynok_concurrency",
  "xynok_ecs",
  "xynok_ecs_proc_macro",
  "xynok_std",
+ "xynok_type_eraser",
 ]
 
 [[package]]

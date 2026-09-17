@@ -1,9 +1,9 @@
 use std::any::TypeId;
 
-use crate::apis::ComponentDescriptor;
 use crate::apis::identifies::{StateDetection, StorageLocation, XynokEcsError};
-use crate::chunk::Chunk;
+use crate::apis::ComponentDescriptor;
 use crate::chunk::layout::ChunkLayout;
+use crate::chunk::Chunk;
 use crate::query::mut_ref::TMutPolicy;
 
 /// `Send + Sync` because query batches hand components out on other threads, see
@@ -65,7 +65,7 @@ fn drop_glue<T>(ptr: *mut u8)
     }
 }
 
-pub trait TArchetype: Sized
+pub trait TArchetype: Sized + Send
 {
     const COMPONENT_DESCRIPTORS: &[ComponentDescriptor];
     const QUERY_TYPE_IDS: &[TypeId];

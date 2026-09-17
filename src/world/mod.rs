@@ -1,15 +1,11 @@
 use std::any::TypeId;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::marker::PhantomData;
-
-use xynok_std::collection::Queue;
 
 use crate::apis::constants::{ChangedTick, DEFAULT_CHUNK_SIZE_IN_BYTE};
 use crate::apis::identifies::XynokEcsError;
 use crate::apis::internal_traits::TQueryParam;
-use crate::apis::params::{
-    ArchetypeTakeAndRemoveComponentParams, ArchetypeTakeAndWriteComponentParams, ComponentSpec, ComponentSpecs, EntityInChunkIndices, EntityIndices, SwappedRow,
-};
+use crate::apis::params::{ArchetypeTakeAndRemoveComponentParams, ArchetypeTakeAndWriteComponentParams, ComponentSpec, ComponentSpecs, EntityIndices};
 use crate::apis::safe_counter::SafeCounter;
 use crate::apis::traits::TArchetype;
 use crate::apis::ArchetypeCfg;
@@ -21,10 +17,10 @@ use crate::query::Query;
 use crate::schedule::executor::TJobExecutor;
 use crate::utils::normalize_set;
 use crate::world::arch_spec::{ArchetypeEdge, ArchetypeEdgeKey, ArchetypeKind, ArchetypeSpec, ArchetypeSpecs, PairArchetypeSpecParams};
-use crate::world::entity_spec::EntitySpec;
+use crate::world::entity_allocator::EntityAllocator;
 use crate::world::query_spec::{QuerySpec, QuerySpecAccessor, QuerySpecs};
 use crate::world::temp_allocation::WorldTempAllocation;
-mod temp_allocation;
+use crate::world::worker_spec::{WorkerSpec, WorkerSpecs};
 
 /// What an archetype gets when nobody registered it: spawned through `create`, or built by
 /// `add_component`/`remove_component`.
@@ -36,7 +32,10 @@ const DEFAULT_ARCHETYPE_CFG: ArchetypeCfg = ArchetypeCfg {
 pub(crate) mod entity_spec;
 pub(crate) mod arch_spec;
 pub(crate) mod query_spec;
+pub(crate) mod worker_spec;
 
+mod temp_allocation;
+mod entity_allocator;
 /// Read-only introspection into `World`'s private storage state, for the integration tests
 /// under `tests/` (which only ever see the crate's normal public API otherwise)
 #[cfg(feature = "test-util")]
@@ -46,21 +45,16 @@ pub struct World
 {
     // A `QuerySpecAccessor` borrows these registries directly, and the entries inside are
     // never boxed: nothing caches their addresses, only their indices.
-    archetypes:               ArchetypeSpecs,
-    component_counter:        ComponentSpecs,
-    query_counter:            QuerySpecs,
-    component_set_counter:    HashMap<Vec<usize>, usize>,
-    archetype_counter:        HashMap<TypeId, usize>,
+    archetypes:            ArchetypeSpecs,
+    component_counter:     ComponentSpecs,
+    query_counter:         QuerySpecs,
+    component_set_counter: HashMap<Vec<usize>, usize>,
+    archetype_counter:     HashMap<TypeId, usize>,
     // Edge cache for structural changes, see `ArchetypeEdge`. `add_edges` serves both
     // `add_component` and `merge_component`, since both land on the union of the two archetypes.
-    add_edges:                HashMap<ArchetypeEdgeKey, ArchetypeEdge>,
-    remove_edges:             HashMap<ArchetypeEdgeKey, ArchetypeEdge>,
-    entities:                 Vec<EntitySpec>,
-    free_entities:            Queue<usize>,
-    // Slots that ran out of versions and will never be handed out again, see `erase_entity`.
-    // Kept as a plain count because nothing can be done with them, it is only here so the
-    // leak is observable rather than silent.
-    retired_entity_slots:     usize,
+    add_edges:             HashMap<ArchetypeEdgeKey, ArchetypeEdge>,
+    remove_edges:          HashMap<ArchetypeEdgeKey, ArchetypeEdge>,
+
     temp_alloc:               WorldTempAllocation,
     global_archetype_version: SafeCounter,
     // a plain counter: the tick only ever moves on the thread that drives the schedule, once per
@@ -72,13 +66,14 @@ pub struct World
     last_query_tick:          ChangedTick,
     // where parallel work goes, see `TJobExecutor`. `None` means everything runs on the caller
     executor:                 Option<Box<dyn TJobExecutor>>,
+    worker_specs:             WorkerSpecs,
+    entity_allocator:         EntityAllocator,
 }
 impl Default for World
 {
     fn default() -> Self
     {
         Self {
-            entities:                 Vec::with_capacity(16),
             archetypes:               ArchetypeSpecs::new(),
             component_counter:        ComponentSpecs::new(),
             archetype_counter:        HashMap::new(),
@@ -86,8 +81,8 @@ impl Default for World
             add_edges:                HashMap::new(),
             remove_edges:             HashMap::new(),
             query_counter:            QuerySpecs::new(),
-            free_entities:            Queue::new(),
-            retired_entity_slots:     0,
+            entity_allocator:         EntityAllocator::new(16),
+            worker_specs:             WorkerSpecs::new(),
             temp_alloc:               WorldTempAllocation::new(),
             global_archetype_version: SafeCounter::new(1, usize::MAX - 1),
             // starts at 1, not 0: `0` is the sentinel both change-detection storage (never
@@ -254,7 +249,7 @@ impl World
             return Err(XynokEcsError::SingletonAlreadyExists(arch_spec.name.clone()));
         }
 
-        let new_e = self.new_entity()?;
+        let new_e = self.entity_allocator.new_entity()?;
         let tick = self.current_tick();
         let arch_spec = self.archetypes.get_mut(&arch_id).unwrap();
         let entity_chunk_indices = match arch_spec.arch.push(&arch_spec.layout, new_e, val, tick)
@@ -268,47 +263,35 @@ impl World
             }
         };
 
-        self.update_entity_spec(new_e, arch_id, entity_chunk_indices);
+        self.entity_allocator.update_entity_spec(new_e, arch_id, entity_chunk_indices);
         Ok(new_e)
     }
 
     #[track_caller]
     pub fn create<T: TArchetype + 'static>(&mut self, val: T) -> Entity
     {
-        let arch_id = self.get_or_create_archetype_id::<T>();
-        // `create` onto a singleton layout that is already taken, e.g. `create_singleton(Hp)` then `create(Hp)`
-        let arch_spec = self.archetypes.get(&arch_id).unwrap();
-        if !arch_spec.arch.can_take_a_row()
+        let new_e = match self.entity_allocator.new_entity()
         {
-            panic!("{}", XynokEcsError::SingletonAlreadyExists(arch_spec.name.clone()));
+            Ok(r) => r,
+            Err(e) => panic!("{}", e),
+        };
+        match self.create_components_for(new_e, val)
+        {
+            Ok(_) =>
+            {}
+            Err(e) => panic!("{}", e),
         }
-
-        let new_e = match self.new_entity()
-        {
-            Ok(r) => r,
-            Err(e) => panic!("{}", e),
-        };
-        let tick = self.current_tick();
-        let arch_spec = self.archetypes.get_mut(&arch_id).unwrap();
-
-        let entity_chunk_indices = match arch_spec.arch.push(&arch_spec.layout, new_e, val, tick)
-        {
-            Ok(r) => r,
-            Err(e) => panic!("{}", e),
-        };
-
-        self.update_entity_spec(new_e, arch_id, entity_chunk_indices);
         new_e
     }
-
+    /// An entity is considered to exist only when it has been registered in the database and possesses associated Archetype data.
     pub fn exists(&self, e: Entity) -> bool
     {
-        match e.idx() < self.entities.len()
+        match e.idx() < self.entity_allocator.total_entities()
         {
             false => false,
             true =>
             {
-                let spec = unsafe { self.entities.get_unchecked(e.idx()) };
+                let spec = self.entity_allocator.get_unchecked(e.idx());
                 match spec.has_value()
                 {
                     false => false,
@@ -340,14 +323,14 @@ impl World
             return Err(XynokEcsError::EntityDoesNotExist(e.idx(), e.version()));
         }
 
-        let (arch_id, chunk_idx, idx_in_chunk) = unsafe {
-            let spec = self.entities.get_unchecked(e.idx());
+        let (arch_id, chunk_idx, idx_in_chunk) = {
+            let spec = self.entity_allocator.get_unchecked(e.idx());
             (spec.arch_id(), spec.chunk_idx(), spec.idx_in_chunk())
         };
         let arch = self.archetypes.get_mut(&arch_id).unwrap();
         if let Some(swapped_row) = arch.arch.remove_at(&arch.layout, chunk_idx, idx_in_chunk)?
         {
-            self.update_entity_indices(swapped_row);
+            self.entity_allocator.update_entity_indices(swapped_row);
         }
 
         self.erase_entity(e);
@@ -379,9 +362,8 @@ impl World
         {
             return Err(XynokEcsError::EntityDoesNotExist(e.idx(), e.version()));
         }
-
-        let (a_arch_id, a_chunk_idx, a_idx_in_chunk) = unsafe {
-            let e_spec = self.entities.get_unchecked(e.idx());
+        let (a_arch_id, a_chunk_idx, a_idx_in_chunk) = {
+            let e_spec = self.entity_allocator.get_unchecked(e.idx());
             (e_spec.arch_id(), e_spec.chunk_idx(), e_spec.idx_in_chunk())
         };
         // Issue #42: checked in every build. Without it, adding a component the entity already has
@@ -429,9 +411,10 @@ impl World
         let take_and_write_result = target_arch_spec.arch.take_and_write_from(params)?;
         if let Some(swapped_row) = take_and_write_result.swapped_e
         {
-            self.update_entity_indices(swapped_row);
+            self.entity_allocator.update_entity_indices(swapped_row);
         }
-        self.update_entity_spec(e, target_arch_id, take_and_write_result.new_indices_took);
+        self.entity_allocator
+            .update_entity_spec(e, target_arch_id, take_and_write_result.new_indices_took);
         Ok(())
     }
 
@@ -461,8 +444,8 @@ impl World
             return Err(XynokEcsError::EntityDoesNotExist(e.idx(), e.version()));
         }
 
-        let (a_arch_id, a_chunk_idx, a_idx_in_chunk) = unsafe {
-            let e_spec = self.entities.get_unchecked(e.idx());
+        let (a_arch_id, a_chunk_idx, a_idx_in_chunk) = {
+            let e_spec = self.entity_allocator.get_unchecked(e.idx());
             (e_spec.arch_id(), e_spec.chunk_idx(), e_spec.idx_in_chunk())
         };
         let edge_key = ArchetypeEdgeKey {
@@ -503,9 +486,10 @@ impl World
         let take_and_write_result = target_arch_spec.arch.take_and_write_from(params)?;
         if let Some(swapped_row) = take_and_write_result.swapped_e
         {
-            self.update_entity_indices(swapped_row);
+            self.entity_allocator.update_entity_indices(swapped_row);
         }
-        self.update_entity_spec(e, target_arch_id, take_and_write_result.new_indices_took);
+        self.entity_allocator
+            .update_entity_spec(e, target_arch_id, take_and_write_result.new_indices_took);
         Ok(())
     }
 
@@ -534,8 +518,8 @@ impl World
         {
             return Err(XynokEcsError::EntityDoesNotExist(e.idx(), e.version()));
         }
-        let (a_arch_id, a_chunk_idx, a_idx_in_chunk) = unsafe {
-            let e_spec = self.entities.get_unchecked(e.idx());
+        let (a_arch_id, a_chunk_idx, a_idx_in_chunk) = {
+            let e_spec = self.entity_allocator.get_unchecked(e.idx());
             (e_spec.arch_id(), e_spec.chunk_idx(), e_spec.idx_in_chunk())
         };
         // same as `try_add_component`: checked in every build, so removing a missing component
@@ -580,9 +564,9 @@ impl World
         let result = target_arch_spec.arch.take_and_remove_from(params)?;
         if let Some(swapped_row) = result.swapped_e
         {
-            self.update_entity_indices(swapped_row);
+            self.entity_allocator.update_entity_indices(swapped_row);
         }
-        self.update_entity_spec(e, target_arch_id, result.new_indices_took);
+        self.entity_allocator.update_entity_spec(e, target_arch_id, result.new_indices_took);
 
         Ok(result.val)
     }
@@ -646,7 +630,7 @@ impl World
     #[inline]
     pub fn retired_entity_slot_count(&self) -> usize
     {
-        self.retired_entity_slots
+        self.entity_allocator.retired_entity_slots()
     }
 
     /// The tick as of the last call to [`advance_tick`](Self::advance_tick), i.e. the one every
@@ -684,23 +668,62 @@ impl World
     /// `change_tick` at: every write within one step is stamped with that one tick, and two
     /// steps running back to back always see two different ticks. A parallel group is one step,
     /// so the systems inside it share a tick, see `schedule::scheduler::run_system_group`.
-    ///
-    /// Driving a world by hand rather than through a schedule, this is how you close one round
-    /// of change detection and open the next. Without it every ad-hoc write shares one tick and
-    /// `Changed` can only ever answer "was this ever written", not "was it written since".
     #[inline]
     pub fn advance_tick(&mut self) -> ChangedTick
     {
-        self.tick += 1;
+        self.tick = self.tick.wrapping_add(1);
         self.tick
+    }
+    /// flush all pending cmd buffer recorded
+    #[track_caller]
+    pub fn sync_point(&mut self)
+    {
+        self.worker_specs.flush_cmd();
     }
 }
 
 impl World
 {
+    /// used by worker threads
+    pub(crate) fn push_worker_spec(&mut self, spec: WorkerSpec) -> usize
+    {
+        self.worker_specs.push(spec)
+    }
+    #[allow(unused)]
+    pub(crate) fn get_worker_spec(&self, idx: usize) -> Option<&WorkerSpec>
+    {
+        self.worker_specs.get_spec_at(idx)
+    }
+    pub(crate) fn get_worker_spec_mut(&mut self, idx: usize) -> Option<&mut WorkerSpec>
+    {
+        self.worker_specs.get_spec_mut_at(idx)
+    }
     pub(crate) fn component_specs_mut(&mut self) -> &mut ComponentSpecs
     {
         &mut self.component_counter
+    }
+    pub(crate) fn erase_entity(&mut self, e: Entity)
+    {
+        self.entity_allocator.erase_entity(e);
+    }
+    /// Usually called for a brand-new entity that isn't attached to any Archetype yet. The caller can be the main thread or a worker thread.
+    pub(crate) fn create_components_for<T: TArchetype + 'static>(&mut self, new_e: Entity, val: T) -> Result<(), XynokEcsError>
+    {
+        let arch_id = self.get_or_create_archetype_id::<T>();
+        // `create` onto a singleton layout that is already taken, e.g. `create_singleton(Hp)` then `create(Hp)`
+        let arch_spec = self.archetypes.get(&arch_id).unwrap();
+        if !arch_spec.arch.can_take_a_row()
+        {
+            return Err(XynokEcsError::SingletonAlreadyExists(arch_spec.name.clone()));
+        }
+
+        let tick = self.current_tick();
+        let arch_spec = self.archetypes.get_mut(&arch_id).unwrap();
+
+        let entity_chunk_indices = arch_spec.arch.push(&arch_spec.layout, new_e, val, tick)?;
+
+        self.entity_allocator.update_entity_spec(new_e, arch_id, entity_chunk_indices);
+        Ok(())
     }
 
     /// Whether the `QuerySpec` registered for `T` writes anything, i.e. what the scheduler would
@@ -800,40 +823,15 @@ impl World
             None => Err(XynokEcsError::QuerySpecVanishedAfterPrepared(std::any::type_name::<T>())),
         }
     }
+
+    #[inline]
+    pub(crate) fn try_pre_allocate_entities(&mut self, amount: usize, dst: &mut VecDeque<Entity>) -> Result<(), XynokEcsError>
+    {
+        self.entity_allocator.pre_allocate_entities(amount, dst)
+    }
 }
 impl World
 {
-    fn update_entity_spec(&mut self, e: Entity, arch_id: usize, indices: EntityInChunkIndices)
-    {
-        let entity_spec = unsafe { self.entities.get_unchecked_mut(e.idx()) };
-        *entity_spec = EntitySpec::new(arch_id, indices.chunk_idx, indices.idx_in_chunk, e.version());
-    }
-    /// Marks the slot empty, and decides whether it may ever be handed out again.
-    ///
-    /// A handle is `(idx, version)`, and the version is the only thing telling this incarnation
-    /// of the slot apart from the next one. `new_entity` hands out `version + 1`, so a slot
-    /// sitting at [`Entity::MAX_VERSION`] has nothing left to distinguish itself with: reusing
-    /// it would reissue a handle identical to the one just destroyed, and every stale copy of
-    /// that handle would start passing `exists` again and address the new entity.
-    ///
-    /// So the slot is retired instead: left in `entities` but never enqueued, and `create`
-    /// takes a fresh slot at the end of the vector. The cost is one `EntitySpec` leaked per
-    /// retired slot, after 2^24 reuses *of that one slot*. That is the trade: a bounded leak
-    /// nobody can observe going wrong, rather than an unbounded correctness hole.
-    fn erase_entity(&mut self, e: Entity)
-    {
-        let version = unsafe {
-            let e_spec = self.entities.get_unchecked_mut(e.idx());
-            e_spec.errase();
-            e_spec.version()
-        };
-
-        match version < Entity::MAX_VERSION
-        {
-            true => self.free_entities.enqueue(e.idx()),
-            false => self.retired_entity_slots += 1,
-        }
-    }
     #[track_caller]
     fn retain_archetype_component_id_of_to(&self, arch_id: usize, component_set: &mut Vec<usize>)
     {
@@ -870,36 +868,6 @@ impl World
                 None => panic!("Archetype `{arch_id}` has an unregistered component to check id !"),
             }
         }
-    }
-    #[track_caller]
-    fn update_entity_indices(&mut self, swapped_row: SwappedRow)
-    {
-        let swapped_e_spec = match self.entities.get_mut(swapped_row.e.idx())
-        {
-            Some(r) => r,
-            None => panic!("Swapped {} not found to update indices !", swapped_row.e),
-        };
-
-        swapped_e_spec.update_idx_in_chunk(swapped_row.from, swapped_row.to);
-    }
-
-    fn new_entity(&mut self) -> Result<Entity, XynokEcsError>
-    {
-        if let Some(free_idx) = self.free_entities.dequeue()
-        {
-            let old_slot = unsafe { self.entities.get_unchecked_mut(free_idx) };
-            // `erase_entity` only enqueues a slot with a version left to spend, so the `+ 1`
-            // cannot run past `MAX_VERSION` here and `Entity::new` has nothing to refuse
-            debug_assert!(
-                old_slot.version() < Entity::MAX_VERSION,
-                "slot {free_idx} was recycled at version {} but should have been retired",
-                old_slot.version()
-            );
-            return Entity::new(free_idx, old_slot.version() + 1);
-        };
-        let e = Entity::new(self.entities.len(), Entity::INITIALIZE_VERSION)?;
-        self.entities.push(EntitySpec::new_empty_slot(e.version()));
-        Ok(e)
     }
 
     fn get_archetype_id<T: TArchetype + 'static>(&self) -> Option<usize>

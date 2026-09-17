@@ -8,7 +8,16 @@
 
 use crate::apis::traits::TComponent;
 use crate::entity::Entity;
+use crate::world::entity_spec::EntitySpec;
 use crate::world::World;
+
+/// Lấy slot của một entity, có kiểm tra biên để test sai vẫn panic rõ ràng thay vì UB.
+#[track_caller]
+fn spec_of(w: &World, e: Entity) -> &EntitySpec
+{
+    assert!(e.idx() < w.entity_allocator.total_entities(), "{e} is out of the entity allocator's range");
+    w.entity_allocator.get_unchecked(e.idx())
+}
 
 /// Where an entity's row currently lives.
 pub struct EntityLocation
@@ -23,7 +32,7 @@ pub struct EntityLocation
 #[track_caller]
 pub fn entity_location(w: &World, e: Entity) -> EntityLocation
 {
-    let spec = &w.entities[e.idx()];
+    let spec = spec_of(w, e);
     EntityLocation {
         arch_id:      spec.arch_id(),
         chunk_idx:    spec.chunk_idx(),
@@ -42,8 +51,8 @@ pub fn entity_location(w: &World, e: Entity) -> EntityLocation
 #[track_caller]
 pub fn force_entity_version(w: &mut World, e: Entity, version: usize) -> Entity
 {
-    let spec = &mut w.entities[e.idx()];
-    assert!(spec.has_value(), "{e} is not live, there is no version to rewrite");
+    assert!(spec_of(w, e).has_value(), "{e} is not live, there is no version to rewrite");
+    let spec = w.entity_allocator.get_unchecked_mut(e.idx());
     spec.force_version(version);
     Entity::new(e.idx(), version).expect("the caller picked the version, it must be representable")
 }
@@ -62,21 +71,21 @@ pub fn archetype_count(w: &World) -> usize
 #[track_caller]
 pub fn archetype_index(w: &World, arch_owner: Entity) -> usize
 {
-    let arch_id = w.entities[arch_owner.idx()].arch_id();
+    let arch_id = spec_of(w, arch_owner).arch_id();
     w.archetypes.index_of(&arch_id).expect("archetype must exist")
 }
 
 #[track_caller]
 pub fn chunk_count(w: &World, arch_owner: Entity) -> usize
 {
-    let arch_id = w.entities[arch_owner.idx()].arch_id();
+    let arch_id = spec_of(w, arch_owner).arch_id();
     w.archetypes.get(&arch_id).expect("archetype must exist").arch.chunk_count()
 }
 
 #[track_caller]
 pub fn max_len(w: &World, arch_owner: Entity) -> usize
 {
-    let arch_id = w.entities[arch_owner.idx()].arch_id();
+    let arch_id = spec_of(w, arch_owner).arch_id();
     w.archetypes.get(&arch_id).expect("archetype must exist").layout.max_len
 }
 
@@ -84,7 +93,7 @@ pub fn max_len(w: &World, arch_owner: Entity) -> usize
 #[track_caller]
 pub fn archetype_name(w: &World, arch_owner: Entity) -> String
 {
-    let arch_id = w.entities[arch_owner.idx()].arch_id();
+    let arch_id = spec_of(w, arch_owner).arch_id();
     w.archetypes.get(&arch_id).expect("archetype must exist").name.clone()
 }
 
@@ -92,14 +101,14 @@ pub fn archetype_name(w: &World, arch_owner: Entity) -> String
 #[track_caller]
 pub fn chunk_size_in_byte(w: &World, arch_owner: Entity) -> usize
 {
-    let arch_id = w.entities[arch_owner.idx()].arch_id();
+    let arch_id = spec_of(w, arch_owner).arch_id();
     w.archetypes.get(&arch_id).expect("archetype must exist").layout.chunk_size_in_byte()
 }
 
 #[track_caller]
 pub fn free_chunk_count(w: &World, arch_owner: Entity) -> usize
 {
-    let arch_id = w.entities[arch_owner.idx()].arch_id();
+    let arch_id = spec_of(w, arch_owner).arch_id();
     w.archetypes.get(&arch_id).expect("archetype must exist").arch.free_chunk_count()
 }
 
@@ -107,7 +116,7 @@ pub fn free_chunk_count(w: &World, arch_owner: Entity) -> usize
 #[track_caller]
 pub fn chunk_len(w: &World, arch_owner: Entity, chunk_idx: usize) -> usize
 {
-    let arch_id = w.entities[arch_owner.idx()].arch_id();
+    let arch_id = spec_of(w, arch_owner).arch_id();
     w.archetypes.get(&arch_id).expect("archetype must exist").arch.chunk_at(chunk_idx).len()
 }
 
@@ -117,7 +126,7 @@ pub fn chunk_len(w: &World, arch_owner: Entity, chunk_idx: usize) -> usize
 #[track_caller]
 pub fn entity_stored_at_row_of(w: &World, e: Entity) -> Entity
 {
-    let spec = &w.entities[e.idx()];
+    let spec = spec_of(w, e);
     let arch_spec = w.archetypes.get(&spec.arch_id()).expect("archetype must exist");
     *arch_spec
         .arch
@@ -130,7 +139,7 @@ pub fn entity_stored_at_row_of(w: &World, e: Entity) -> Entity
 #[track_caller]
 pub fn entity_stored_at(w: &World, arch_owner: Entity, chunk_idx: usize, row: usize) -> Entity
 {
-    let arch_id = w.entities[arch_owner.idx()].arch_id();
+    let arch_id = spec_of(w, arch_owner).arch_id();
     let arch_spec = w.archetypes.get(&arch_id).expect("archetype must exist");
     *arch_spec
         .arch
@@ -143,7 +152,7 @@ pub fn entity_stored_at(w: &World, arch_owner: Entity, chunk_idx: usize, row: us
 #[track_caller]
 pub fn read_component<C: TComponent + Copy + 'static>(w: &World, e: Entity) -> C
 {
-    let spec = &w.entities[e.idx()];
+    let spec = spec_of(w, e);
     let arch_spec = w.archetypes.get(&spec.arch_id()).expect("archetype must exist");
     *arch_spec
         .arch
@@ -168,7 +177,7 @@ pub struct ComponentState
 #[track_caller]
 pub fn component_state<C: TComponent + 'static>(w: &World, e: Entity) -> ComponentState
 {
-    let spec = &w.entities[e.idx()];
+    let spec = spec_of(w, e);
     let arch_spec = w.archetypes.get(&spec.arch_id()).expect("archetype must exist");
     let col_des = arch_spec
         .layout

@@ -1,7 +1,7 @@
 
 [package]
 name = "xynok_ecs"
-version = "0.2.46"
+version = "0.2.47"
 edition = "2024"
 
 [lints.clippy]
@@ -20,6 +20,8 @@ members = ["proc_macro", "benches"]
 [dependencies]
 xynok_std = { git = "https://github.com/Xynok-Engine/xynok_std.git" }
 xynok_concurrency = { git = "https://github.com/Xynok-Engine/xynok_concurrency.git" }
+xynok_type_eraser = { git = "https://github.com/Xynok-Engine/xynok_type_eraser.git" }
+xynok_async_toolkit = { git = "https://github.com/Xynok-Engine/xynok_async_toolkit.git" }
 # xynok_concurrency = { path = "../xynok_concurrency" }
 thiserror = "2.0.18"
 xynok_ecs_proc_macro = { path = "proc_macro" }

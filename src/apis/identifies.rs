@@ -115,6 +115,12 @@ pub enum XynokEcsError
 
     #[error("query spec for {0} vanished right after it was prepared")]
     QuerySpecVanishedAfterPrepared(&'static str),
+
+    #[error("The pre-allocated entity count must be greater than 0")]
+    PreAllocateEntityAmountMustGreaterThanZero,
+
+    #[error("WorkerSpec is not created for current thread !")]
+    WorkerSpecIsNotCreated,
 }
 
 // src: https://crates.io/crates/thiserror
