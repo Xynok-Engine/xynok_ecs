@@ -362,7 +362,8 @@ impl World
     }
 
     /// The non panicking version of [`World::add_component`]: returns
-    /// [`XynokEcsError::EntityDoesNotExist`] instead of panicking on a stale handle.
+    /// [`XynokEcsError::EntityDoesNotExist`] instead of panicking on a stale handle, and
+    /// [`XynokEcsError::ComponentAlreadyExists`] when `e` already has any component of `T`.
     #[track_caller]
     pub fn try_add_component<T: TArchetype + 'static>(&mut self, e: Entity, val: T) -> Result<(), XynokEcsError>
     {
@@ -375,9 +376,9 @@ impl World
             let e_spec = self.entities.get_unchecked(e.idx());
             (e_spec.arch_id(), e_spec.chunk_idx(), e_spec.idx_in_chunk())
         };
-        // `b_arch_id` is only needed in a debug build now: it is here purely to compare the two
-        // archetypes and report a misuse of the API. The main path goes straight to the edge cache.
-        #[cfg(debug_assertions)]
+        // Issue #42: checked in every build. Without it, adding a component the entity already has
+        // makes the add edge point back to the source archetype, and `get_disjoint_mut` below
+        // panics on the two equal indices. A partial overlap would also slip through as a silent merge.
         {
             let b_arch_id = self.get_or_create_archetype_id::<T>();
             let has_any_component_duplicated = {
@@ -387,13 +388,7 @@ impl World
             };
             if has_any_component_duplicated
             {
-                panic!(
-                    "Cannot add component `{}` for entity {}. A component with this type already exists. 
-                    When using add_component(), you can only add components that are not already present. 
-                    If you want to add a duplicate component, use merge_component() instead.",
-                    std::any::type_name::<T>(),
-                    e
-                )
+                return Err(XynokEcsError::ComponentAlreadyExists(e.idx(), e.version(), std::any::type_name::<T>()));
             }
         }
 
@@ -522,7 +517,8 @@ impl World
     }
 
     /// The non panicking version of [`World::remove_component`]: returns
-    /// [`XynokEcsError::EntityDoesNotExist`] instead of panicking on a stale handle.
+    /// [`XynokEcsError::EntityDoesNotExist`] instead of panicking on a stale handle, and
+    /// [`XynokEcsError::ComponentNotFound`] when `e` is missing any component of `T`.
     #[track_caller]
     pub fn try_remove_component<T: TArchetype + 'static>(&mut self, e: Entity) -> Result<T, XynokEcsError>
     {
@@ -534,8 +530,8 @@ impl World
             let e_spec = self.entities.get_unchecked(e.idx());
             (e_spec.arch_id(), e_spec.chunk_idx(), e_spec.idx_in_chunk())
         };
-        // like `add_component`: only a debug build needs `b_arch_id`, to check the input
-        #[cfg(debug_assertions)]
+        // same as `try_add_component`: checked in every build, so removing a missing component
+        // returns an error instead of panicking on a remove edge that points back to the source
         {
             let b_arch_id = self.get_or_create_archetype_id::<T>();
             let contains_all_components = {
@@ -545,11 +541,7 @@ impl World
             };
             if !contains_all_components
             {
-                panic!(
-                    "Cannot remove component `{}` from entity {}: the entity does not have this component.",
-                    std::any::type_name::<T>(),
-                    e
-                )
+                return Err(XynokEcsError::ComponentNotFound(e.idx(), e.version(), std::any::type_name::<T>()));
             }
         }
 
