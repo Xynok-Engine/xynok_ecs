@@ -199,3 +199,16 @@ fn t_without_alone_yields_nothing()
 
     assert_eq!(w.create_query::<Without<Mana>>().into_iter().count(), 0);
 }
+
+/// A tuple made only of `Without` has no column to walk either, so it behaves like a lone `Without`.
+#[test]
+fn t_tuple_of_only_without_yields_nothing()
+{
+    let mut w = World::default();
+    w.create(Hp(1));
+
+    let mut query = w.create_query::<(Without<Mana>, (Without<Pos>, Without<Marker>))>();
+    assert_eq!(query.iter().count(), 0);
+    assert_eq!(query.iter_chunk().count(), 0);
+    assert_eq!(query.iter_batch(8).count(), 0);
+}

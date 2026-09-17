@@ -36,9 +36,10 @@ pub trait TQueryParam
     /// Unique per query shape, see [`TQueryParam::Shape`]
     const TYPE_ID: TypeId = TypeId::of::<Self::Shape>();
 
-    /// `true` when the shape names no column at all, i.e. [`Without`](crate::query::filter::Without)
-    /// on its own. There is nothing to walk then, so every iterator is empty from the start.
-    const NAMES_NO_COLUMN: bool = false;
+    /// `true` when the shape only excludes archetypes and names no column at all, i.e.
+    /// [`Without`](crate::query::filter::Without) on its own, or a tuple made only of `Without`.
+    /// There is nothing to walk then, so every iterator is empty from the start.
+    const EXCLUDE_ONLY: bool = false;
 
     fn access_scope(component_specs: &mut ComponentSpecs) -> Result<AccessScope, XynokEcsError>;
 

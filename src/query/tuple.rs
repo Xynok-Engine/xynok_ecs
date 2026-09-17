@@ -15,6 +15,9 @@ macro_rules! impl_tuple_query_param {
             type Fetch = ($($q::Fetch,)+);
             type Shape = ($($q::Shape,)+);
 
+            // a tuple has nothing to walk only when every element has nothing to walk
+            const EXCLUDE_ONLY: bool = $($q::EXCLUDE_ONLY &&)+ true;
+
             fn access_scope(component_specs: &mut ComponentSpecs) -> Result<AccessScope, XynokEcsError>
             {
                 let mut scope = AccessScope::default();

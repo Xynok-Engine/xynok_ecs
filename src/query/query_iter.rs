@@ -24,7 +24,7 @@ impl<'q, T: TQueryParam> ChunkCursor<'q, T>
         Self {
             archetypes:   accessor.archetypes,
             // a shape with no column has nothing to walk, so it starts out already finished
-            arch_indices: if T::NAMES_NO_COLUMN { &[] } else { accessor.arch_indices() },
+            arch_indices: if T::EXCLUDE_ONLY { &[] } else { accessor.arch_indices() },
             arch_pos:     0,
             arch:         None,
             chunk_idx:    0,
@@ -520,7 +520,7 @@ impl<'q, T: TQueryParam> ParWalker<'q, T>
     {
         Self {
             archetypes:   accessor.archetypes,
-            arch_indices: if T::NAMES_NO_COLUMN { &[] } else { accessor.arch_indices() },
+            arch_indices: if T::EXCLUDE_ONLY { &[] } else { accessor.arch_indices() },
             ticks:        ticks_of(accessor),
             phantom:      PhantomData,
         }

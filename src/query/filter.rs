@@ -120,7 +120,7 @@ define_filter!(
 /// starts. That also means it costs nothing per row.
 ///
 /// It only makes sense as one element of a tuple, next to the columns you do want, e.g.
-/// `Query<(&Hp, Without<Frozen>)>`. Used on its own, `Query<Without<Frozen>>` names no column to walk, so it yields nothing.
+/// `Query<(&Hp, Without<Frozen>)>`. Used on its own (or in a tuple made only of `Without`), `Query<Without<Frozen>>` names no column to walk, so it yields nothing.
 pub struct Without<T: TComponent + 'static>(PhantomData<fn() -> T>);
 
 impl<T: TComponent + 'static> TQueryParam for Without<T>
@@ -132,7 +132,7 @@ impl<T: TComponent + 'static> TQueryParam for Without<T>
     type Fetch = ();
     type Shape = Without<T::StorageType>;
 
-    const NAMES_NO_COLUMN: bool = true;
+    const EXCLUDE_ONLY: bool = true;
 
     fn access_scope(component_specs: &mut ComponentSpecs) -> Result<AccessScope, XynokEcsError>
     {
