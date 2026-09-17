@@ -218,3 +218,31 @@ fn t_derived_archetype_name_follows_type_name_format()
     w.remove_component::<Hp>(e);
     assert_eq!(testing::archetype_name(&w, e), std::any::type_name::<Mana>());
 }
+
+/// Hand written component that shares `Hp`'s storage but asks for change tracking, which the
+/// layout built from `Hp` does not have. Writing it through that layout makes `push` fail.
+struct TrackedHp(#[allow(unused)] u32);
+impl xynok_ecs::apis::traits::TComponent for TrackedHp
+{
+    type QueryType = Hp;
+    type StorageType = Hp;
+    type MutPolicy = xynok_ecs::query::mut_ref::NoTracking;
+
+    const STORAGE_LOCATION: xynok_ecs::apis::identifies::StorageLocation = xynok_ecs::apis::identifies::StorageLocation::Chunk;
+    const STATE_DETECTION: xynok_ecs::apis::identifies::StateDetection = xynok_ecs::apis::identifies::StateDetection::ChangeAble;
+}
+
+#[test]
+fn t_failed_singleton_push_gives_the_entity_slot_back()
+{
+    let mut w = World::default();
+    w.register_singleton::<Hp>();
+
+    let err = w.try_create_singleton(TrackedHp(1)).unwrap_err();
+    assert!(matches!(err, XynokEcsError::ComponentStateNotAvailable(_, _)));
+
+    // the slot taken for the failed singleton is back in the free list, so it gets reused
+    let e = w.create(Mana(1));
+    assert_eq!(e.idx(), 0);
+    assert!(w.exists(e));
+}

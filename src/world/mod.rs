@@ -258,7 +258,16 @@ impl World
         let new_e = self.new_entity()?;
         let tick = self.current_tick();
         let arch_spec = self.archetypes.get_mut(&arch_id).unwrap();
-        let entity_chunk_indices = arch_spec.arch.push(&arch_spec.layout, new_e, val, tick)?;
+        let entity_chunk_indices = match arch_spec.arch.push(&arch_spec.layout, new_e, val, tick)
+        {
+            Ok(r) => r,
+            Err(e) =>
+            {
+                // `new_entity` already took the slot, give it back so it can be reused (issue #45)
+                self.erase_entity(new_e);
+                return Err(e);
+            }
+        };
 
         self.update_entity_spec(new_e, arch_id, entity_chunk_indices);
         Ok(new_e)
