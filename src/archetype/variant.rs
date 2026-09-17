@@ -37,6 +37,18 @@ impl<T: TComponent + 'static> TArchetype for T
     {
         unsafe { chunk.replace_at::<T>(layout, row, val, tick) }
     }
+
+    fn write_or_replace_at(
+        src_layout: &ChunkLayout,
+        dst_layout: &ChunkLayout,
+        chunk: &mut crate::chunk::Chunk,
+        row: usize,
+        val: Self,
+        tick: ChangedTick,
+    ) -> Result<(), XynokEcsError>
+    {
+        unsafe { chunk.write_or_replace_at::<T>(src_layout, dst_layout, row, val, tick) }
+    }
 }
 
 macro_rules! tuple_arch {
@@ -82,6 +94,22 @@ macro_rules! tuple_arch {
                 unsafe
                 {
                     $(chunk.replace_at::<$component>(layout, row, val.$idx, tick)?;)*
+                }
+                Ok(())
+            }
+
+            fn write_or_replace_at(
+                src_layout: &ChunkLayout,
+                dst_layout: &ChunkLayout,
+                chunk: &mut crate::chunk::Chunk,
+                row: usize,
+                val: Self,
+                tick: ChangedTick,
+            ) -> Result<(), XynokEcsError>
+            {
+                unsafe
+                {
+                    $(chunk.write_or_replace_at::<$component>(src_layout, dst_layout, row, val.$idx, tick)?;)*
                 }
                 Ok(())
             }

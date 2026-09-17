@@ -81,5 +81,17 @@ pub trait TArchetype: Sized
 
     fn write_at(layout: &ChunkLayout, chunk: &mut Chunk, write_idx: usize, val: Self, tick: crate::apis::constants::ChangedTick) -> Result<(), XynokEcsError>;
     fn replace_at(layout: &ChunkLayout, chunk: &mut Chunk, row: usize, val: Self, tick: crate::apis::constants::ChangedTick) -> Result<(), XynokEcsError>;
+    /// Writes `val` into a row that just arrived from `src_layout` (issue #43). A component the
+    /// entity already had was moved across together with its state, so it goes through
+    /// `replace_at`: the old value is dropped, enable and `added` stay, only `changed` moves. A
+    /// component that is new to the entity goes through `write_at` like a fresh insert.
+    fn write_or_replace_at(
+        src_layout: &ChunkLayout,
+        dst_layout: &ChunkLayout,
+        chunk: &mut Chunk,
+        row: usize,
+        val: Self,
+        tick: crate::apis::constants::ChangedTick,
+    ) -> Result<(), XynokEcsError>;
     fn take_from(layout: &ChunkLayout, chunk: &mut Chunk, idx: usize) -> Result<Self, XynokEcsError>;
 }

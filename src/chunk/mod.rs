@@ -278,9 +278,6 @@ impl Chunk
                         // added/changed ticks must keep pointing at the run that actually touched it
                         copy_state_across(src_ptr, &m.src.state_offset, params.from, dst_ptr, &m.dst_state_offset, params.to);
                     }
-                    // the caller (e.g. merge_component) is about to overwrite this column with a new value right
-                    // after this call, so drop the old one in place instead of migrating it into dst
-                    ComponentMigration::DropInPlace(d) => (d.fn_drop)(src_ptr.add(d.src.offset).add(params.from * d.src.byte_size)),
                     // when removing a component, the dst often won't have all the components from the src
                     ComponentMigration::Abandon(_) =>
                     {}
@@ -413,6 +410,23 @@ impl Chunk
             self.set_changed_tick::<T>(layout, row, tick)?;
         }
         Ok(())
+    }
+    /// Used after a move: if the source row already had `T`, its value and state were moved into
+    /// `row`, so this is an overwrite (`replace_at`). Otherwise `T` is new here (`write_at`).
+    pub(crate) unsafe fn write_or_replace_at<T: TComponent + 'static>(
+        &mut self,
+        src_layout: &ChunkLayout,
+        dst_layout: &ChunkLayout,
+        row: usize,
+        value: T,
+        tick: ChangedTick,
+    ) -> Result<(), XynokEcsError>
+    {
+        match src_layout.component_col_descriptors.contains_key(&std::any::TypeId::of::<T::StorageType>())
+        {
+            true => unsafe { self.replace_at::<T>(dst_layout, row, value, tick) },
+            false => unsafe { self.write_at::<T>(dst_layout, row, value, tick) },
+        }
     }
     /// Writes directly to memory without dropping the old value. Typically used when the memory
     /// has just been initialized, i.e. this component is appearing in this row for the first
