@@ -367,6 +367,14 @@ at the `add_system_parallel` call with `ParallelGroupConflict`. Shared reads nev
 any number of systems can read the same component together. A group of one skips the thread
 pool and runs inline.
 
+A group counts as one step for change detection too, so every system in it shares one tick.
+Nobody inside the group can see what another member writes anyway (that would be a conflict),
+so giving each of them a different tick buys nothing. What you get from it:
+
+- A system after the group sees everything the group wrote, just like after a single system.
+- A system in the group never sees its own writes from the previous run as `Changed`, no matter
+  how the threads happened to interleave.
+
 Runnable versions: [`examples/single_thread.rs`](../examples/single_thread.rs) and
 [`examples/multi_thread.rs`](../examples/multi_thread.rs).
 

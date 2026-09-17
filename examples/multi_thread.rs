@@ -11,6 +11,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use xynok_ecs::component;
+use xynok_ecs::query::filter::Changed;
 use xynok_ecs::query::Query;
 use xynok_ecs::schedule::scheduler::{DefaultScheduleSession, DefaultScheduler, TScheduler};
 use xynok_ecs::world::World;
@@ -25,7 +26,7 @@ struct Position(f32);
 #[component]
 #[derive(Debug, Default)]
 struct Velocity(f32);
-#[component]
+#[component(ChangeAble)]
 #[derive(Debug, Default)]
 struct Hp(i32);
 #[component]
@@ -94,6 +95,11 @@ fn tick_poison(query: Query<(&mut Hp, &Poison)>)
     busy();
     for (mut hp, poison) in query
     {
+        // skip before touching `hp`: a mutable deref alone already counts as a write for `Changed`
+        if poison.0 == 0
+        {
+            continue;
+        }
         hp.0 -= poison.0;
     }
     println!("{}", tag("tick_poison -> wrote Hp"));
@@ -130,6 +136,18 @@ fn report(query: Query<(&Name, &Position, &Hp, &Mana)>)
     }
 }
 
+/// Runs after the `Update` group. The whole group shares one tick, and this system's baseline is
+/// older than that tick, so it sees every `Hp` the group wrote, here only the poisoned goblin.
+/// Frame 1 lists everyone too, because spawning an entity counts as a change. From frame 2 on,
+/// each run starts from a newer baseline, so each write shows up exactly once.
+fn watch_hp(query: Query<(&Name, Changed<&Hp>)>)
+{
+    for (name, hp) in query
+    {
+        println!("  {} hp changed -> {}", name.0, hp.0);
+    }
+}
+
 fn main()
 {
     let mut world = HeapPtr::new(World::default());
@@ -143,6 +161,7 @@ fn main()
     scheduler
         .add_system_parallel(DefaultScheduleSession::PreUpdate, (survey_speed, survey_spread))
         .add_system_parallel(DefaultScheduleSession::Update, (integrate, tick_poison, regen_mana))
+        .add_system(DefaultScheduleSession::LateUpdate, watch_hp)
         .add_system(DefaultScheduleSession::LateUpdate, report);
 
     // Rejected right here, at the call site, with `ParallelGroupConflict`: `regen_mana` and
