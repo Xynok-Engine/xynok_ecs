@@ -53,6 +53,8 @@ pub trait TSystem: Send + Sync + 'static
     /// Warm up the system's query parameters. We must ensure all accessed data is available when the system starts running
     fn prepare(&self, world: HeapMut<World>) -> Result<(), XynokEcsError>;
 
+    /// Runs the system. Call [`TSystem::prepare`] first: building the parameters here only reads
+    /// the world, so a query that was never prepared is a bug and panics.
     fn run(&mut self, world: HeapMut<World>) -> Result<(), XynokEcsError>;
     /// One entry per parameter, never merged into a single scope - [`AccessScopes`] explains
     /// what merging would throw away

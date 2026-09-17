@@ -129,7 +129,21 @@ fn run_system(system: &mut SystemTypeStorage, world: HeapMut<World>)
     // one tick per step: every write this system makes is stamped with it, and the next step
     // sees a strictly later one
     let this_run = world.as_ref_mut().advance_tick();
+    prepare_system(system, world);
     run_system_at(system, world, this_run);
+}
+
+/// Registers every query the system needs, on the calling thread. `run` only reads the world's
+/// registries, so this has to happen before it, otherwise the system has nothing to read.
+#[track_caller]
+fn prepare_system(system: &SystemTypeStorage, world: HeapMut<World>)
+{
+    match system.prepare(world)
+    {
+        Ok(_) =>
+        {}
+        Err(e) => panic!("{}", e),
+    }
 }
 
 /// Runs a system whose tick was already taken by the caller.
@@ -164,7 +178,10 @@ fn run_system_group(group: &mut [SystemTypeStorage], world: HeapMut<World>)
         Some(pool) if group.len() > 1 => pool,
         _ =>
         {
-            group.iter_mut().for_each(|system| run_system_at(system, world, this_run));
+            group.iter_mut().for_each(|system| {
+                prepare_system(system, world);
+                run_system_at(system, world, this_run);
+            });
             return;
         }
     };
@@ -172,15 +189,7 @@ fn run_system_group(group: &mut [SystemTypeStorage], world: HeapMut<World>)
     // The preparation pass, on this very thread: initialising a query writes into the world's
     // registries, and two jobs writing there at once is a race. After this pass, `init` inside a
     // job is a table lookup, which is a read, and concurrent reads are fine.
-    for system in group.iter()
-    {
-        match system.prepare(world)
-        {
-            Ok(_) =>
-            {}
-            Err(e) => panic!("{}", e),
-        }
-    }
+    group.iter().for_each(|system| prepare_system(system, world));
 
     // Job `i` runs system `i`. Every index is handed out exactly once, so no two jobs ever
     // reach the same system even though they all go through this one shared pointer.
