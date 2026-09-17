@@ -131,7 +131,7 @@ fn t_par_inside_a_parallel_system_group()
     let mut world = HeapPtr::new(World::default());
     fill(&mut world);
 
-    let mut scheduler = DefaultScheduler::new(world);
+    let mut scheduler = DefaultScheduler::new(world.as_ref_mut());
     scheduler
         .add_system_parallel(DefaultScheduleSession::Update, (add_hp, add_mana))
         .add_system(DefaultScheduleSession::Update, check);

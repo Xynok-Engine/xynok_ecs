@@ -83,7 +83,7 @@ fn main()
     // `world` itself is moved into the scheduler.
     let mut world_mut = world.as_ref_mut();
 
-    let mut scheduler = DefaultScheduler::new(world);
+    let mut scheduler = DefaultScheduler::new(world.as_ref_mut());
     scheduler
         .add_system(DefaultScheduleSession::Update, report_added)
         .add_system(DefaultScheduleSession::Update, report_changed)

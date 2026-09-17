@@ -76,7 +76,9 @@ pub struct ParallelFrame;
 
 impl ParallelWorkload for ParallelFrame
 {
-    type Runner = DefaultScheduler;
+    // The scheduler only borrows the world, so the runner keeps the world alive next to it.
+    // Tuple fields drop in order, so the scheduler goes first.
+    type Runner = (DefaultScheduler, HeapPtr<World>);
     type World = World;
 
     const DISPLAY_NAME: &'static str = "xynok_ecs";
@@ -85,7 +87,7 @@ impl ParallelWorkload for ParallelFrame
     fn setup(entity_count: usize, group: SystemGroup) -> Self::Runner
     {
         let world = HeapPtr::new(build_world(entity_count));
-        let mut scheduler = DefaultScheduler::new(world);
+        let mut scheduler = DefaultScheduler::new(world.as_ref_mut());
 
         match group
         {
@@ -97,12 +99,12 @@ impl ParallelWorkload for ParallelFrame
         // measurement. bevy's first `Schedule::run` builds its graph for the same reason, and both
         // sides get the same courtesy.
         scheduler.run(SESSION);
-        scheduler
+        (scheduler, world)
     }
 
     fn run_frame(runner: &mut Self::Runner)
     {
-        runner.run(SESSION);
+        runner.0.run(SESSION);
     }
 
     fn build_world_only(entity_count: usize) -> World

@@ -3,7 +3,7 @@ use std::hash::Hash;
 
 use xynok_concurrency::thread_pool::cfg::CfgThreadPool;
 use xynok_concurrency::thread_pool::ThreadPool;
-use xynok_std::unsafe_ptr::{HeapMut, HeapPtr};
+use xynok_std::unsafe_ptr::HeapMut;
 
 use crate::apis::constants::ChangedTick;
 use crate::schedule::step::ScheduleStep;
@@ -11,12 +11,16 @@ use crate::schedule::system_spec::SystemSpecs;
 use crate::system::traits::{SystemTypeStorage, TIntoSystem, TIntoSystems};
 use crate::world::World;
 
+/// THIS IS FOR DEMO PURPOSES ONLY.
+///
+/// This scheduler serves as an example of how to use xynok_ecs,
+/// but you should implement your own. YOUR WORLD, YOUR RULE !  
 pub trait TScheduler: Sized
 {
     type SessionType: Eq + Hash + Clone;
 
     #[track_caller]
-    fn new(world: HeapPtr<World>) -> Self;
+    fn new(world: HeapMut<World>) -> Self;
 
     #[track_caller]
     fn add_system<P, T: TIntoSystem<P>>(&mut self, session: Self::SessionType, system: T) -> &mut Self;
@@ -27,9 +31,14 @@ pub trait TScheduler: Sized
     #[track_caller]
     fn run(&mut self, session: Self::SessionType);
 }
+
+/// THIS IS FOR DEMO PURPOSES ONLY.
+///
+/// This scheduler serves as an example of how to use xynok_ecs,
+/// but you should implement your own. YOUR WORLD, YOUR RULE !  
 pub struct DefaultScheduler
 {
-    world:        HeapPtr<World>,
+    world:        HeapMut<World>,
     system_specs: SystemSpecs,
     steps:        HashMap<DefaultScheduleSession, Vec<ScheduleStep>>,
 }
@@ -93,7 +102,7 @@ impl TScheduler for DefaultScheduler
         {
             return;
         };
-        let world = self.world.as_ref_mut();
+        let world = self.world;
 
         for step in steps.iter_mut()
         {
@@ -106,11 +115,11 @@ impl TScheduler for DefaultScheduler
         }
     }
 
-    fn new(world: HeapPtr<World>) -> Self
+    fn new(world: HeapMut<World>) -> Self
     {
         // The pool lives in the world, so a `Query` can reach it too. An executor the user
         // already plugged in is kept as it is.
-        let w = world.as_ref_mut().as_ref_mut();
+        let w = world.as_ref_mut();
         if w.executor().is_none()
         {
             w.set_executor(Some(Box::new(ThreadPool::new(CfgThreadPool::new("Default Xynok ECS Scheduler ThreadPool", 4)))));
@@ -302,7 +311,7 @@ mod test
         let mut world = HeapPtr::new(World::default());
         world.create(Hp(12));
         world.create((Hp(12), Mana(12)));
-        let mut scheduler = DefaultScheduler::new(world);
+        let mut scheduler = DefaultScheduler::new(world.as_ref_mut());
 
         scheduler.add_system(DefaultScheduleSession::Start, system_two_queries);
         // Runs twice on purpose: the first pass registers both queries (the relocating case),
@@ -317,7 +326,7 @@ mod test
         let mut world = HeapPtr::new(World::default());
         world.create(Hp(12));
         world.create((Hp(12), Mana(12)));
-        let mut scheduler = DefaultScheduler::new(world);
+        let mut scheduler = DefaultScheduler::new(world.as_ref_mut());
 
         scheduler
             .add_system(DefaultScheduleSession::Start, system_a)
@@ -335,7 +344,7 @@ mod test
     {
         let mut world = HeapPtr::new(World::default());
         world.create((Hp(12), Mana(12)));
-        let mut scheduler = DefaultScheduler::new(world);
+        let mut scheduler = DefaultScheduler::new(world.as_ref_mut());
 
         scheduler.add_system(DefaultScheduleSession::Start, system_aliasing_hp);
     }
@@ -353,7 +362,7 @@ mod test
         let mut world = HeapPtr::new(World::default());
         world.create(Hp(12));
         world.create((Hp(12), Mana(12)));
-        let mut scheduler = DefaultScheduler::new(world);
+        let mut scheduler = DefaultScheduler::new(world.as_ref_mut());
 
         scheduler.add_system(DefaultScheduleSession::Start, reads_hp_twice);
         scheduler.run(DefaultScheduleSession::Start);
@@ -366,7 +375,7 @@ mod test
     {
         let mut world = HeapPtr::new(World::default());
         world.create(Hp(12));
-        let mut scheduler = DefaultScheduler::new(world);
+        let mut scheduler = DefaultScheduler::new(world.as_ref_mut());
 
         scheduler
             .add_system(DefaultScheduleSession::Start, system_b)
@@ -408,7 +417,7 @@ mod test
         {
             world.create((Hp(1), Mana(10)));
         }
-        let mut scheduler = DefaultScheduler::new(world);
+        let mut scheduler = DefaultScheduler::new(world.as_ref_mut());
         scheduler
             .add_system_parallel(DefaultScheduleSession::Update, (add_hp, add_mana))
             .add_system(DefaultScheduleSession::Update, check);
@@ -464,7 +473,7 @@ mod test
         {
             world.create((Armor(0), Speed(0)));
         }
-        let mut scheduler = DefaultScheduler::new(world);
+        let mut scheduler = DefaultScheduler::new(world.as_ref_mut());
         scheduler
             .add_system_parallel(DefaultScheduleSession::Update, (bump_armor, bump_speed))
             .add_system(DefaultScheduleSession::Update, after);
@@ -477,7 +486,10 @@ mod test
             ScheduleStep::Single(_) => unreachable!(),
         };
         let world_tick = scheduler.world.current_tick();
-        assert!(group_ticks.iter().all(|&t| t == world_tick - 1), "group ticks {group_ticks:?}, world tick {world_tick}");
+        assert!(
+            group_ticks.iter().all(|&t| t == world_tick - 1),
+            "group ticks {group_ticks:?}, world tick {world_tick}"
+        );
         assert_eq!(ARMOR_SEEN.load(Ordering::Relaxed), 64);
         assert_eq!(SPEED_SEEN.load(Ordering::Relaxed), 64);
         assert_eq!(AFTER_SEEN.load(Ordering::Relaxed), 64);

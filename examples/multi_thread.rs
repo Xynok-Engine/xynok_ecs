@@ -156,7 +156,7 @@ fn main()
     world.create((Name("mage"), Position(4.0), Velocity(0.5), Hp(70), Mana(40), Regen(8), Poison(0)));
     world.create((Name("goblin"), Position(9.0), Velocity(2.0), Hp(30), Mana(0), Regen(1), Poison(3)));
 
-    let mut scheduler = DefaultScheduler::new(world);
+    let mut scheduler = DefaultScheduler::new(world.as_ref_mut());
 
     scheduler
         .add_system_parallel(DefaultScheduleSession::PreUpdate, (survey_speed, survey_spread))

@@ -76,7 +76,7 @@ fn main()
     // Same components plus `Poison`: a different archetype, still matched by `Query<&Hp>`
     world.create((Name("goblin"), Hp(30), Mana(0), Poison(3)));
 
-    let mut scheduler = DefaultScheduler::new(world);
+    let mut scheduler = DefaultScheduler::new(world.as_ref_mut());
 
     scheduler
         .add_system(DefaultScheduleSession::Start, announce_start)

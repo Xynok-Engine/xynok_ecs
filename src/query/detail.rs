@@ -8,8 +8,7 @@ use crate::apis::traits::{TComponent, TEnableAble};
 use crate::chunk::layout::ChunkLayout;
 use crate::chunk::{read_bit, write_bit};
 use crate::query::access_scope::AccessScope;
-use crate::query::variant::MutItem;
-use crate::query::variant::column_descriptor;
+use crate::query::variant::{column_descriptor, MutItem};
 
 /// Hands out a component together with its per-row state, for now only the enable bit.
 ///
@@ -27,8 +26,7 @@ use crate::query::variant::column_descriptor;
 pub struct Detail<Q>(PhantomData<fn() -> Q>);
 
 impl<Q: TQueryColumn> TQueryParam for Detail<Q>
-where
-    Q::Component: TEnableAble,
+where Q::Component: TEnableAble
 {
     type QueryItem<'a> = DetailItem<'a, Q>;
     // the wrapped column's own state, plus the offset of its enable region
@@ -112,7 +110,7 @@ impl<'a, 'q, T: TComponent + 'static> DetailItem<'a, &'q T>
     }
 }
 
-impl<'a, 'q, T: TComponent + 'static> DetailItem<'a, &'q mut T>
+impl<'a, T: TComponent + 'static> DetailItem<'a, &mut T>
 {
     #[inline]
     pub fn value(&self) -> &T
