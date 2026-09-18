@@ -74,21 +74,24 @@ impl Cmd
             unsafe { &mut *r.get() },
             None => return Err(XynokEcsError::WorkerSpecIsNotCreated),
         };
-        let e = {
+        let e = loop
+        {
             match worker_spec.pre_allocated_entities.pop_front()
             {
-                Some(r) => r,
+                Some(r) => break r,
                 None => match world.try_pre_allocate_entities(PRE_ALLOCATED_ENTITIES_AMOUNT, &mut worker_spec.pre_allocated_entities)
                 {
-                    Ok(_) => return self.try_create(val),
+                    Ok(_) =>
+                    {}
                     Err(e) => return Err(e),
                 },
             }
         };
         let cmd = CmdBuffer::new(move || {
-            if let Err(e) = world.create_components_for(e, val)
+            if let Err(err) = world.create_components_for(e, val)
             {
-                panic!("WORKER[{:?}]: {}", Self::id(), e)
+                world.erase_entity(e);
+                panic!("WORKER[{:?}]: {}", Self::id(), err)
             }
         });
         worker_spec.cmd_buffer.push_back(cmd);

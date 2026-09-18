@@ -92,6 +92,7 @@ impl EntityAllocator
         *entity_spec = EntitySpec::new(arch_id, indices.chunk_idx, indices.idx_in_chunk, e.version());
     }
 
+    /// Mark this entity as invalid. If its version is exceeded, the entity becomes obsolete.
     #[inline]
     pub fn erase_entity(&mut self, e: Entity)
     {
