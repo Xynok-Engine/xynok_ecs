@@ -68,6 +68,7 @@ pub struct World
     executor:                 Option<Box<dyn TJobExecutor>>,
     worker_specs:             WorkerSpecs,
     entity_allocator:         EntityAllocator,
+    in_parallel_compute:      bool,
 }
 impl Default for World
 {
@@ -85,6 +86,7 @@ impl Default for World
             worker_specs:             WorkerSpecs::new(),
             temp_alloc:               WorldTempAllocation::new(),
             global_archetype_version: SafeCounter::new(1, usize::MAX - 1),
+            in_parallel_compute:      false,
             // starts at 1, not 0: `0` is the sentinel both change-detection storage (never
             // touched) and a system's `last_run_tick` (never run) default to. If the world's
             // first-ever write also stamped tick `0`, `is_newer_than(0, last_run=0, this_run=1)`
@@ -104,6 +106,20 @@ impl Drop for World
         {
             arch.arch.dispose(&arch.layout);
         }
+    }
+}
+// UNSAFE PUBLIC
+impl World
+{
+    /// more details at issue #66
+    pub unsafe fn set_in_parallel_compute(&mut self, val: bool)
+    {
+        self.in_parallel_compute = val;
+    }
+    /// more details at issue #66
+    pub unsafe fn in_parallel_compute(&self) -> bool
+    {
+        self.in_parallel_compute
     }
 }
 impl World
@@ -283,6 +299,13 @@ impl World
         }
         new_e
     }
+    pub fn try_create<T: TArchetype + 'static>(&mut self, val: T) -> Result<Entity, XynokEcsError>
+    {
+        let new_e = self.entity_allocator.new_entity()?;
+        self.create_components_for(new_e, val)?;
+        Ok(new_e)
+    }
+
     /// An entity is considered to exist only when it has been registered in the database and possesses associated Archetype data.
     pub fn exists(&self, e: Entity) -> bool
     {
@@ -807,6 +830,7 @@ impl World
         })
     }
 
+    #[track_caller]
     pub(crate) fn get_or_create_query_src_access<'a, T: TQueryParam + 'static>(
         &'a mut self,
         last_run_tick: ChangedTick,
@@ -824,12 +848,14 @@ impl World
         }
     }
 
+    /// this is thread-safe, called by worker threads
     #[inline]
     pub(crate) fn try_pre_allocate_entities(&mut self, amount: usize, dst: &mut VecDeque<Entity>) -> Result<(), XynokEcsError>
     {
         self.entity_allocator.pre_allocate_entities(amount, dst)
     }
 }
+// PRIVATES
 impl World
 {
     #[track_caller]

@@ -10,7 +10,10 @@ use crate::entity::Entity;
 use crate::system::traits::TSystemParam;
 use crate::world::worker_spec::WorkerSpec;
 use crate::world::World;
+
 const PRE_ALLOCATED_ENTITIES_AMOUNT: usize = 32;
+const CMD_BUFFER_CAPACITY: usize = 32;
+
 pub struct Cmd
 {
     world: HeapMut<World>,
@@ -58,6 +61,10 @@ impl Cmd
 
     pub fn try_create<T: TArchetype + 'static>(&mut self, val: T) -> Result<Entity, XynokEcsError>
     {
+        if self.in_main_thread_now()
+        {
+            return self.world.try_create(val);
+        }
         self.warm_up();
         let mut world = self.world;
         let mut world2 = self.world;
@@ -99,6 +106,10 @@ impl Cmd
     }
     pub fn try_add_component<T: TArchetype + 'static>(&mut self, e: Entity, val: T) -> Result<(), XynokEcsError>
     {
+        if self.in_main_thread_now()
+        {
+            return self.world.try_add_component(e, val);
+        }
         let mut world = self.world;
         let cmd_buffer = self.cmd_buffer()?;
         let cmd = CmdBuffer::new(move || {
@@ -111,17 +122,22 @@ impl Cmd
         Ok(())
     }
     #[track_caller]
-    pub fn remove_component<T: TArchetype + 'static>(&mut self, e: Entity)
+    pub fn remove_component<T: TArchetype + 'static>(&mut self, e: Entity) -> Option<T>
     {
         match self.try_remove_component::<T>(e)
         {
-            Ok(_) =>
-            {}
+            Ok(r) => r,
+
             Err(e) => panic!("{}", e),
         }
     }
-    pub fn try_remove_component<T: TArchetype + 'static>(&mut self, e: Entity) -> Result<(), XynokEcsError>
+    pub fn try_remove_component<T: TArchetype + 'static>(&mut self, e: Entity) -> Result<Option<T>, XynokEcsError>
     {
+        if self.in_main_thread_now()
+        {
+            let r = self.world.try_remove_component::<T>(e)?;
+            return Ok(Some(r));
+        }
         let mut world = self.world;
         let cmd_buffer = self.cmd_buffer()?;
         let cmd = CmdBuffer::new(move || {
@@ -131,7 +147,7 @@ impl Cmd
             }
         });
         cmd_buffer.push_back(cmd);
-        Ok(())
+        Ok(None)
     }
     #[track_caller]
     pub fn merge_component<T: TArchetype + 'static>(&mut self, e: Entity, val: T)
@@ -145,6 +161,10 @@ impl Cmd
     }
     pub fn try_merge_component<T: TArchetype + 'static>(&mut self, e: Entity, val: T) -> Result<(), XynokEcsError>
     {
+        if self.in_main_thread_now()
+        {
+            return self.world.try_merge_component(e, val);
+        }
         let mut world = self.world;
         let cmd_buffer = self.cmd_buffer()?;
         let cmd = CmdBuffer::new(move || {
@@ -168,6 +188,10 @@ impl Cmd
     }
     pub fn try_destroy(&mut self, e: Entity) -> Result<(), XynokEcsError>
     {
+        if self.in_main_thread_now()
+        {
+            return self.world.try_destroy(e);
+        }
         let mut world = self.world;
         let cmd_buffer = self.cmd_buffer()?;
         let cmd = CmdBuffer::new(move || {
@@ -184,6 +208,11 @@ impl Cmd
 
 impl Cmd
 {
+    #[inline]
+    fn in_main_thread_now(&self) -> bool
+    {
+        unsafe { !self.world.in_parallel_compute() }
+    }
     fn cmd_buffer(&mut self) -> Result<&mut VecDeque<CmdBuffer>, XynokEcsError>
     {
         // This thread may never have called `try_create`, in which case it has no worker spec
@@ -204,7 +233,7 @@ impl Cmd
         let worker_idx = Self::worker_idx();
         if worker_idx.is_none()
         {
-            let idx = world.push_worker_spec(WorkerSpec::new(32, 32));
+            let idx = world.push_worker_spec(WorkerSpec::new(PRE_ALLOCATED_ENTITIES_AMOUNT, CMD_BUFFER_CAPACITY));
             *worker_idx = Some(idx);
         }
     }

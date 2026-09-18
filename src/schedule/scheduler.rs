@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 use std::hash::Hash;
 
-use xynok_concurrency::thread_pool::ThreadPool;
 use xynok_concurrency::thread_pool::cfg::CfgThreadPool;
+use xynok_concurrency::thread_pool::ThreadPool;
 use xynok_std::unsafe_ptr::HeapMut;
 
 use crate::apis::constants::ChangedTick;
@@ -186,8 +186,11 @@ fn run_system_at(system: &mut SystemTypeStorage, world: HeapMut<World>, this_run
 }
 
 #[track_caller]
-fn run_system_group(group: &mut [SystemTypeStorage], world: HeapMut<World>)
+fn run_system_group(group: &mut [SystemTypeStorage], mut world: HeapMut<World>)
 {
+    unsafe {
+        world.set_in_parallel_compute(true);
+    }
     // The whole group is one step, so it shares one tick. Systems in a group never touch what
     // another one writes, so nobody inside it needs to tell their writes apart. Taking a tick per
     // system would also break change detection: a query reads `current_tick` when it starts, and
@@ -216,11 +219,19 @@ fn run_system_group(group: &mut [SystemTypeStorage], world: HeapMut<World>)
     // Job `i` runs system `i`. Every index is handed out exactly once, so no two jobs ever
     // reach the same system even though they all go through this one shared pointer.
     let systems = SyncMutPtr(group.as_mut_ptr());
+
+    unsafe {
+        world.set_in_parallel_compute(true);
+    }
+
     pool.run_indexed(group.len(), &|i| {
         // SAFETY: `i < group.len()`, only this job gets `i`, and `group` outlives `run_indexed`
         let system = unsafe { systems.at(i) };
         run_system_at(system, world, this_run);
     });
+    unsafe {
+        world.set_in_parallel_compute(false);
+    }
 }
 
 /// Lets a raw pointer into a slice be shared by jobs that each touch a different element
