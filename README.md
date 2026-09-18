@@ -9,9 +9,10 @@ This repository contains a lightweight ECS library designed specifically for the
 
 The library focuses on providing the fundamental building blocks necessary for entity and component management. Currently, it supports:
 
-- Creating and destroying entities
+- Creating and destroying entities, singletons included
 - Adding, removing and merging components
 - Querying entities by the components they carry, with filters for added, changed, enabled or disabled state
+- Walking a query one entity at a time, one chunk at a time, in batches, or spread over threads
 - Writing systems as plain functions, and running them yourself through a simple scheduler, one at a time or as a parallel group
 - Making structural changes from inside a system through `Cmd`, safely, even while a parallel group is running
 
@@ -92,8 +93,28 @@ loop
 }
 ```
 
+A query does not have to be walked one entity at a time. When the work is heavy, hand it to the
+threads instead:
+
+```rust
+let mut query = world.create_query::<(&mut Hp, &Mana)>();
+query.par_for_each_chunk(|(hp, mana)| hp.0 += mana.0);
+```
+
+And for the things that exist only once, such as settings or the current score, there are
+singletons:
+
+```rust
+world.create_singleton(Score(0));
+
+for score in world.create_query::<&mut Score>()
+{
+    score.0 += 1;
+}
+```
+
 From here, the [overview](docs/xynok_ecs_overview.md) walks through queries, filters, change
-detection, parallel groups and `Cmd` in order, each with a runnable example.
+detection, singletons, parallel groups and `Cmd` in order, each with a runnable example.
 
 ## Docs
 - [details docs at here](docs/xynok_ecs_overview.md)

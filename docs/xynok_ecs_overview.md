@@ -21,16 +21,22 @@ cargo run --example query
 
 ## Features
 
-- **Archetype storage.** Entities that carry the same set of components live together in fixed
-  16 KB chunks, so a query walks contiguous memory instead of chasing pointers.
+- **Archetype storage.** Entities that carry the same set of components live together in chunks
+  of 16 KB by default, so a query walks contiguous memory instead of chasing pointers. You can
+  pick another chunk size, or lock an archetype so its entities never change shape.
 - **Entity lifecycle.** `create`, `destroy`, `exists`. Ids are recycled with a version counter,
   so a stale `Entity` never points at the entity that took its slot.
 - **Structural changes.** `add_component`, `remove_component`, `merge_component`, on a single
   component or on a tuple of them.
 - **Queries.** `&T` and `&mut T`, alone or in tuples, iterated across every archetype that
   matches. Add `&Entity` to get the handle of each row too.
+- **Several ways to walk a query.** One entity at a time, one chunk at a time, in batches of a
+  size you choose, or spread over threads with `par_for_each_chunk` / `par_for_each_batch`.
 - **Query filters.** `Added`, `Changed`, `Enabled`, `Disabled` for state, and `Without` to
-  exclude an archetype entirely.
+  exclude an archetype entirely. `Detail<&mut T>` keeps every row and lets a system read and
+  flip the enable bit itself.
+- **Singletons.** An archetype that holds one entity at most, for the one-of-a-kind things like
+  game settings or the current input state.
 - **Per-system change detection.** Each system gets its own baseline tick, so a system running
   every 10 frames still sees every change exactly once.
 - **Systems and a demo scheduler.** Plain functions taking `Query` parameters, grouped into
@@ -41,8 +47,8 @@ cargo run --example query
   of one system, or between two systems of a parallel group is rejected at the registration
   call site, not silently raced at runtime.
 
-What it does not have: job graphs, automatic parallelization, resources/singletons, relations,
-serialization, or a reflection layer. Those are on you.
+What it does not have: job graphs, automatic system parallelization (you say which systems run
+together), relations, serialization, or a reflection layer. Those are on you.
 
 ## Architecture
 
@@ -106,7 +112,8 @@ not declared for is an error, not a silent empty result.
 
 ### Chunk
 
-A chunk is a 16 KB block holding rows of one archetype. Inside it, components are stored
+A chunk is a block of memory holding rows of one archetype, 16 KB by default and configurable
+per archetype. Inside it, components are stored
 column by column: all the `Hp` values together, then all the `Mana` values, and so on. The
 entity ids live in their own column too.
 
@@ -115,7 +122,7 @@ in a separate region of the same chunk, so a query that never asks about state n
 load those bytes.
 
 How many rows fit depends on how wide the archetype is: a narrow archetype gets thousands of
-rows per chunk, a wide one fewer. An archetype whose components add up to more than 16 KB per
+rows per chunk, a wide one fewer. An archetype whose components add up to more than one chunk per
 row is rejected outright.
 
 Removal is a swap-remove: the last row moves into the freed slot, and its state moves with it.
@@ -318,6 +325,130 @@ own, `Query<Without<Frozen>>` names no column to walk and yields nothing.
 Runnable versions: [`examples/query_state.rs`](../examples/query_state.rs) and
 [`examples/query_state_tuple.rs`](../examples/query_state_tuple.rs).
 
+#### Choosing how to walk a query
+
+`for x in query` and `query.iter()` give you one entity at a time, which is what you want most
+of the time. When you need more control over how the work is shaped, there are three more ways:
+
+```rust
+let mut query = world.create_query::<(&mut Position, &Velocity)>();
+
+// one chunk at a time, row count known before you start
+for mut chunk in query.iter_chunk()
+{
+    println!("{} rows", chunk.len());
+    for (pos, vel) in chunk.iter()
+    {
+        pos.0 += vel.0;
+    }
+}
+
+// batches of about 64 rows, crossing chunk and archetype borders as needed
+for batch in query.iter_batch(64)
+{
+    for (pos, vel) in batch { pos.0 += vel.0; }
+}
+```
+
+A batch covers rows nobody else's batch covers, and it is `Send`, so you can hand each one to a
+thread yourself. If you would rather not deal with threads, the query does it for you:
+
+```rust
+query.par_for_each_chunk(|(pos, vel)| pos.0 += vel.0);
+query.par_for_each_batch(64, |(pos, vel)| pos.0 += vel.0);
+```
+
+Both return once all the work is done. `par_for_each_chunk` makes one job per chunk, which is a
+good default. Reach for `par_for_each_batch` when your chunks hold too many rows to split the
+work well, or so few that a job per chunk is not worth it. The closure runs on several threads
+at once, so it has to be `Fn + Send + Sync`, and you cannot count on rows being visited in any
+particular order. With no executor set on the world, both fall back to walking on the calling
+thread, so the result is the same, only slower.
+
+Runnable version: [`examples/query_iter.rs`](../examples/query_iter.rs).
+
+#### Reading and flipping the enable bit
+
+`Enabled<&T>` and `Disabled<&T>` pick rows for you. When a system wants to decide the bit
+instead, use `Detail<&mut T>`: it keeps every row, enabled or not, and lets you read and set the
+bit yourself.
+
+```rust
+use xynok_ecs::query::detail::Detail;
+
+fn hide_the_dead(query: Query<(&Hp, Detail<&mut Mesh>)>)
+{
+    for (hp, mut mesh) in query
+    {
+        mesh.set_enabled(hp.0 > 0);
+    }
+}
+```
+
+The item reads like the component itself, so `mesh.vertex_count` still works, and
+`mesh.value_mut()` gives you the usual mutable access. `Detail<&T>` can only read the bit, since
+two systems are allowed to read the same component side by side and letting them both write
+would be a race. Flipping the bit is not a value change, so `Changed<T>` stays quiet. As with
+the state filters, `T` has to be declared `EnableAble`.
+
+### Singleton
+
+Some things exist once and only once: the game settings, the current input state, the score.
+`create_singleton` puts them in an archetype that holds one entity at most.
+
+```rust
+#[component]
+#[derive(Debug, Default)]
+struct Score(u32);
+
+let settings = world.create_singleton((Score(0), Difficulty::Hard));
+```
+
+Trying to spawn a second one fails, and so does a plain `create` of that same set of components.
+Destroy the entity and you are free to spawn it again.
+
+A singleton is queried like anything else, there is no special accessor:
+
+```rust
+for score in world.create_query::<&mut Score>()
+{
+    score.0 += 1;
+}
+```
+
+Entities cannot move in or out of a singleton, so `add_component` and `remove_component` on it
+are rejected, and so is a `merge_component` that would add something new. A `merge_component`
+that only overwrites values it already has is fine.
+
+If you want to declare the singleton up front, before anything spawns, use
+`world.register_singleton::<(Score, Difficulty)>()`. Registering twice does nothing. The one
+thing that fails is asking for a singleton of a component set that already exists as a regular
+archetype, since an archetype cannot change kind once entities live in it.
+
+### Archetype configuration
+
+Registering an archetype yourself is optional, `create` does it for you. Do it when you want to
+change the defaults:
+
+```rust
+use xynok_ecs::apis::ArchetypeCfg;
+
+world.register_archetype::<(Hp, Mana)>(ArchetypeCfg {
+    chunk_size_in_byte:     64 * 1024,
+    allow_structure_change: false,
+});
+```
+
+`chunk_size_in_byte` decides how many entities sit together in one block. It is also the unit a
+parallel query hands to one thread, so a bigger chunk means fewer, larger jobs.
+
+`allow_structure_change: false` locks the shape of the entities in this archetype. Anything that
+would move an entity in or out of it is rejected instead of silently costing you a copy, which
+is useful for the hot archetypes you never intend to reshape at runtime.
+
+Register the same archetype again with different settings and you get an error, rather than one
+half of your code quietly running with the other half's settings.
+
 ### System and Scheduler
 
 > [!IMPORTANT]
@@ -408,14 +539,15 @@ fn respawn(mut cmd: Cmd, q: Query<(&Entity, &Hp)>)
 
 Available calls: `create`, `destroy`, `add_component`, `remove_component`, `merge_component`.
 Each one panics on failure and has a `try_` twin that returns a `Result` if you would rather
-handle the error yourself.
+handle the error yourself. Singletons and archetype registration are not part of `Cmd`, they are
+setup work you do on the `World` before handing it to the scheduler.
 
 #### Why not call `World` directly?
 
-You cannot. A system only ever gets `Query` and `Cmd` parameters, and for a good reason: adding
-or removing a component moves the entity to another archetype, which is exactly the memory a
-query may be walking at that moment. `Cmd` is the safe way in, and it is the same code whether
-your system runs alone or inside a parallel group.
+A system only ever receives `Query` and `Cmd` parameters, so `Cmd` is the way in. That is on
+purpose: adding or removing a component moves the entity to another archetype, which is exactly
+the memory a query may be walking at that moment. The nice part is that you write the same code
+whether the system runs alone or inside a parallel group.
 
 #### When the change becomes visible
 
