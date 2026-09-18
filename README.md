@@ -9,11 +9,91 @@ This repository contains a lightweight ECS library designed specifically for the
 
 The library focuses on providing the fundamental building blocks necessary for entity and component management. Currently, it supports:
 
-- Entity initialization
-- Component addition and removal
-- Manual system scheduling
+- Creating and destroying entities
+- Adding, removing and merging components
+- Querying entities by the components they carry, with filters for added, changed, enabled or disabled state
+- Writing systems as plain functions, and running them yourself through a simple scheduler, one at a time or as a parallel group
+- Making structural changes from inside a system through `Cmd`, safely, even while a parallel group is running
 
 Notably, this library lacks complex abstractions such as job graphs or automatic parallelization. All operations must be scheduled manually by the developer.
+
+## Getting started
+
+Describe a component, spawn an entity, then read it back:
+
+```rust
+use xynok_ecs::component;
+use xynok_ecs::world::World;
+
+#[component]
+#[derive(Debug, Default)]
+struct Hp(u32);
+
+#[component]
+#[derive(Debug, Default)]
+struct Mana(u32);
+
+let mut world = World::default();
+world.create((Hp(100), Mana(10)));
+
+for (hp, mana) in world.create_query::<(&mut Hp, &Mana)>().into_iter()
+{
+    hp.0 += mana.0;
+}
+```
+
+A system is a plain function that asks for what it needs. `Query` reads and writes components,
+`Cmd` creates entities, destroys them, or changes which components they carry:
+
+```rust
+use xynok_ecs::cmd_buffer::cmd::Cmd;
+use xynok_ecs::entity::Entity;
+use xynok_ecs::query::Query;
+
+fn regen(q: Query<&mut Mana>)
+{
+    for mana in q.into_iter()
+    {
+        mana.0 += 1;
+    }
+}
+
+fn respawn(mut cmd: Cmd, q: Query<(&Entity, &Hp)>)
+{
+    for (e, hp) in q.into_iter()
+    {
+        if hp.0 == 0
+        {
+            cmd.destroy(*e);
+            cmd.create((Hp(100), Mana(10)));
+        }
+    }
+}
+```
+
+Hand the world to the scheduler, register the systems, and decide yourself when each session
+runs:
+
+```rust
+use xynok_ecs::schedule::scheduler::{DefaultScheduleSession, DefaultScheduler, TScheduler};
+use xynok_std::unsafe_ptr::HeapPtr;
+
+let mut world = HeapPtr::new(World::default());
+world.create((Hp(0), Mana(10)));
+
+let mut scheduler = DefaultScheduler::new(world.as_ref_mut());
+scheduler.add_system(DefaultScheduleSession::Update, regen);
+scheduler.add_system(DefaultScheduleSession::Update, respawn);
+
+loop
+{
+    scheduler.run(DefaultScheduleSession::Update);
+    world.sync_point(); // applies whatever `Cmd` left queued
+}
+```
+
+From here, the [overview](docs/xynok_ecs_overview.md) walks through queries, filters, change
+detection, parallel groups and `Cmd` in order, each with a runnable example.
 
 ## Docs
 - [details docs at here](docs/xynok_ecs_overview.md)
@@ -68,23 +148,6 @@ cargo bench -p xynok_ecs_benches --bench query          # single-threaded timing
 cargo bench -p xynok_ecs_benches --bench parallel       # multi-threaded timings
 cargo run --release -p xynok_ecs_benches --bin report   # memory + report, from the timings above
 ```
-
-`benches/` is a separate crate (`xynok_ecs_benches`) comparing single-threaded query iteration
-against `bevy_ecs` and a plain `std::Vec` baseline, across every combination of query arity
-(1, 2 or 3 components), archetype layout (1 archetype or 5) and entity count (1k, 10k, 100k).
-
-Timing is done by [criterion](https://github.com/criterion-rs/criterion.rs), which picks the
-iteration counts, runs the warm-up, collects the samples, bootstraps the confidence intervals,
-classifies outliers and compares each run against the previous one on disk. Memory is a different
-question and a stopwatch is the wrong instrument for it, so a second binary measures that through
-a counting global allocator over the same workload:
-
-- **footprint**: bytes still held once the storage is built, and what that works out to per entity
-- **setup allocation**: every byte requested while building, and how many allocator calls it took
-- **query-loop allocation**: bytes allocated inside the pass criterion times (must be 0, otherwise
-  the timing is not iteration-only)
-- **leak**: live bytes still held after the storage is dropped (must be 0)
-
 The report binary joins the two and writes `benches/output/results.json` plus
 `benches/output/report.html`, a self-contained page with the comparison table and charts. It exits
 non-zero if any scenario allocates in the timed loop or leaks, so it works as a CI check too.

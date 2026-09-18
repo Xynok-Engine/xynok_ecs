@@ -35,6 +35,8 @@ cargo run --example query
   every 10 frames still sees every change exactly once.
 - **Systems and a demo scheduler.** Plain functions taking `Query` parameters, grouped into
   named sessions, run sequentially or in parallel.
+- **Commands from systems.** `Cmd` lets a system create entities, destroy them, or change their
+  components, safely, whether the system runs alone or in a parallel group.
 - **Compile-time-ish safety checks.** Conflicting access inside a query, between two parameters
   of one system, or between two systems of a parallel group is rejected at the registration
   call site, not silently raced at runtime.
@@ -382,3 +384,94 @@ Runnable versions: [`examples/single_thread.rs`](../examples/single_thread.rs) a
 If you do write your own, the two hooks you need are on `World`: `capture_current_tick()` gives
 you a baseline to store per system, and `create_query_since(baseline)` builds a query against
 it. That is exactly how `Added` and `Changed` stay per system.
+
+### Cmd
+
+`Cmd` is how a system creates entities, destroys them, or changes which components they carry.
+Add it to the system's parameters and use it like `World`:
+
+```rust
+use xynok_ecs::cmd_buffer::cmd::Cmd;
+
+fn respawn(mut cmd: Cmd, q: Query<(&Entity, &Hp)>)
+{
+    for (e, hp) in q.into_iter()
+    {
+        if hp.0 == 0
+        {
+            cmd.destroy(*e);
+            cmd.create((Hp(100), Mana(10)));
+        }
+    }
+}
+```
+
+Available calls: `create`, `destroy`, `add_component`, `remove_component`, `merge_component`.
+Each one panics on failure and has a `try_` twin that returns a `Result` if you would rather
+handle the error yourself.
+
+#### Why not call `World` directly?
+
+You cannot. A system only ever gets `Query` and `Cmd` parameters, and for a good reason: adding
+or removing a component moves the entity to another archetype, which is exactly the memory a
+query may be walking at that moment. `Cmd` is the safe way in, and it is the same code whether
+your system runs alone or inside a parallel group.
+
+#### When the change becomes visible
+
+This is the one rule worth remembering:
+
+- A system running **on its own** sees its changes applied immediately. The next system in the
+  session already sees them.
+- A system running **inside a parallel group** does not. The request is queued and applied when
+  the world reaches a sync point.
+
+So inside a parallel group, do not create an entity and then expect a `Query` in the same step
+to find it. Write the change, move on, read it back in a later system.
+
+#### Applying queued changes
+
+`World::sync_point()` applies everything that is still queued:
+
+```rust
+scheduler.run(DefaultScheduleSession::Update);
+world.sync_point();
+```
+
+Call it at a point in your frame where no system is running, usually right after a session. If
+you would rather not think about it, use a scheduler with `AUTO_SYNC_POINT` turned on and it
+will do this at the end of every `run`. `DefaultScheduler` leaves it off so the timing stays
+yours.
+
+Within one system, queued changes are applied in the order you wrote them, so `create` then
+`add_component` on that same entity behaves as you would expect. Across two systems of the same
+parallel group there is no order, just as there is no order between the systems themselves. If
+two of them fight over the same entity, the result depends on who got there first.
+
+#### Working with an entity you just created
+
+`create` hands back a usable `Entity` right away, even when the change is still queued. You can
+store it, pass it around, or keep building on it:
+
+```rust
+fn spawn_boss(mut cmd: Cmd)
+{
+    let boss = cmd.create(Hp(500));
+    cmd.add_component(boss, Armor(20));
+}
+```
+
+What you cannot do yet is read its components, since they only exist after the sync point.
+
+One call behaves differently depending on the two cases above: `remove_component` returns
+`Some(value)` when the change is applied immediately, and `None` when it is queued. In the
+queued case the component value is dropped for you.
+
+#### If something goes wrong later
+
+A queued change can still fail when it is applied, for example if you add a component to an
+entity another system destroyed in the same step. Since the original call already returned, the
+error surfaces at `sync_point()` instead, as a panic naming the system's thread. When you see
+one, look for two systems in the same parallel group touching the same entity.
+
+See [`tests/cmd_buffer.rs`](../tests/cmd_buffer.rs) for the full set of cases.
