@@ -67,18 +67,18 @@ impl Cmd
         }
         self.warm_up();
         let mut world = self.world;
-        let mut world2 = self.world;
         let worker_idx = Self::worker_idx().unwrap();
-        let worker_spec = match world.get_worker_spec_mut(worker_idx)
+        let worker_spec = match world.get_worker_spec(worker_idx)
         {
-            Some(r) => r,
+            Some(r) =>
+            unsafe { &mut *r.get() },
             None => return Err(XynokEcsError::WorkerSpecIsNotCreated),
         };
         let e = {
             match worker_spec.pre_allocated_entities.pop_front()
             {
                 Some(r) => r,
-                None => match world2.try_pre_allocate_entities(PRE_ALLOCATED_ENTITIES_AMOUNT, &mut worker_spec.pre_allocated_entities)
+                None => match world.try_pre_allocate_entities(PRE_ALLOCATED_ENTITIES_AMOUNT, &mut worker_spec.pre_allocated_entities)
                 {
                     Ok(_) => return self.try_create(val),
                     Err(e) => return Err(e),
@@ -86,7 +86,7 @@ impl Cmd
             }
         };
         let cmd = CmdBuffer::new(move || {
-            if let Err(e) = world2.create_components_for(e, val)
+            if let Err(e) = world.create_components_for(e, val)
             {
                 panic!("WORKER[{}]: {}", worker_idx, e)
             }
@@ -221,9 +221,13 @@ impl Cmd
         // change its components.
         self.warm_up();
         let worker_idx = Self::worker_idx().unwrap();
-        match self.world.get_worker_spec_mut(worker_idx)
+        match self.world.get_worker_spec(worker_idx)
         {
-            Some(r) => Ok(&mut r.cmd_buffer),
+            Some(r) =>
+            {
+                let x = unsafe { &mut *r.get() };
+                Ok(&mut x.cmd_buffer)
+            }
             None => Err(XynokEcsError::WorkerSpecIsNotCreated),
         }
     }

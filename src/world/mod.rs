@@ -1,4 +1,5 @@
 use std::any::TypeId;
+use std::cell::UnsafeCell;
 use std::collections::{HashMap, VecDeque};
 use std::marker::PhantomData;
 
@@ -712,15 +713,11 @@ impl World
     {
         self.worker_specs.push(spec)
     }
-    #[allow(unused)]
-    pub(crate) fn get_worker_spec(&self, idx: usize) -> Option<&WorkerSpec>
+    pub(crate) fn get_worker_spec(&self, idx: usize) -> Option<&UnsafeCell<WorkerSpec>>
     {
         self.worker_specs.get_spec_at(idx)
     }
-    pub(crate) fn get_worker_spec_mut(&mut self, idx: usize) -> Option<&mut WorkerSpec>
-    {
-        self.worker_specs.get_spec_mut_at(idx)
-    }
+
     pub(crate) fn component_specs_mut(&mut self) -> &mut ComponentSpecs
     {
         &mut self.component_counter
@@ -850,7 +847,7 @@ impl World
 
     /// this is thread-safe, called by worker threads
     #[inline]
-    pub(crate) fn try_pre_allocate_entities(&mut self, amount: usize, dst: &mut VecDeque<Entity>) -> Result<(), XynokEcsError>
+    pub(crate) fn try_pre_allocate_entities(&self, amount: usize, dst: &mut VecDeque<Entity>) -> Result<(), XynokEcsError>
     {
         self.entity_allocator.pre_allocate_entities(amount, dst)
     }

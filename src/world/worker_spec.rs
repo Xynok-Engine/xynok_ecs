@@ -38,19 +38,9 @@ impl WorkerSpecs
         drop(guard);
         idx
     }
-    pub fn get_spec_at(&self, idx: usize) -> Option<&WorkerSpec>
+    pub fn get_spec_at(&self, idx: usize) -> Option<&UnsafeCell<WorkerSpec>>
     {
-        let guard = self.write_lock.read();
-        let ptr = self.workers.get(idx).map(|slot| slot.get());
-        drop(guard);
-        ptr.map(|p| unsafe { &*p })
-    }
-    pub fn get_spec_mut_at(&mut self, idx: usize) -> Option<&mut WorkerSpec>
-    {
-        let guard = self.write_lock.read();
-        let ptr = self.workers.get(idx).map(|slot| slot.get());
-        drop(guard);
-        ptr.map(|p| unsafe { &mut *p })
+        self.workers.get(idx).map(|slot| slot.as_ref())
     }
     #[track_caller]
     pub fn flush_cmd(&mut self)
@@ -87,7 +77,7 @@ mod tests
     {
         let mut specs = WorkerSpecs::new();
         let idx = specs.push(WorkerSpec::new(4, 4));
-        let first: *mut WorkerSpec = specs.get_spec_mut_at(idx).unwrap();
+        let first = specs.get_spec_at(idx).unwrap().get();
 
         // Push beyond the initial capacity to ensure the Vec reallocates at least once.
         for _ in 0..(available_cores() * 4 + 8)
@@ -95,11 +85,11 @@ mod tests
             specs.push(WorkerSpec::new(4, 4));
         }
 
-        let after: *mut WorkerSpec = specs.get_spec_mut_at(idx).unwrap();
+        let after = specs.get_spec_at(idx).unwrap().get();
         assert_eq!(first, after, "spec moved during Vec growth, leaving the old reference dangling");
 
         // The old reference is still writable and points to the correct slot.
         unsafe { (*first).pre_allocated_entities.reserve(64) };
-        assert!(specs.get_spec_at(idx).unwrap().pre_allocated_entities.capacity() >= 64);
+        assert!(unsafe { &*specs.get_spec_at(idx).unwrap().get() }.pre_allocated_entities.capacity() >= 64);
     }
 }
