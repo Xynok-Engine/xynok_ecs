@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 use std::hash::Hash;
 
-use xynok_concurrency::thread_pool::cfg::CfgThreadPool;
 use xynok_concurrency::thread_pool::ThreadPool;
+use xynok_concurrency::thread_pool::cfg::CfgThreadPool;
 use xynok_std::unsafe_ptr::HeapMut;
 
 use crate::apis::constants::ChangedTick;
@@ -34,7 +34,7 @@ pub trait TScheduler: Sized
 ///
 /// This scheduler serves as an example of how to use xynok_ecs,
 /// but you should implement your own. YOUR WORLD, YOUR RULE !  
-pub type DefaultScheduler = Scheduler<DefaultScheduleSession>;
+pub type DefaultScheduler = Scheduler<DefaultScheduleSession, false>;
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone, Copy)]
 pub enum DefaultScheduleSession
@@ -48,13 +48,14 @@ pub enum DefaultScheduleSession
     LateFixedUpdate,
     AppQuit,
 }
-pub struct Scheduler<T: Hash + Eq>
+/// `AUTO_SYNC_POINT = true`: automatically calls `world.sync_point()` each time a system or a parallel system group finishes running.
+pub struct Scheduler<T: Hash + Eq, const AUTO_SYNC_POINT: bool>
 {
     world:        HeapMut<World>,
     system_specs: SystemSpecs,
     steps:        HashMap<T, Vec<ScheduleStep>>,
 }
-impl<T: Hash + PartialEq + Eq> Scheduler<T>
+impl<T: Hash + PartialEq + Eq, const AUTO_SYNC_POINT: bool> Scheduler<T, AUTO_SYNC_POINT>
 {
     /// Records a system's spec before it ever gets a chance to run.
     ///
@@ -69,7 +70,7 @@ impl<T: Hash + PartialEq + Eq> Scheduler<T>
         }
     }
 }
-impl<TS: Hash + PartialEq + Eq> TScheduler for Scheduler<TS>
+impl<TS: Hash + PartialEq + Eq, const AUTO_SYNC_POINT: bool> TScheduler for Scheduler<TS, AUTO_SYNC_POINT>
 {
     type SessionType = TS;
 
@@ -125,6 +126,11 @@ impl<TS: Hash + PartialEq + Eq> TScheduler for Scheduler<TS>
 
                 ScheduleStep::Parallel(tsystems) => run_system_group(tsystems, world),
             }
+        }
+
+        if AUTO_SYNC_POINT
+        {
+            self.world.sync_point();
         }
     }
 
@@ -188,9 +194,6 @@ fn run_system_at(system: &mut SystemTypeStorage, world: HeapMut<World>, this_run
 #[track_caller]
 fn run_system_group(group: &mut [SystemTypeStorage], mut world: HeapMut<World>)
 {
-    unsafe {
-        world.set_in_parallel_compute(true);
-    }
     // The whole group is one step, so it shares one tick. Systems in a group never touch what
     // another one writes, so nobody inside it needs to tell their writes apart. Taking a tick per
     // system would also break change detection: a query reads `current_tick` when it starts, and

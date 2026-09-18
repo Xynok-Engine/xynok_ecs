@@ -1,7 +1,8 @@
-//! Cmd buffer: every write that goes through `Cmd` is only a recording. It touches nothing in
-//! the world until `World::sync_point()` runs. These tests pin down two things: when a change
-//! becomes visible, and whether the state after a flush matches what calling `World` directly
-//! would have produced.
+//! Cmd buffer: `Cmd` picks the cheaper of two ways depending on where it is called from. Inside
+//! a parallel group it records the write and only replays it at `World::sync_point()`. Running
+//! single threaded there is nothing to wait for, so it writes to the world right away and the
+//! later `sync_point()` has nothing left to do. These tests pin down both ways, and check that
+//! the state they leave behind is the same one calling `World` directly would have produced.
 //!
 //! Systems in the scheduler are `Fn`, not `FnMut`, so they cannot capture locals. The tests
 //! therefore hand data to their systems through statics. The test runner runs tests in parallel
@@ -82,7 +83,7 @@ fn sys_create_one(mut cmd: Cmd)
 }
 
 #[test]
-fn t_create_only_shows_up_after_sync_point()
+fn t_create_applies_right_away_when_single_threaded()
 {
     let mut world = new_world();
     let mut scheduler = DefaultScheduler::new(world.as_ref_mut());
@@ -91,13 +92,13 @@ fn t_create_only_shows_up_after_sync_point()
 
     let e = CREATE_ONE.one();
 
-    // The handle is already in hand, but the entity does not belong to any archetype yet.
-    assert!(!world.exists(e), "{e} must not exist before sync_point");
-    assert_eq!(world.create_query::<&Hp>().into_iter().count(), 0, "a query must see nothing before the flush");
+    // A single threaded run has nobody to synchronise with, so the entity is already there.
+    assert!(world.exists(e), "{e} must exist as soon as the system returns");
+    assert_eq!(world.create_query::<&Hp>().into_iter().count(), 1, "a query must see it without waiting for a flush");
 
     world.sync_point();
 
-    assert!(world.exists(e), "{e} must be alive after sync_point");
+    assert!(world.exists(e), "{e} must still be alive after sync_point");
     assert_eq!(testing::read_component::<Hp>(&world, e), Hp(10));
     assert_eq!(world.create_query::<&Hp>().into_iter().count(), 1);
 }
@@ -138,7 +139,7 @@ fn t_create_past_one_pre_allocation_batch()
         assert_eq!(testing::read_component::<Hp>(&world, e), Hp(i as u32));
     }
 
-    // Leftover pre-allocated entities are attached to no archetype, so no query can see them.
+    // Only the entities the system asked for show up, nothing the pre-allocation left over.
     assert_eq!(world.create_query::<&Hp>().into_iter().count(), MANY as usize);
 }
 
@@ -154,7 +155,7 @@ fn sys_add_component(mut cmd: Cmd)
 }
 
 #[test]
-fn t_add_component_is_deferred()
+fn t_add_component_applies_right_away_when_single_threaded()
 {
     let mut world = new_world();
     let e = world.create(Hp(1));
@@ -164,7 +165,7 @@ fn t_add_component_is_deferred()
     scheduler.add_system(UPDATE, sys_add_component);
     scheduler.run(UPDATE);
 
-    assert_eq!(world.create_query::<&Mana>().into_iter().count(), 0, "Mana must not appear before sync_point");
+    assert_eq!(world.create_query::<&Mana>().into_iter().count(), 1, "Mana is already there, no flush needed");
 
     world.sync_point();
 
@@ -181,7 +182,7 @@ fn sys_merge_component(mut cmd: Cmd)
 }
 
 #[test]
-fn t_merge_component_is_deferred()
+fn t_merge_component_applies_right_away_when_single_threaded()
 {
     let mut world = new_world();
     let e = world.create(Hp(1));
@@ -191,7 +192,7 @@ fn t_merge_component_is_deferred()
     scheduler.add_system(UPDATE, sys_merge_component);
     scheduler.run(UPDATE);
 
-    assert_eq!(testing::read_component::<Hp>(&world, e), Hp(1), "the old value must stay untouched before sync_point");
+    assert_eq!(testing::read_component::<Hp>(&world, e), Hp(99), "merge has already overwritten the old value");
 
     world.sync_point();
 
@@ -207,7 +208,7 @@ fn sys_remove_component(mut cmd: Cmd)
 }
 
 #[test]
-fn t_remove_component_is_deferred()
+fn t_remove_component_applies_right_away_when_single_threaded()
 {
     let mut world = new_world();
     let e = world.create((Hp(1), Mana(2)));
@@ -217,7 +218,7 @@ fn t_remove_component_is_deferred()
     scheduler.add_system(UPDATE, sys_remove_component);
     scheduler.run(UPDATE);
 
-    assert_eq!(world.create_query::<&Mana>().into_iter().count(), 1, "Mana must still be there before sync_point");
+    assert_eq!(world.create_query::<&Mana>().into_iter().count(), 0, "Mana is already gone, no flush needed");
 
     world.sync_point();
 
@@ -238,7 +239,7 @@ fn sys_destroy(mut cmd: Cmd)
 }
 
 #[test]
-fn t_destroy_is_deferred()
+fn t_destroy_applies_right_away_when_single_threaded()
 {
     let mut world = new_world();
     let keep = world.create(Hp(1));
@@ -249,7 +250,7 @@ fn t_destroy_is_deferred()
     scheduler.add_system(UPDATE, sys_destroy);
     scheduler.run(UPDATE);
 
-    assert!(world.exists(doomed), "the entity must stay alive until the flush");
+    assert!(!world.exists(doomed), "the entity is already gone when the system returns");
 
     world.sync_point();
 
@@ -267,8 +268,8 @@ static ORDERED: Slot = Slot::new();
 
 fn sys_create_then_touch(mut cmd: Cmd)
 {
-    // create, add, merge, add, remove on one entity, all of them just recordings. Run them out
-    // of order and add_component blows up right away, because the entity is not there yet.
+    // create, add, merge, add, remove on one entity. Whichever way Cmd takes, the order has to
+    // hold: run them out of order and add_component blows up, because the entity is not there yet.
     let e = cmd.create(Hp(1));
     cmd.add_component(e, Mana(2));
     cmd.merge_component(e, Hp(3));
@@ -353,7 +354,7 @@ fn sys_create_for_accumulate(mut cmd: Cmd)
 }
 
 #[test]
-fn t_several_runs_pile_up_and_flush_in_one_go()
+fn t_several_runs_each_apply_right_away()
 {
     let mut world = new_world();
     let mut scheduler = DefaultScheduler::new(world.as_ref_mut());
@@ -362,11 +363,11 @@ fn t_several_runs_pile_up_and_flush_in_one_go()
     scheduler.run(UPDATE);
     scheduler.run(UPDATE);
 
-    assert_eq!(world.create_query::<&Hp>().into_iter().count(), 0);
+    assert_eq!(world.create_query::<&Hp>().into_iter().count(), 3, "every run must land, none of them may get lost");
 
     world.sync_point();
 
-    assert_eq!(world.create_query::<&Hp>().into_iter().count(), 3, "commands from several runs must pile up rather than get lost");
+    assert_eq!(world.create_query::<&Hp>().into_iter().count(), 3, "sync_point has nothing left to replay");
 }
 
 static INTERLEAVED: Slot = Slot::new();
@@ -485,7 +486,7 @@ fn t_creating_entities_while_iterating_a_query()
     scheduler.add_system(UPDATE, sys_spawn_per_row);
     scheduler.run(UPDATE);
 
-    // Because the commands are deferred, the loop does not grow rows out from under itself.
+    // The loop must see exactly the ten rows it started with, not the ones it spawns along the way.
     assert_eq!(SPAWNED_FROM_QUERY.load(Ordering::SeqCst), 10);
 
     world.sync_point();
@@ -529,5 +530,171 @@ fn t_bulk_destroy_leaves_the_survivors_intact()
             assert_eq!(testing::read_component::<Hp>(&world, e), Hp(i as u32));
             assert_eq!(testing::entity_stored_at_row_of(&world, e), e, "swap-remove knocked the row mapping of {e} out of line");
         }
+    }
+}
+
+// ------------------------------------------------------------------------------------------------
+// the parallel way: inside a group, every command waits for the flush
+// ------------------------------------------------------------------------------------------------
+
+static PAR_ADD: Slot = Slot::new();
+static PAR_REMOVE: Slot = Slot::new();
+
+fn sys_par_add(mut cmd: Cmd)
+{
+    cmd.add_component(PAR_ADD.one(), Mana(7));
+}
+
+fn sys_par_remove(mut cmd: Cmd)
+{
+    cmd.remove_component::<Mana>(PAR_REMOVE.one());
+}
+
+#[test]
+fn t_parallel_add_and_remove_wait_for_the_flush()
+{
+    let mut world = new_world();
+    let added_to = world.create(Hp(1));
+    let removed_from = world.create((Hp(2), Mana(2)));
+    PAR_ADD.set(added_to);
+    PAR_REMOVE.set(removed_from);
+
+    let mut scheduler = DefaultScheduler::new(world.as_ref_mut());
+    scheduler.add_system_parallel(UPDATE, (sys_par_add, sys_par_remove));
+    scheduler.run(UPDATE);
+
+    // Only the Mana that was there before the run, neither command has touched the world yet.
+    assert_eq!(world.create_query::<&Mana>().into_iter().count(), 1, "no command may land before sync_point");
+    assert_eq!(testing::read_component::<Mana>(&world, removed_from), Mana(2));
+
+    world.sync_point();
+
+    assert_eq!(testing::read_component::<Mana>(&world, added_to), Mana(7));
+    assert_eq!(testing::read_component::<Hp>(&world, added_to), Hp(1), "the old component must follow the entity into its new archetype");
+    assert_eq!(world.create_query::<&Mana>().into_iter().count(), 1, "one entity gained Mana and the other lost it");
+    assert_eq!(testing::read_component::<Hp>(&world, removed_from), Hp(2));
+    assert!(world.exists(removed_from));
+}
+
+static PAR_MERGE: Slot = Slot::new();
+static PAR_DESTROY: Slot = Slot::new();
+
+fn sys_par_merge(mut cmd: Cmd)
+{
+    cmd.merge_component(PAR_MERGE.one(), (Hp(99), Armor(5)));
+}
+
+fn sys_par_destroy(mut cmd: Cmd)
+{
+    cmd.destroy(PAR_DESTROY.one());
+}
+
+#[test]
+fn t_parallel_merge_and_destroy_wait_for_the_flush()
+{
+    let mut world = new_world();
+    let merged = world.create(Hp(1));
+    let doomed = world.create(Hp(2));
+    PAR_MERGE.set(merged);
+    PAR_DESTROY.set(doomed);
+
+    let mut scheduler = DefaultScheduler::new(world.as_ref_mut());
+    scheduler.add_system_parallel(UPDATE, (sys_par_merge, sys_par_destroy));
+    scheduler.run(UPDATE);
+
+    assert_eq!(testing::read_component::<Hp>(&world, merged), Hp(1), "the old value must stay untouched before sync_point");
+    assert!(world.exists(doomed), "the entity must stay alive until the flush");
+
+    world.sync_point();
+
+    assert_eq!(testing::read_component::<Hp>(&world, merged), Hp(99));
+    assert_eq!(testing::read_component::<Armor>(&world, merged), Armor(5));
+    assert!(!world.exists(doomed));
+    assert_eq!(testing::entity_stored_at_row_of(&world, merged), merged, "swap-remove must leave the surviving row intact");
+}
+
+static PAR_ORDERED: Slot = Slot::new();
+static PAR_SIDE: Slot = Slot::new();
+
+fn sys_par_create_then_touch(mut cmd: Cmd)
+{
+    let e = cmd.create(Hp(1));
+    cmd.add_component(e, Mana(2));
+    cmd.merge_component(e, Hp(3));
+    cmd.add_component(e, Armor(4));
+    cmd.remove_component::<Mana>(e);
+    PAR_ORDERED.push(e);
+}
+
+fn sys_par_create_then_destroy(mut cmd: Cmd)
+{
+    let keep = cmd.create(Armor(1));
+    let doomed = cmd.create(Armor(2));
+    cmd.destroy(doomed);
+    PAR_SIDE.push(keep);
+    PAR_SIDE.push(doomed);
+}
+
+#[test]
+fn t_parallel_each_worker_replays_its_own_commands_in_order()
+{
+    let mut world = new_world();
+    let mut scheduler = DefaultScheduler::new(world.as_ref_mut());
+    scheduler.add_system_parallel(UPDATE, (sys_par_create_then_touch, sys_par_create_then_destroy));
+    scheduler.run(UPDATE);
+
+    assert_eq!(world.create_query::<&Hp>().into_iter().count(), 0, "nothing may exist before the flush");
+
+    world.sync_point();
+
+    let e = PAR_ORDERED.one();
+    assert_eq!(testing::read_component::<Hp>(&world, e), Hp(3), "merge must run after create");
+    assert_eq!(testing::read_component::<Armor>(&world, e), Armor(4));
+    assert_eq!(world.create_query::<&Mana>().into_iter().count(), 0, "remove must run after add");
+
+    let side = PAR_SIDE.all();
+    assert!(world.exists(side[0]));
+    assert!(!world.exists(side[1]), "an entity created and destroyed in the same batch must be gone after the flush");
+}
+
+static MIXED_PARALLEL: Slot = Slot::new();
+static MIXED_SINGLE: Slot = Slot::new();
+
+fn sys_mixed_a(mut cmd: Cmd)
+{
+    MIXED_PARALLEL.push(cmd.create(Hp(1)));
+}
+
+fn sys_mixed_b(mut cmd: Cmd)
+{
+    MIXED_PARALLEL.push(cmd.create(Hp(2)));
+}
+
+fn sys_mixed_single(mut cmd: Cmd)
+{
+    MIXED_SINGLE.push(cmd.create(Mana(3)));
+}
+
+#[test]
+fn t_a_single_step_after_a_parallel_one_writes_right_away_again()
+{
+    let mut world = new_world();
+    let mut scheduler = DefaultScheduler::new(world.as_ref_mut());
+    scheduler.add_system_parallel(UPDATE, (sys_mixed_a, sys_mixed_b));
+    scheduler.add_system(UPDATE, sys_mixed_single);
+    scheduler.run(UPDATE);
+
+    // The parallel step must leave the world back in its single threaded mode, otherwise the
+    // step behind it would be recording when it has no reason to.
+    assert_eq!(world.create_query::<&Mana>().into_iter().count(), 1, "the single step must have written straight into the world");
+    assert_eq!(world.create_query::<&Hp>().into_iter().count(), 0, "the parallel step is still waiting for the flush");
+
+    world.sync_point();
+
+    assert_eq!(world.create_query::<&Hp>().into_iter().count(), 2);
+    assert_eq!(world.create_query::<&Mana>().into_iter().count(), 1);
+    for &e in MIXED_PARALLEL.all().iter().chain(MIXED_SINGLE.all().iter())
+    {
+        assert!(world.exists(e), "{e} must be alive after sync_point");
     }
 }
