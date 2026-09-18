@@ -7,8 +7,8 @@ use crate::apis::identifies::XynokEcsError;
 use crate::apis::traits::TArchetype;
 use crate::entity::Entity;
 use crate::system::traits::TSystemParam;
-use crate::world::worker_spec::WorkerSpec;
 use crate::world::World;
+use crate::world::worker_spec::WorkerSpec;
 
 const PRE_ALLOCATED_ENTITIES_AMOUNT: usize = 32;
 const CMD_BUFFER_CAPACITY: usize = 32;
@@ -87,11 +87,12 @@ impl Cmd
                 },
             }
         };
+        let id = Self::current_thread_id();
         let cmd = CmdBuffer::new(move || {
             if let Err(err) = world.create_components_for(e, val)
             {
                 world.erase_entity(e);
-                panic!("WORKER[{:?}]: {}", Self::id(), err)
+                panic!("WORKER[{:?}]: {}", id, err)
             }
         });
         worker_spec.cmd_buffer.push_back(cmd);
@@ -115,10 +116,11 @@ impl Cmd
         }
         let mut world = self.world;
         let cmd_buffer = self.cmd_buffer()?;
+        let id = Self::current_thread_id();
         let cmd = CmdBuffer::new(move || {
             if let Err(e) = world.try_add_component(e, val)
             {
-                panic!("WORKER[{:?}]: {}", Self::id(), e)
+                panic!("WORKER[{:?}]: {}", id, e)
             }
         });
         cmd_buffer.push_back(cmd);
@@ -143,10 +145,11 @@ impl Cmd
         }
         let mut world = self.world;
         let cmd_buffer = self.cmd_buffer()?;
+        let id = Self::current_thread_id();
         let cmd = CmdBuffer::new(move || {
             if let Err(e) = world.try_remove_component::<T>(e)
             {
-                panic!("WORKER[{:?}]: {}", Self::id(), e)
+                panic!("WORKER[{:?}]: {}", id, e)
             }
         });
         cmd_buffer.push_back(cmd);
@@ -170,10 +173,11 @@ impl Cmd
         }
         let mut world = self.world;
         let cmd_buffer = self.cmd_buffer()?;
+        let id = Self::current_thread_id();
         let cmd = CmdBuffer::new(move || {
             if let Err(e) = world.try_merge_component(e, val)
             {
-                panic!("WORKER[{:?}]: {}", Self::id(), e)
+                panic!("WORKER[{:?}]: {}", id, e)
             }
         });
         cmd_buffer.push_back(cmd);
@@ -197,11 +201,12 @@ impl Cmd
         }
         let mut world = self.world;
         let cmd_buffer = self.cmd_buffer()?;
+        let id = Self::current_thread_id();
         let cmd = CmdBuffer::new(move || {
             if let Err(err) = world.try_destroy(e)
             {
                 world.erase_entity(e);
-                panic!("WORKER[{:?}]: {}", Self::id(), err)
+                panic!("WORKER[{:?}]: {}", id, err)
             }
         });
         cmd_buffer.push_back(cmd);
@@ -212,7 +217,7 @@ impl Cmd
 impl Cmd
 {
     #[inline]
-    fn id() -> std::thread::ThreadId
+    fn current_thread_id() -> std::thread::ThreadId
     {
         std::thread::current().id()
     }
