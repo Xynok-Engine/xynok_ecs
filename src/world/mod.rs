@@ -709,13 +709,19 @@ impl World
 impl World
 {
     /// used by worker threads
-    pub(crate) fn push_worker_spec(&mut self, spec: WorkerSpec) -> usize
+    pub(crate) fn is_registered(&self) -> bool
     {
-        self.worker_specs.push(spec)
+        self.worker_specs.is_registered()
     }
-    pub(crate) fn get_worker_spec(&self, idx: usize) -> Option<&UnsafeCell<WorkerSpec>>
+    /// used by worker threads
+    pub(crate) fn push_worker_spec(&mut self, spec: WorkerSpec)
     {
-        self.worker_specs.get_spec_at(idx)
+        self.worker_specs.push(spec);
+    }
+    /// used by worker threads
+    pub(crate) fn get_current_worker_spec(&self) -> Option<&UnsafeCell<WorkerSpec>>
+    {
+        self.worker_specs.get_current_worker_spec()
     }
 
     pub(crate) fn component_specs_mut(&mut self) -> &mut ComponentSpecs

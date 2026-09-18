@@ -1,4 +1,3 @@
-use core::cell::UnsafeCell;
 use std::collections::VecDeque;
 
 use xynok_std::unsafe_ptr::HeapMut;
@@ -14,6 +13,8 @@ use crate::world::World;
 const PRE_ALLOCATED_ENTITIES_AMOUNT: usize = 32;
 const CMD_BUFFER_CAPACITY: usize = 32;
 
+/// Use this type in your system parameters to access world APIs, both in main and parallel contexts.
+/// A thread-safe wrapper for the World.
 pub struct Cmd
 {
     world: HeapMut<World>,
@@ -42,11 +43,11 @@ impl TSystemParam for Cmd
         Ok(())
     }
 }
-
-thread_local! {
-static WORKER_IDX: UnsafeCell<Option<usize>> = const{UnsafeCell::new(None)};
-
-}
+//
+//thread_local! {
+//static WORKER_IDX: UnsafeCell<Option<usize>> = const{UnsafeCell::new(None)};
+//
+//}
 impl Cmd
 {
     #[track_caller]
@@ -67,8 +68,7 @@ impl Cmd
         }
         self.warm_up();
         let mut world = self.world;
-        let worker_idx = Self::worker_idx().unwrap();
-        let worker_spec = match world.get_worker_spec(worker_idx)
+        let worker_spec = match world.get_current_worker_spec()
         {
             Some(r) =>
             unsafe { &mut *r.get() },
@@ -88,7 +88,7 @@ impl Cmd
         let cmd = CmdBuffer::new(move || {
             if let Err(e) = world.create_components_for(e, val)
             {
-                panic!("WORKER[{}]: {}", worker_idx, e)
+                panic!("WORKER[{:?}]: {}", Self::id(), e)
             }
         });
         worker_spec.cmd_buffer.push_back(cmd);
@@ -115,7 +115,7 @@ impl Cmd
         let cmd = CmdBuffer::new(move || {
             if let Err(e) = world.try_add_component(e, val)
             {
-                panic!("WORKER[{}]: {}", Self::worker_idx().unwrap(), e)
+                panic!("WORKER[{:?}]: {}", Self::id(), e)
             }
         });
         cmd_buffer.push_back(cmd);
@@ -143,7 +143,7 @@ impl Cmd
         let cmd = CmdBuffer::new(move || {
             if let Err(e) = world.try_remove_component::<T>(e)
             {
-                panic!("WORKER[{}]: {}", Self::worker_idx().unwrap(), e)
+                panic!("WORKER[{:?}]: {}", Self::id(), e)
             }
         });
         cmd_buffer.push_back(cmd);
@@ -170,7 +170,7 @@ impl Cmd
         let cmd = CmdBuffer::new(move || {
             if let Err(e) = world.try_merge_component(e, val)
             {
-                panic!("WORKER[{}]: {}", Self::worker_idx().unwrap(), e)
+                panic!("WORKER[{:?}]: {}", Self::id(), e)
             }
         });
         cmd_buffer.push_back(cmd);
@@ -198,7 +198,7 @@ impl Cmd
             if let Err(err) = world.try_destroy(e)
             {
                 world.erase_entity(e);
-                panic!("WORKER[{}]: {}", Self::worker_idx().unwrap(), err)
+                panic!("WORKER[{:?}]: {}", Self::id(), err)
             }
         });
         cmd_buffer.push_back(cmd);
@@ -208,6 +208,11 @@ impl Cmd
 
 impl Cmd
 {
+    #[inline]
+    fn id() -> std::thread::ThreadId
+    {
+        std::thread::current().id()
+    }
     #[inline]
     fn in_main_thread_now(&self) -> bool
     {
@@ -220,8 +225,7 @@ impl Cmd
         // the caller to create something first before they are allowed to destroy an entity or
         // change its components.
         self.warm_up();
-        let worker_idx = Self::worker_idx().unwrap();
-        match self.world.get_worker_spec(worker_idx)
+        match self.world.get_current_worker_spec()
         {
             Some(r) =>
             {
@@ -234,16 +238,9 @@ impl Cmd
     fn warm_up(&mut self)
     {
         let mut world = self.world;
-        let worker_idx = Self::worker_idx();
-        if worker_idx.is_none()
+        if !world.is_registered()
         {
-            let idx = world.push_worker_spec(WorkerSpec::new(PRE_ALLOCATED_ENTITIES_AMOUNT, CMD_BUFFER_CAPACITY));
-            *worker_idx = Some(idx);
+            world.push_worker_spec(WorkerSpec::new(PRE_ALLOCATED_ENTITIES_AMOUNT, CMD_BUFFER_CAPACITY));
         }
-    }
-    #[inline]
-    fn worker_idx() -> &'static mut Option<usize>
-    {
-        WORKER_IDX.with(|q| unsafe { &mut *q.get() })
     }
 }
