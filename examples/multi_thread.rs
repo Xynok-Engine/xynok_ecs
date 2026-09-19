@@ -11,8 +11,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use xynok_ecs::component;
-use xynok_ecs::query::filter::Changed;
 use xynok_ecs::query::Query;
+use xynok_ecs::query::filter::Changed;
 use xynok_ecs::schedule::scheduler::{DefaultScheduleSession, DefaultScheduler, TScheduler};
 use xynok_ecs::world::World;
 use xynok_std::unsafe_ptr::HeapPtr;

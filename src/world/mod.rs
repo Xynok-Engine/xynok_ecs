@@ -851,6 +851,30 @@ impl World
         }
     }
 
+    /// The spec of `T`'s archetype, for a `Singleton` parameter.
+    ///
+    /// Read-only on purpose: a `Singleton` is built next to other parameters that already borrow
+    /// the world, exactly like [`Query::new_prepared`], so it never gets to create the archetype
+    /// itself. An archetype nobody registered is an error, not something this quietly fixes up.
+    pub(crate) fn singleton_archetype_spec<T: TArchetype + 'static>(&self) -> Result<&ArchetypeSpec, XynokEcsError>
+    {
+        let arch_id = match self.get_archetype_id::<T>()
+        {
+            Some(r) => r,
+            None => return Err(XynokEcsError::SingletonArchetypeIsNotRegistered(std::any::type_name::<T>())),
+        };
+        let arch_spec = match self.archetypes.get(&arch_id)
+        {
+            Some(r) => r,
+            None => return Err(XynokEcsError::SingletonArchetypeIsNotRegistered(std::any::type_name::<T>())),
+        };
+        if !arch_spec.arch.is_singleton()
+        {
+            return Err(XynokEcsError::ArchetypeIsNotSingleton(arch_spec.name.clone()));
+        }
+        Ok(arch_spec)
+    }
+
     /// this is thread-safe, called by worker threads
     #[inline]
     pub(crate) fn try_pre_allocate_entities(&self, amount: usize, dst: &mut VecDeque<Entity>) -> Result<(), XynokEcsError>

@@ -116,6 +116,14 @@ pub enum XynokEcsError
     #[error("query spec for {0} vanished right after it was prepared")]
     QuerySpecVanishedAfterPrepared(&'static str),
 
+    #[error(
+        "Archetype `{0}` is not registered in this world, a `Singleton` parameter only reads an archetype that already exists, call `World::register_singleton` or `World::create_singleton` first"
+    )]
+    SingletonArchetypeIsNotRegistered(&'static str),
+
+    #[error("Singleton archetype `{0}` has no entity yet, call `World::create_singleton` first")]
+    SingletonEntityIsNotSpawned(&'static str),
+
     #[error("The pre-allocated entity count must be greater than 0")]
     PreAllocateEntityAmountMustGreaterThanZero,
 

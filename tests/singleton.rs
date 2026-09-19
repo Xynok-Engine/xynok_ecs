@@ -246,3 +246,118 @@ fn t_failed_singleton_push_gives_the_entity_slot_back()
     assert_eq!(e.idx(), 0);
     assert!(w.exists(e));
 }
+
+// ------------------------------------------------------------------------------------------------
+// `Singleton` system parameter (issue #82)
+// ------------------------------------------------------------------------------------------------
+
+mod singleton_param
+{
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    use xynok_ecs::component;
+    use xynok_ecs::query::singleton::Singleton;
+    use xynok_ecs::schedule::scheduler::{DefaultScheduleSession, DefaultScheduler, TScheduler};
+    use xynok_ecs::world::{testing, World};
+    use xynok_std::unsafe_ptr::HeapPtr;
+
+    #[component(ChangeAble)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    struct Time(u32);
+
+    #[component]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    struct Score(u32);
+
+    /// What the read-only systems below saw, so a test can check it after the run
+    static SEEN: AtomicU32 = AtomicU32::new(0);
+
+    fn advance_time(mut time: Singleton<&mut Time>)
+    {
+        time.0 += 1;
+    }
+
+    fn read_time(time: Singleton<&Time>)
+    {
+        SEEN.store(time.0, Ordering::Relaxed);
+    }
+
+    fn read_score(score: Singleton<&Score>)
+    {
+        SEEN.store(score.0, Ordering::Relaxed);
+    }
+
+    /// `TIntoSystem` is crate private, so a helper taking any system would not compile out here.
+    /// A macro sidesteps that: it pastes the three lines at the call site, where the system is a
+    /// concrete `fn`.
+    macro_rules! run_once {
+        ($world:expr, $system:expr) => {{
+            let mut scheduler = DefaultScheduler::new($world.as_ref_mut());
+            scheduler.add_system(DefaultScheduleSession::Update, $system);
+            scheduler.run(DefaultScheduleSession::Update);
+        }};
+    }
+
+    #[test]
+    fn t_singleton_reads_the_only_row()
+    {
+        let mut world = HeapPtr::new(World::default());
+        world.create_singleton(Time(7));
+
+        run_once!(world, read_time);
+
+        assert_eq!(SEEN.load(Ordering::Relaxed), 7);
+    }
+
+    #[test]
+    fn t_singleton_writes_the_only_row()
+    {
+        let mut world = HeapPtr::new(World::default());
+        let e = world.create_singleton(Time(0));
+
+        run_once!(world, advance_time);
+
+        assert_eq!(testing::read_component::<Time>(&world, e), Time(1));
+    }
+
+    #[test]
+    #[should_panic(expected = "is not registered in this world")]
+    fn t_singleton_on_an_unknown_archetype_is_rejected()
+    {
+        let world = HeapPtr::new(World::default());
+        run_once!(world, read_score);
+    }
+
+    #[test]
+    #[should_panic(expected = "already exists as a regular archetype")]
+    fn t_singleton_on_a_regular_archetype_is_rejected()
+    {
+        let mut world = HeapPtr::new(World::default());
+        world.create(Score(1));
+        world.create(Score(2));
+
+        run_once!(world, read_score);
+    }
+
+    #[test]
+    #[should_panic(expected = "has no entity yet")]
+    fn t_singleton_without_its_entity_is_rejected()
+    {
+        let mut world = HeapPtr::new(World::default());
+        // the archetype exists, but nobody spawned its entity
+        world.register_singleton::<Score>();
+
+        run_once!(world, read_score);
+    }
+
+    #[test]
+    #[should_panic(expected = "has no entity yet")]
+    fn t_singleton_after_its_entity_was_destroyed_is_rejected()
+    {
+        let mut world = HeapPtr::new(World::default());
+        let e = world.create_singleton(Score(1));
+        world.destroy(e);
+
+        run_once!(world, read_score);
+    }
+}

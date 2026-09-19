@@ -16,6 +16,7 @@ pub mod query_iter;
 pub mod filter;
 pub mod mut_ref;
 pub mod detail;
+pub mod singleton;
 
 /// A `Query` is `Copy` only when it is read-only. Any `&mut` in the query makes it non-copyable.
 ///

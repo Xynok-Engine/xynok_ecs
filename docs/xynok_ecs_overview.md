@@ -425,6 +425,39 @@ If you want to declare the singleton up front, before anything spawns, use
 thing that fails is asking for a singleton of a component set that already exists as a regular
 archetype, since an archetype cannot change kind once entities live in it.
 
+#### `Singleton` in a system
+
+Inside a system, a loop over one row reads a bit silly. `Singleton<&T>` and `Singleton<&mut T>`
+hand you that row directly:
+
+```rust
+#[component(ChangeAble)]
+#[derive(Default)]
+struct Time { delta: f32, scale: f32 }
+
+fn scale_time(mut time: Singleton<&mut Time>)
+{
+    time.scale = 0.5;
+}
+
+fn use_time(time: Singleton<&Time>)
+{
+    let step = time.delta * time.scale;
+}
+```
+
+It behaves like the reference it wraps (`Deref` / `DerefMut`), and a `&mut` on a `ChangeAble`
+component still only stamps the changed tick when you actually write. The scheduler sees the
+same access scope a `Query<&mut Time>` would declare, so nothing else touching `Time` runs
+beside it.
+
+`T` here names the archetype, not just one of its components, and that archetype has to be a
+singleton one. Three things are reported as errors instead of quietly handing back nothing: the
+archetype is not registered in this world, it exists but is a regular archetype, or it is a
+singleton whose entity has not been spawned (or was destroyed). So a singleton built from
+several components, `create_singleton((Score, Difficulty))`, is not reachable through
+`Singleton<&Score>`, use a `Query` for that one.
+
 ### Archetype configuration
 
 Registering an archetype yourself is optional, `create` does it for you. Do it when you want to
