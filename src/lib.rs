@@ -16,7 +16,7 @@ pub mod wrapper;
 mod utils;
 mod chunk;
 mod archetype;
-mod system;
+pub(crate) mod system;
 mod collection;
 
 pub use xynok_ecs_proc_macro::*;

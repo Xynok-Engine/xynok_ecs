@@ -95,3 +95,9 @@ pub trait TArchetype: Sized + Send
     ) -> Result<(), XynokEcsError>;
     fn take_from(layout: &ChunkLayout, chunk: &mut Chunk, idx: usize) -> Result<Self, XynokEcsError>;
 }
+
+/// Re-exported for anyone writing their own [`TScheduler`](crate::schedule::scheduler::TScheduler):
+/// its `add_system`/`add_system_parallel` are bounded by these, so an impl outside the crate
+/// needs to name them. [`SystemTypeStorage`] is the boxed system a scheduler keeps, and
+/// [`TSystem`] is what it calls on each step.
+pub use crate::system::traits::{SystemTypeStorage, TIntoSystem, TIntoSystems, TSystem};
